@@ -2,13 +2,6 @@ name: Build Codeg Portable Windows x64
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-
-concurrency:
-  group: portable-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -58,6 +51,18 @@ jobs:
         env:
           CODEG_SKIP_SIDECAR: "1"
 
+      - name: Create portable launcher
+        shell: pwsh
+        run: |
+          @"
+          @echo off
+          cd /d "%~dp0"
+          set "CODEG_HOME=%~dp0data"
+          set "CODEG_DATA_DIR=%~dp0data"
+          set "CODEG_STATIC_DIR=%~dp0web"
+          start "" "%~dp0codeg.exe"
+          "@ | Out-File -FilePath start-codeg-portable.bat -Encoding ascii
+
       - name: Package portable zip
         shell: pwsh
         run: |
@@ -68,6 +73,7 @@ jobs:
           Copy-Item "src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe" $dir/
           Copy-Item "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" $dir/
           Copy-Item -Recurse "out" "$dir/web"
+          Copy-Item "start-codeg-portable.bat" $dir/
           Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/*.dll" -ErrorAction SilentlyContinue |
             Copy-Item -Destination $dir
 
