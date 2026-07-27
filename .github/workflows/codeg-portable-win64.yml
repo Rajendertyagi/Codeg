@@ -1,0 +1,78 @@
+name: Build Codeg Portable Windows x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build portable
+        run: pnpm tauri build --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      - name: Find NSIS output
+        id: find
+        shell: bash
+        run: |
+          NSIS_DIR=$(find src-tauri/target -name "*.nsis.exe" -type f 2>/dev/null | head -1)
+          if [ -z "$NSIS_DIR" ]; then
+            echo "No NSIS installer found, trying to zip release dir..."
+            RELEASE_DIR=$(find src-tauri/target -path "*/release/bundle" -type d | head -1)
+            if [ -d "$RELEASE_DIR/nsis" ]; then
+              NSIS_DIR="$RELEASE_DIR/nsis"
+            fi
+          fi
+          echo "nsis_path=$NSIS_DIR" >> $GITHUB_OUTPUT
+          echo "Found: $NSIS_DIR"
+
+      - name: Create portable zip
+        shell: bash
+        run: |
+          RELEASE_DIR=$(find src-tauri/target -path "*/release/bundle" -type d | head -1)
+          BUILD_DIR="$RELEASE_DIR/msi"
+          
+          # Find the main binary and sidecar
+          BINARY=$(find src-tauri/target/release -maxdepth 1 -name "codeg.exe" -type f | head -1)
+          SIDECAR=$(find src-tauri/target/release -maxdepth 1 -name "codeg-mcp.exe" -type f | head -1)
+          WEB_DIR="out"
+          
+          PORTABLE_DIR="codeg-portable-win64"
+          mkdir -p "$PORTABLE_DIR"
+          
+          cp "$BINARY" "$PORTABLE_DIR/" 2>/dev/null || true
+          cp "$SIDECAR" "$PORTABLE_DIR/" 2>/dev/null || true
+          cp -r "$WEB_DIR" "$PORTABLE_DIR/web" 2>/dev/null || true
+          
+          # Also copy DLLs if any
+          find src-tauri/target/release -maxdepth 1 -name "*.dll" -exec cp {} "$PORTABLE_DIR/" \; 2>/dev/null || true
+          
+          7z a -tzip "codeg-portable-win64.zip" "$PORTABLE_DIR"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeg-portable-win64
+          path: codeg-portable-win64.zip
