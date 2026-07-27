@@ -3,71 +3,126 @@ name: Build Codeg Portable Windows x64
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 90
+    env:
+      # Replace with secrets when you sign builds
+      TAURI_SIGNING_PRIVATE_KEY: ""
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      - name: Setup Node
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Rust toolchain and target
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - uses: swatinem/rust-cache@v2
+      - name: Cache Rust target and cargo registry
+        uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
           shared-key: win64-desktop
 
-      - name: Build everything via Tauri
-        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-
-      - name: Find built binaries
-        shell: bash
-        run: |
-          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe
-          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe
-
-      - name: Create portable launcher
+      - name: Install frontend deps and build
         shell: pwsh
         run: |
-          @"
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Pre-build codeg-mcp sidecar (release)
+        shell: pwsh
+        working-directory: src-tauri
+        run: |
+          cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
+          New-Item -ItemType Directory -Force -Path binaries | Out-Null
+          $src = "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe"
+          if (Test-Path $src) {
+            Copy-Item -Path $src -Destination "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
+          } else {
+            Write-Warning "Sidecar not found at $src"
+          }
+
+      - name: Build desktop binary (Tauri)
+        shell: pwsh
+        run: |
+          pnpm tauri build --target x86_64-pc-windows-msvc --bundles none
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Create portable launcher (batch)
+        shell: pwsh
+        run: |
+          $bat = @'
           @echo off
           cd /d "%~dp0"
           set "CODEG_HOME=%~dp0data"
           set "CODEG_DATA_DIR=%~dp0data"
           set "CODEG_STATIC_DIR=%~dp0web"
           start "" "%~dp0codeg.exe"
-          "@ | Out-File -FilePath start-codeg-portable.bat -Encoding ascii
+          '@
+          $bat | Out-File -FilePath start-codeg-portable.bat -Encoding ascii
 
       - name: Package portable zip
         shell: pwsh
         run: |
           $artifact = "codeg-portable-win64"
           $dir = "dist/$artifact"
-          New-Item -ItemType Directory -Force -Path $dir
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-          Copy-Item "src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe" $dir/
-          Copy-Item "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" $dir/
-          Copy-Item -Recurse "out" "$dir/web"
-          Copy-Item "start-codeg-portable.bat" $dir/
-          Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/*.dll" -ErrorAction SilentlyContinue |
-            Copy-Item -Destination $dir
+          $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
 
-          Compress-Archive -Path "$dir/*" -DestinationPath "dist/$artifact.zip"
+          if (Test-Path "$releaseDir\codeg.exe") {
+            Copy-Item -Path "$releaseDir\codeg.exe" -Destination $dir -Force
+          } else {
+            Write-Error "codeg.exe not found in $releaseDir"
+            exit 1
+          }
+
+          if (Test-Path "src-tauri\binaries\codeg-mcp-x86_64-pc-windows-msvc.exe") {
+            Copy-Item -Path "src-tauri\binaries\codeg-mcp-x86_64-pc-windows-msvc.exe" -Destination $dir -Force
+          } elseif (Test-Path "$releaseDir\codeg-mcp.exe") {
+            Copy-Item -Path "$releaseDir\codeg-mcp.exe" -Destination $dir -Force
+          } else {
+            Write-Warning "codeg-mcp not found; continuing without it"
+          }
+
+          if (Test-Path "out") {
+            New-Item -ItemType Directory -Force -Path "$dir\web" | Out-Null
+            Copy-Item -Recurse -Path "out\*" -Destination "$dir\web" -Force
+          } else {
+            Write-Warning "Frontend output 'out' not found; ensure pnpm build outputs to 'out'"
+          }
+
+          Copy-Item -Path "start-codeg-portable.bat" -Destination $dir -Force
+
+          Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item -Path $_.FullName -Destination $dir -Force }
+
+          $zipPath = "dist/$artifact.zip"
+          Remove-Item -Path $zipPath -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zipPath -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: codeg-portable-win64
           path: dist/codeg-portable-win64.zip
+          retention-days: 14
