@@ -12,7 +12,6 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     env:
-      # Replace with secrets when you sign builds
       TAURI_SIGNING_PRIVATE_KEY: ""
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
@@ -20,14 +19,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
 
       - name: Install Rust toolchain and target
         uses: dtolnay/rust-toolchain@stable
@@ -63,9 +62,6 @@ jobs:
         shell: pwsh
         run: |
           pnpm tauri build --target x86_64-pc-windows-msvc --bundles none
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Create portable launcher (batch)
         shell: pwsh
@@ -125,4 +121,3 @@ jobs:
         with:
           name: codeg-portable-win64
           path: dist/codeg-portable-win64.zip
-          retention-days: 14
