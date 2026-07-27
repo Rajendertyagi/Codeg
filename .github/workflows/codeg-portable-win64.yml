@@ -32,24 +32,17 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
-      - name: Build codeg-mcp sidecar
-        run: pnpm tauri:prepare-sidecars --target x86_64-pc-windows-msvc
+      - name: Build binaries (codeg + codeg-mcp)
+        working-directory: src-tauri
+        run: |
+          cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
+          cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
 
-      - name: Verify sidecar
+      - name: Verify binaries
         shell: bash
         run: |
-          file="src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe"
-          if [ ! -f "$file" ]; then
-            echo "FATAL: sidecar $file missing"
-            exit 1
-          fi
-          ls -la "$file"
-
-      - name: Build desktop binary
-        working-directory: src-tauri
-        run: cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
-        env:
-          CODEG_SKIP_SIDECAR: "1"
+          ls -la "src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe"
+          ls -la "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe"
 
       - name: Create portable launcher
         shell: pwsh
