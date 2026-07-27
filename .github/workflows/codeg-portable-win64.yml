@@ -39,6 +39,14 @@ jobs:
           workspaces: ./src-tauri -> target
           shared-key: win64-desktop
 
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        shell: pwsh
+        run: pnpm build
+
       - name: Pre-build and stage codeg-mcp sidecar
         shell: pwsh
         working-directory: src-tauri
@@ -48,10 +56,18 @@ jobs:
           Copy-Item "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" `
             "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
 
-      - name: Build with Tauri (embeds frontend, produces MSI)
+      - name: Patch tauri.conf.json (skip installer, skip beforeBuildCommand)
         shell: pwsh
         run: |
-          pnpm tauri build --target x86_64-pc-windows-msvc --bundles msi
+          $config = "src-tauri/tauri.conf.json"
+          $content = Get-Content $config -Raw
+          $content = $content -replace '"targets":\s*"all"', '"targets": []'
+          $content = $content -replace '"beforeBuildCommand":\s*"pnpm tauri:before-build"', '"beforeBuildCommand": ""'
+          $content | Out-File $config -Encoding utf8 -NoNewline
+
+      - name: Build desktop binary with Tauri (embeds frontend)
+        shell: pwsh
+        run: pnpm tauri build --target x86_64-pc-windows-msvc
 
       - name: Create portable launcher
         shell: pwsh
