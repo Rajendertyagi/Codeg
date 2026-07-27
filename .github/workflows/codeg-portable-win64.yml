@@ -32,17 +32,26 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
-      - name: Build binaries (codeg + codeg-mcp)
+      - name: Build codeg-mcp sidecar
         working-directory: src-tauri
+        run: cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
+
+      - name: Stage sidecar for desktop build
+        shell: bash
         run: |
-          cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
-          cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
+          mkdir -p src-tauri/binaries
+          cp "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" \
+             "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe"
+
+      - name: Build desktop binary
+        working-directory: src-tauri
+        run: cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
 
       - name: Verify binaries
         shell: bash
         run: |
           ls -la "src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe"
-          ls -la "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe"
+          ls -la "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe"
 
       - name: Create portable launcher
         shell: pwsh
