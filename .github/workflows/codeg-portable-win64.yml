@@ -33,7 +33,7 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Cache Rust target and cargo registry
+      - name: Cache Rust artifacts
         uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
@@ -45,7 +45,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Pre-build codeg-mcp sidecar (release)
+      - name: Pre-build codeg-mcp sidecar and stage
         shell: pwsh
         working-directory: src-tauri
         run: |
@@ -58,12 +58,13 @@ jobs:
             Write-Warning "Sidecar not found at $src"
           }
 
-      - name: Build desktop binary (Tauri)
+      - name: Build desktop binary
         shell: pwsh
+        working-directory: src-tauri
         run: |
-          pnpm tauri build --target x86_64-pc-windows-msvc --bundles none
+          cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
 
-      - name: Create portable launcher (batch)
+      - name: Create portable launcher
         shell: pwsh
         run: |
           $bat = @'
@@ -104,7 +105,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$dir\web" | Out-Null
             Copy-Item -Recurse -Path "out\*" -Destination "$dir\web" -Force
           } else {
-            Write-Warning "Frontend output 'out' not found; ensure pnpm build outputs to 'out'"
+            Write-Warning "Frontend output 'out' not found"
           }
 
           Copy-Item -Path "start-codeg-portable.bat" -Destination $dir -Force
@@ -121,3 +122,4 @@ jobs:
         with:
           name: codeg-portable-win64
           path: dist/codeg-portable-win64.zip
+          retention-days: 14
