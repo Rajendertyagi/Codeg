@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
@@ -26,32 +26,17 @@ jobs:
           workspaces: ./src-tauri -> target
           shared-key: win64-desktop
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build everything via Tauri
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
-      - name: Build frontend
-        run: pnpm build
-
-      - name: Build codeg-mcp sidecar
-        working-directory: src-tauri
-        run: cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
-
-      - name: Stage sidecar for desktop build
+      - name: Find built binaries
         shell: bash
         run: |
-          mkdir -p src-tauri/binaries
-          cp "src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" \
-             "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe"
-
-      - name: Build desktop binary
-        working-directory: src-tauri
-        run: cargo build --release --bin codeg --features tauri-runtime --target x86_64-pc-windows-msvc
-
-      - name: Verify binaries
-        shell: bash
-        run: |
-          ls -la "src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe"
-          ls -la "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe"
+          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/codeg.exe
+          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/codeg-mcp.exe
 
       - name: Create portable launcher
         shell: pwsh
