@@ -2565,6 +2565,16 @@
         "errorFailedLink": "Error al abrir el enlace",
         "errorUnsupportedLinkProtocol": "Este protocolo de enlace no es compatible."
       },
+      "fileActions": {
+        "openInFinder": "Abrir en Finder",
+        "openInExplorer": "Abrir en Explorer",
+        "openInFileManager": "Abrir en el gestor de archivos",
+        "copyRelativePath": "Copiar ruta relativa",
+        "copyAbsolutePath": "Copiar ruta absoluta",
+        "pathCopied": "Ruta copiada",
+        "copyPathFailed": "No se pudo copiar la ruta",
+        "openFailed": "Error al abrir el archivo local"
+      },
       "messageList": {
         "attachedResources": "Recursos adjuntos",
         "loading": "Cargando...",

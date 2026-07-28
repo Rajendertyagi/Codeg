@@ -2565,6 +2565,16 @@
         "errorFailedLink": "Falha ao abrir o link",
         "errorUnsupportedLinkProtocol": "Este protocolo de link não é compatível."
       },
+      "fileActions": {
+        "openInFinder": "Abrir no Finder",
+        "openInExplorer": "Abrir no Explorer",
+        "openInFileManager": "Abrir no gerenciador de arquivos",
+        "copyRelativePath": "Copiar caminho relativo",
+        "copyAbsolutePath": "Copiar caminho absoluto",
+        "pathCopied": "Caminho copiado",
+        "copyPathFailed": "Falha ao copiar o caminho",
+        "openFailed": "Falha ao abrir o arquivo local"
+      },
       "messageList": {
         "attachedResources": "Recursos anexados",
         "loading": "Carregando...",

@@ -2565,6 +2565,16 @@
         "errorFailedLink": "Échec de l'ouverture du lien",
         "errorUnsupportedLinkProtocol": "Ce protocole de lien n’est pas pris en charge."
       },
+      "fileActions": {
+        "openInFinder": "Ouvrir dans Finder",
+        "openInExplorer": "Ouvrir dans Explorer",
+        "openInFileManager": "Ouvrir dans le gestionnaire de fichiers",
+        "copyRelativePath": "Copier le chemin relatif",
+        "copyAbsolutePath": "Copier le chemin absolu",
+        "pathCopied": "Chemin copié",
+        "copyPathFailed": "Échec de la copie du chemin",
+        "openFailed": "Échec de l'ouverture du fichier local"
+      },
       "messageList": {
         "attachedResources": "Ressources jointes",
         "loading": "Chargement...",

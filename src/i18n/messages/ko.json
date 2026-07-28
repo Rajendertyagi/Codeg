@@ -2565,6 +2565,16 @@
         "errorFailedLink": "링크 열기 실패",
         "errorUnsupportedLinkProtocol": "이 링크 프로토콜은 지원되지 않습니다."
       },
+      "fileActions": {
+        "openInFinder": "Finder에서 열기",
+        "openInExplorer": "Explorer에서 열기",
+        "openInFileManager": "파일 관리자에서 열기",
+        "copyRelativePath": "상대 경로 복사",
+        "copyAbsolutePath": "절대 경로 복사",
+        "pathCopied": "경로가 복사되었습니다",
+        "copyPathFailed": "경로 복사에 실패했습니다",
+        "openFailed": "로컬 파일 열기 실패"
+      },
       "messageList": {
         "attachedResources": "첨부된 리소스",
         "loading": "불러오는 중...",

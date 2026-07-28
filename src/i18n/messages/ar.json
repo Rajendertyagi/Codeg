@@ -2565,6 +2565,16 @@
         "errorFailedLink": "فشل فتح الرابط",
         "errorUnsupportedLinkProtocol": "بروتوكول الرابط هذا غير مدعوم."
       },
+      "fileActions": {
+        "openInFinder": "فتح في Finder",
+        "openInExplorer": "فتح في Explorer",
+        "openInFileManager": "فتح في مدير الملفات",
+        "copyRelativePath": "نسخ المسار النسبي",
+        "copyAbsolutePath": "نسخ المسار المطلق",
+        "pathCopied": "تم نسخ المسار",
+        "copyPathFailed": "فشل نسخ المسار",
+        "openFailed": "فشل فتح الملف المحلي"
+      },
       "messageList": {
         "attachedResources": "الموارد المرفقة",
         "loading": "جارٍ التحميل...",

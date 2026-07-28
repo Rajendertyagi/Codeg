@@ -2565,6 +2565,16 @@
         "errorFailedLink": "打开链接失败",
         "errorUnsupportedLinkProtocol": "不支持该链接协议。"
       },
+      "fileActions": {
+        "openInFinder": "在访达打开",
+        "openInExplorer": "在资源管理器打开",
+        "openInFileManager": "在文件管理器打开",
+        "copyRelativePath": "复制相对路径",
+        "copyAbsolutePath": "复制绝对路径",
+        "pathCopied": "已复制路径",
+        "copyPathFailed": "复制路径失败",
+        "openFailed": "打开本地文件失败"
+      },
       "messageList": {
         "attachedResources": "附加资源",
         "loading": "加载中...",

@@ -2565,6 +2565,16 @@
         "errorFailedLink": "Link konnte nicht geöffnet werden",
         "errorUnsupportedLinkProtocol": "Dieses Linkprotokoll wird nicht unterstützt."
       },
+      "fileActions": {
+        "openInFinder": "In Finder öffnen",
+        "openInExplorer": "In Explorer öffnen",
+        "openInFileManager": "Im Dateimanager öffnen",
+        "copyRelativePath": "Relativen Pfad kopieren",
+        "copyAbsolutePath": "Absoluten Pfad kopieren",
+        "pathCopied": "Pfad kopiert",
+        "copyPathFailed": "Pfad konnte nicht kopiert werden",
+        "openFailed": "Lokale Datei konnte nicht geöffnet werden"
+      },
       "messageList": {
         "attachedResources": "Angehängte Ressourcen",
         "loading": "Lädt...",
