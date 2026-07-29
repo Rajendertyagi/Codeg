@@ -48,8 +48,6 @@ import {
   mcpUpsertLocalServer,
 } from "@/lib/api"
 import { toLocalizedErrorMessage } from "@/lib/app-error"
-import { getAgentLabel, isCustomAgentType } from "@/lib/custom-agents"
-import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { normalizeMcpType } from "@/lib/mcp-types"
 import { cn } from "@/lib/utils"
 import type {
@@ -253,24 +251,27 @@ function normalizeApps(apps: McpAppType[]): McpAppType[] {
 
 function appsToDraft(apps: McpAppType[]): Record<McpAppType, boolean> {
   const appSet = new Set(apps)
-  const draft = {} as Record<McpAppType, boolean>
-  for (const option of APP_OPTIONS) {
-    draft[option.value] = appSet.has(option.value)
+  return {
+    claude_code: appSet.has("claude_code"),
+    codex: appSet.has("codex"),
+    gemini: appSet.has("gemini"),
+    open_claw: appSet.has("open_claw"),
+    open_code: appSet.has("open_code"),
+    cline: appSet.has("cline"),
+    hermes: appSet.has("hermes"),
+    code_buddy: appSet.has("code_buddy"),
+    kimi_code: appSet.has("kimi_code"),
+    grok: appSet.has("grok"),
+    cursor: appSet.has("cursor"),
   }
-  // Assignments beyond the static options — custom agents (whose checkboxes
-  // come from the dynamic list) and legacy apps like open_claw — start
-  // checked so an edit round-trip does not silently drop them.
-  for (const app of apps) {
-    draft[app] = true
-  }
-  return draft
 }
 
 function selectedAppsFromDraft(
-  draft: Record<McpAppType, boolean>,
-  options: { value: McpAppType; label: string }[]
+  draft: Record<McpAppType, boolean>
 ): McpAppType[] {
-  return options.filter((item) => draft[item.value]).map((item) => item.value)
+  return APP_OPTIONS.filter((item) => draft[item.value]).map(
+    (item) => item.value
+  )
 }
 
 function detectEnvOnRemote(text: string): boolean {
@@ -328,22 +329,6 @@ export function McpSettings() {
   const [selection, setSelection] = useState<Selection>(null)
 
   const [installedServers, setInstalledServers] = useState<LocalMcpServer[]>([])
-  // Custom ACP agents are MCP targets too — their servers live in codeg's own
-  // per-agent store and are forwarded over `session/new.mcpServers`. Their
-  // checkboxes join the static built-in list as they register.
-  const { agents: acpAgents } = useAcpAgents()
-  const appOptions = useMemo(
-    () => [
-      ...APP_OPTIONS,
-      ...acpAgents
-        .filter((agent) => isCustomAgentType(agent.agent_type))
-        .map((agent) => ({
-          value: agent.agent_type as McpAppType,
-          label: getAgentLabel(agent.agent_type),
-        })),
-    ],
-    [acpAgents]
-  )
   const [localFilter, setLocalFilter] = useState("")
 
   const [providers, setProviders] = useState<McpMarketplaceProvider[]>([])
@@ -614,14 +599,14 @@ export function McpSettings() {
     }
 
     // Apps the user can see and toggle in the UI.
-    const visibleApps = selectedAppsFromDraft(localAppsDraft, appOptions)
+    const visibleApps = selectedAppsFromDraft(localAppsDraft)
     // Carry forward assignments for agents no longer offered in the UI (e.g.
     // OpenClaw, which no longer accepts MCP over the ACP wire). We never add
     // these, but must not silently strip a legacy assignment from a server the
     // user is editing — that would destroy existing on-disk config and could
     // wedge an OpenClaw-only server into an unsavable "no apps" state.
     const hiddenLegacyApps = selectedLocal.apps.filter(
-      (app) => !appOptions.some((option) => option.value === app)
+      (app) => !APP_OPTIONS.some((option) => option.value === app)
     )
     const apps = normalizeApps([...visibleApps, ...hiddenLegacyApps])
     if (apps.length === 0) {
@@ -654,7 +639,6 @@ export function McpSettings() {
       setRunningAction(null)
     }
   }, [
-    appOptions,
     localAppsDraft,
     localSpecText,
     mcpT,
@@ -696,9 +680,7 @@ export function McpSettings() {
       return
     }
 
-    const apps = normalizeApps(
-      selectedAppsFromDraft(draftAppsDraft, appOptions)
-    )
+    const apps = normalizeApps(selectedAppsFromDraft(draftAppsDraft))
     if (apps.length === 0) {
       toast.error(t("toasts.selectAtLeastOneApp"))
       return
@@ -729,7 +711,6 @@ export function McpSettings() {
       setRunningAction(null)
     }
   }, [
-    appOptions,
     draftAppsDraft,
     draftServerId,
     draftSpecText,
@@ -804,9 +785,7 @@ export function McpSettings() {
       }
     }
 
-    const apps = normalizeApps(
-      selectedAppsFromDraft(installAppsDraft, appOptions)
-    )
+    const apps = normalizeApps(selectedAppsFromDraft(installAppsDraft))
     if (apps.length === 0) {
       toast.error(t("toasts.selectAtLeastOneApp"))
       return
@@ -843,7 +822,6 @@ export function McpSettings() {
       setRunningAction(null)
     }
   }, [
-    appOptions,
     installAppsDraft,
     installParamDraft,
     marketDetail,
@@ -1011,7 +989,7 @@ export function McpSettings() {
               <div className="text-xs text-muted-foreground">
                 {t("installDialog.targetApps")}
               </div>
-              {appOptions.map((app) => (
+              {APP_OPTIONS.map((app) => (
                 <label
                   key={app.value}
                   className="inline-flex w-full items-center gap-2 rounded-md border px-2 py-1.5"
@@ -1380,7 +1358,7 @@ export function McpSettings() {
                   {t("local.enabledApps")}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {appOptions.map((app) => (
+                  {APP_OPTIONS.map((app) => (
                     <label
                       key={app.value}
                       className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
@@ -1486,7 +1464,7 @@ export function McpSettings() {
                   {t("local.enabledApps")}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {appOptions.map((app) => (
+                  {APP_OPTIONS.map((app) => (
                     <label
                       key={app.value}
                       className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"

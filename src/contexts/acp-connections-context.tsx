@@ -143,8 +143,14 @@ export interface ClaudeApiRetryState {
 }
 
 export type LiveContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; text: string }
+  /**
+   * `parentToolUseId`: subagent attribution (claude-agent-acp ≥0.63,
+   * `_meta.claudeCode.parentToolUseId`). Parented text/thinking belongs to
+   * the live Agent capsule of that tool call — the runtime store routes it
+   * out of the main thread. `undefined` = main-thread content.
+   */
+  | { type: "text"; text: string; parentToolUseId?: string }
+  | { type: "thinking"; text: string; parentToolUseId?: string }
   | { type: "plan"; entries: PlanEntryInfo[] }
   | { type: "tool_call"; info: ToolCallInfo }
 
@@ -562,8 +568,18 @@ type Action =
     }
 
 type StreamingAction =
-  | { type: "CONTENT_DELTA"; contextKey: string; text: string }
-  | { type: "THINKING"; contextKey: string; text: string }
+  | {
+      type: "CONTENT_DELTA"
+      contextKey: string
+      text: string
+      parentToolUseId?: string
+    }
+  | {
+      type: "THINKING"
+      contextKey: string
+      text: string
+      parentToolUseId?: string
+    }
 
 type ConnectionsMap = Map<string, ConnectionState>
 const MAX_LIVE_TOOL_RAW_OUTPUT_CHARS = 200_000
@@ -1045,31 +1061,86 @@ function applyStreamingAction(
   // redact thinking text entirely, keeping the empty block as the signal).
   if (action.type === "CONTENT_DELTA" && action.text.length === 0) return null
 
+  // Orphan gate for subagent-attributed chunks: the parent Agent tool_call
+  // always precedes its subagent's chunks on the seq-ordered wire (and
+  // `tool_call` dispatch flushes the streaming queue first), so a parented
+  // delta whose parent is absent from liveMessage is out-of-turn residue —
+  // e.g. an async subagent still streaming after its parent turn settled.
+  // Dropping it here keeps liveMessage, its runtime-store sinks, and
+  // COMPLETE_TURN promotion consistent, and bounds memory (orphan text never
+  // accumulates).
+  if (action.parentToolUseId) {
+    const parentPresent = conn.liveMessage?.content.some(
+      (b) =>
+        b.type === "tool_call" && b.info.tool_call_id === action.parentToolUseId
+    )
+    if (!parentPresent) return null
+  }
+
   const prev = ensureLiveMessage(conn.liveMessage)
   const lastBlock = prev.content[prev.content.length - 1]
   let newContent: LiveContentBlock[] | null = null
 
+  // Merge only into a trailing block of the same kind AND the same subagent
+  // attribution — main → subagent → main must produce three blocks. Mirrors
+  // the backend's `append_text_delta` predicate so a snapshot-hydrated client
+  // converges on identical block boundaries.
   if (action.type === "CONTENT_DELTA") {
-    if (lastBlock?.type === "text") {
+    if (
+      lastBlock?.type === "text" &&
+      lastBlock.parentToolUseId === action.parentToolUseId
+    ) {
       newContent = [
         ...prev.content.slice(0, -1),
-        { type: "text", text: lastBlock.text + action.text },
+        {
+          type: "text",
+          text: lastBlock.text + action.text,
+          parentToolUseId: action.parentToolUseId,
+        },
       ]
     } else {
-      newContent = [...prev.content, { type: "text", text: action.text }]
+      newContent = [
+        ...prev.content,
+        {
+          type: "text",
+          text: action.text,
+          parentToolUseId: action.parentToolUseId,
+        },
+      ]
     }
   } else {
-    if (action.text.length === 0 && lastBlock?.type === "thinking") {
-      // Already have a thinking block; an empty follow-up event is a no-op.
+    if (
+      action.text.length === 0 &&
+      lastBlock?.type === "thinking" &&
+      lastBlock.parentToolUseId === action.parentToolUseId
+    ) {
+      // Already have a thinking block of this attribution; an empty
+      // follow-up event is a no-op. (A parented empty chunk must not
+      // suppress the main thread's "Thinking..." placeholder, nor vice
+      // versa — hence the attribution check.)
       return null
     }
-    if (lastBlock?.type === "thinking") {
+    if (
+      lastBlock?.type === "thinking" &&
+      lastBlock.parentToolUseId === action.parentToolUseId
+    ) {
       newContent = [
         ...prev.content.slice(0, -1),
-        { type: "thinking", text: lastBlock.text + action.text },
+        {
+          type: "thinking",
+          text: lastBlock.text + action.text,
+          parentToolUseId: action.parentToolUseId,
+        },
       ]
     } else {
-      newContent = [...prev.content, { type: "thinking", text: action.text }]
+      newContent = [
+        ...prev.content,
+        {
+          type: "thinking",
+          text: action.text,
+          parentToolUseId: action.parentToolUseId,
+        },
+      ]
     }
   }
 
@@ -2791,7 +2862,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         continue
       }
       const last = list[list.length - 1]
-      if (last && last.type === action.type) {
+      // Same-type AND same subagent attribution: within one flush window,
+      // main-thread and parented deltas (or two different subagents') must
+      // not concatenate — this pre-coalescing runs BEFORE the reducer's
+      // attribution-aware merge and would otherwise defeat it.
+      if (
+        last &&
+        last.type === action.type &&
+        last.parentToolUseId === action.parentToolUseId
+      ) {
         last.text += action.text
       } else {
         list.push({ ...action })
@@ -2922,10 +3001,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "CONTENT_DELTA",
             contextKey,
             text: e.text,
+            // Wire `null` normalizes to `undefined` so the reducer's strict
+            // attribution equality works on one representation.
+            parentToolUseId: e.parent_tool_use_id ?? undefined,
           })
           break
         case "thinking":
-          enqueueStreamingAction({ type: "THINKING", contextKey, text: e.text })
+          enqueueStreamingAction({
+            type: "THINKING",
+            contextKey,
+            text: e.text,
+            parentToolUseId: e.parent_tool_use_id ?? undefined,
+          })
           break
         case "claude_sdk_message":
           flushStreamingQueue()

@@ -6,6 +6,7 @@ import {
   getAgentInitial,
   getAgentLabel,
   getCustomAgentDisplayVersion,
+  isMonochromeSvgDataUrl,
   setCustomAgentDisplay,
   subscribeCustomAgentDisplay,
 } from "@/lib/custom-agents"
@@ -74,5 +75,100 @@ describe("setCustomAgentDisplay", () => {
     unsubscribe()
     setCustomAgentDisplay([])
     expect(listener).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("isMonochromeSvgDataUrl", () => {
+  const encode = (svg: string) => `data:image/svg+xml;base64,${btoa(svg)}`
+
+  it("classifies currentColor marks as monochrome", () => {
+    // The shape every ACP-registry icon has today.
+    expect(
+      isMonochromeSvgDataUrl(
+        encode('<svg xmlns="x"><path fill="currentColor" d="M0 0h4"/></svg>')
+      )
+    ).toBe(true)
+    // CSS spelling too.
+    expect(
+      isMonochromeSvgDataUrl(
+        encode('<svg><path style="fill: currentColor" d="M0 0"/></svg>')
+      )
+    ).toBe(true)
+  })
+
+  it("treats plain black or unpainted silhouettes as monochrome", () => {
+    expect(
+      isMonochromeSvgDataUrl(
+        encode('<svg viewBox="0 0 4 4"><path fill="#000000" d="M0 0"/></svg>')
+      )
+    ).toBe(true)
+    // No paint at all defaults to black — same one-theme problem.
+    expect(
+      isMonochromeSvgDataUrl(encode('<svg><path d="M0 0h4v4z"/></svg>'))
+    ).toBe(true)
+    // `fill-rule` / `fill-opacity` must not read as paints.
+    expect(
+      isMonochromeSvgDataUrl(
+        encode('<svg><path fill-rule="evenodd" fill-opacity="0.4"/></svg>')
+      )
+    ).toBe(true)
+  })
+
+  it("keeps colored marks, gradients and black-white plates as images", () => {
+    expect(
+      isMonochromeSvgDataUrl(
+        encode('<svg><rect fill="#D97757" width="4" height="4"/></svg>')
+      )
+    ).toBe(false)
+    expect(
+      isMonochromeSvgDataUrl(
+        encode(
+          '<svg><linearGradient id="g"><stop stop-color="#EE4D5D"/></linearGradient><path fill="url(#g)"/></svg>'
+        )
+      )
+    ).toBe(false)
+    // A white plate under a black glyph would flatten into a solid block
+    // under a mask, so the mix stays an <img>.
+    expect(
+      isMonochromeSvgDataUrl(
+        encode(
+          '<svg><rect fill="#fff" width="4" height="4"/><path fill="#000" d="M0 0"/></svg>'
+        )
+      )
+    ).toBe(false)
+    // Same for currentColor mixed with a real paint.
+    expect(
+      isMonochromeSvgDataUrl(
+        encode(
+          '<svg><rect fill="#1783FF"/><path fill="currentColor" d="M0 0"/></svg>'
+        )
+      )
+    ).toBe(false)
+  })
+
+  it("only inspects base64 svg data urls, and never throws on garbage", () => {
+    expect(isMonochromeSvgDataUrl(null)).toBe(false)
+    expect(isMonochromeSvgDataUrl("https://e/i.svg")).toBe(false)
+    expect(isMonochromeSvgDataUrl("data:image/png;base64,AAAA")).toBe(false)
+    // Percent-encoded svg data urls are not produced by codeg's inliner or
+    // the upload form; they stay on the <img> path.
+    expect(isMonochromeSvgDataUrl("data:image/svg+xml;utf8,<svg/>")).toBe(false)
+    expect(
+      isMonochromeSvgDataUrl("data:image/svg+xml;base64,%%%not-base64%%%")
+    ).toBe(false)
+    // Valid base64 that is not svg markup.
+    expect(
+      isMonochromeSvgDataUrl(`data:image/svg+xml;base64,${btoa("hello")}`)
+    ).toBe(false)
+  })
+
+  it("memoizes per url", () => {
+    const url = encode('<svg><path fill="currentColor"/></svg>')
+    const spy = vi.spyOn(globalThis, "atob")
+    isMonochromeSvgDataUrl(url)
+    const callsAfterFirst = spy.mock.calls.length
+    isMonochromeSvgDataUrl(url)
+    expect(spy.mock.calls.length).toBe(callsAfterFirst)
+    spy.mockRestore()
   })
 })

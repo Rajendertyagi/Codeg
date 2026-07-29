@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import { act, render, screen } from "@testing-library/react"
 import { TabDragGhost } from "./tab-drag-ghost"
 import { useTabStore } from "@/contexts/tab-context"
@@ -20,13 +20,8 @@ const release = () =>
   })
 
 describe("TabDragGhost", () => {
-  beforeEach(() => {
-    document.body.classList.remove("select-none")
-  })
-
   afterEach(() => {
     release()
-    vi.restoreAllMocks()
   })
 
   it("shows the floating chip only while hovering a FOREIGN group", () => {
@@ -44,30 +39,13 @@ describe("TabDragGhost", () => {
     expect(screen.queryByText("Refactor the parser")).toBeNull()
   })
 
-  it("suppresses document-wide text selection for the whole drag, not just while the chip shows", () => {
+  it("leaves text-selection suppression to the dragged tab itself", () => {
+    // The guard covers EVERY tab drag (within-group sorting, the unsplit strip),
+    // not just the cross-group ones that produce a ghost — so it lives in
+    // TabItem via drag-selection-guard, not here. See
+    // src/lib/drag-selection-guard.test.ts.
     render(<TabDragGhost />)
-    expect(document.body.classList.contains("select-none")).toBe(false)
-
-    dragTo(null)
-    expect(document.body.classList.contains("select-none")).toBe(true)
     dragTo("g-2")
-    expect(document.body.classList.contains("select-none")).toBe(true)
-
-    release()
     expect(document.body.classList.contains("select-none")).toBe(false)
-  })
-
-  it("clears any selection smear that slipped in before suppression kicked in", () => {
-    const removeAllRanges = vi.fn()
-    vi.spyOn(window, "getSelection").mockReturnValue({
-      removeAllRanges,
-    } as unknown as Selection)
-
-    render(<TabDragGhost />)
-    dragTo(null)
-    expect(removeAllRanges).not.toHaveBeenCalled()
-
-    release()
-    expect(removeAllRanges).toHaveBeenCalledTimes(1)
   })
 })

@@ -54,7 +54,13 @@ describe("ConversationDetailPanel new conversation layout", () => {
 
     const welcomeBranch = source.slice(welcomeBranchStart, nextBranchStart)
     expect(welcomeBranch).toContain("<ChatInput")
-    expect(welcomeBranch).toContain("overflow-x-hidden overflow-y-auto")
+    // The welcome page scrolls with the app's shared overlay scrollbar (the
+    // sidebar's os-theme-codeg bar), not the platform's native one. `min-h-full`
+    // on the inner column preserves the spacer layout the old
+    // `overflow-y-auto` flex column had.
+    expect(welcomeBranch).toContain("<ScrollArea")
+    expect(welcomeBranch).toContain('className="flex min-h-full flex-col"')
+    expect(welcomeBranch).not.toContain("overflow-y-auto")
     expect(welcomeBranch).not.toContain("WelcomeBackdrop")
     // The welcome input is flushed: the welcome column already supplies px-4, so
     // the input must not double-pad (would make it narrower than the cards).

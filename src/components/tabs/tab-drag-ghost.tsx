@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect } from "react"
 import { createPortal } from "react-dom"
 import { useTabStore } from "@/contexts/tab-context"
 
@@ -13,28 +12,13 @@ import { useTabStore } from "@/contexts/tab-context"
  *
  * Portal to <body>: ancestors animate with transforms, which would re-anchor
  * `position: fixed` to themselves instead of the viewport.
+ *
+ * Text-selection suppression during a drag is NOT here: it belongs to every tab
+ * drag (within-group sorting, the unsplit strip), not just the cross-group ones
+ * that produce a ghost, so `TabItem` holds it via `drag-selection-guard`.
  */
 export function TabDragGhost() {
   const drag = useTabStore((s) => s.tabDrag)
-  const dragging = drag != null
-
-  // While ANY tab drag is live, suppress text selection document-wide: the
-  // press that starts the drag also starts a browser text selection, and as
-  // the pointer sweeps other groups (headers, message bodies) it smears
-  // highlight across everything it crosses — noise the user then has to
-  // click away after every drop. `select-none` on <body> stops the spread
-  // (descendants' `user-select: auto` resolves through it), and clearing the
-  // selection on release removes anything that slipped in between the press
-  // and the first drag frame.
-  useEffect(() => {
-    if (!dragging) return
-    document.body.classList.add("select-none")
-    return () => {
-      document.body.classList.remove("select-none")
-      window.getSelection()?.removeAllRanges()
-    }
-  }, [dragging])
-
   if (!drag || drag.overGroupId == null) return null
   return createPortal(
     <div

@@ -143,6 +143,40 @@ pub struct CustomAgentSpec {
     pub binary: BTreeMap<String, BinaryPlatformSpec>,
 }
 
+/// Where a definition came from. A `Manual` definition's `version` is whatever
+/// the user typed (or the fallback), so there is no meaningful "registry
+/// version" to compare the installed one against — the version-status display
+/// keys off this to show the local version alone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomAgentSource {
+    #[default]
+    Registry,
+    Manual,
+}
+
+impl CustomAgentSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CustomAgentSource::Registry => "registry",
+            CustomAgentSource::Manual => "manual",
+        }
+    }
+
+    /// Unknown strings fall back to `Registry` — the value that keeps the
+    /// display behavior rows had before the column existed.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "manual" => CustomAgentSource::Manual,
+            _ => CustomAgentSource::Registry,
+        }
+    }
+}
+
+fn is_registry_source(source: &CustomAgentSource) -> bool {
+    *source == CustomAgentSource::Registry
+}
+
 /// A full custom-agent definition as stored in the `custom_agent` table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomAgentDef {
@@ -169,11 +203,31 @@ pub struct CustomAgentDef {
     /// store (`~/.agents/skills` plus project-local `.agents/skills`) — the
     /// cross-agent convention OpenCode, Gemini, Cline, Codex, pi, and Cursor
     /// already follow. codeg cannot detect where an arbitrary ACP agent loads
-    /// skills from, so this stays off until the user turns it on; it is the
-    /// single gate that puts the agent into every skills matrix (see
-    /// `skill_storage_spec`).
+    /// skills from, so this stays off until the user turns it on; together
+    /// with [`Self::skills_dir`] it is the gate that puts the agent into
+    /// every skills matrix (see `skill_storage_spec`).
     #[serde(default)]
     pub skills_shared_store: bool,
+    /// Absolute path of a directory this agent loads skills from — its own,
+    /// dedicated store for agents that do not follow the shared convention.
+    /// Declared by the user like [`Self::skills_shared_store`], and the two
+    /// compose: either alone is enough to reach the skills surfaces, and when
+    /// both are set the dedicated directory is listed first so linking targets
+    /// it (the pi/Cursor ordering). Normalized at save time (`~` expanded,
+    /// must be absolute) by `commands::custom_agents::normalize_skills_dir`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills_dir: Option<String>,
+    /// [`CustomAgentSource::Registry`] is skipped when serializing so
+    /// registry-added definitions keep their pre-column JSON shape (the def
+    /// JSON participates in cache fingerprints).
+    #[serde(default, skip_serializing_if = "is_registry_source")]
+    pub source: CustomAgentSource,
+    /// Optional user-supplied command that prints the locally installed
+    /// version (e.g. `qwen --version`). `None` means "run the agent command
+    /// with `--version`". Consulted by the system-install version probe only;
+    /// never used to launch the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_probe: Option<String>,
 }
 
 /// Version stamped on a definition that carries none. Used as a cache key and
@@ -424,18 +478,21 @@ pub fn build_meta(def: &CustomAgentDef) -> Result<AcpAgentMeta, CustomAgentError
             if uvx.package.trim().is_empty() {
                 return Err(CustomAgentError::MissingPackage("uvx"));
             }
+            let cmd = intern(&resolved_cmd(uvx.cmd.as_deref(), &uvx.package));
+            let args = intern_args(&uvx.args);
             AgentDistribution::Uvx {
                 version,
                 package: intern(uvx.package.trim()),
-                cmd: intern(&resolved_cmd(uvx.cmd.as_deref(), &uvx.package)),
-                args: intern_args(&uvx.args),
+                cmd,
+                args,
                 env: intern_env(&uvx.env),
                 uv_required: uvx.uv_required.as_deref().map(intern),
                 python: uvx.python.as_deref().map(intern),
-                // Custom agents have no vetted "installed via the official
-                // installer" fallback command; PATH resolution still happens
-                // inside the uvx path itself.
-                system_cmd: None,
+                // The user's own install of the CLI (pipx, `uv tool install`,
+                // …) is a legitimate launcher for a custom agent — same
+                // recipe as the uvx entry script, used when the uv runner is
+                // absent (mirrors the Hermes system fallback).
+                system_cmd: Some((cmd, args)),
             }
         }
         CustomDistributionKind::Binary => build_binary_distribution(&def.spec, version)?,
@@ -587,6 +644,14 @@ struct Entry {
     /// store. Beside the meta for the same reason as `icon`: it drives the
     /// skills surfaces, not the launch.
     skills_shared_store: bool,
+    /// The declared dedicated skills directory, if any. See
+    /// [`CustomAgentDef::skills_dir`].
+    skills_dir: Option<&'static str>,
+    /// Registry-added vs hand-written. Display data like `icon`; drives the
+    /// version-status presentation, not the launch.
+    source: CustomAgentSource,
+    /// Optional version-probe command. See [`CustomAgentDef::version_probe`].
+    version_probe: Option<&'static str>,
 }
 
 fn registry() -> &'static RwLock<HashMap<&'static str, Entry>> {
@@ -621,6 +686,9 @@ pub fn hydrate(defs: &[CustomAgentDef]) -> Vec<(String, CustomAgentError)> {
                     meta: prev.meta,
                     icon: prev.icon,
                     skills_shared_store: prev.skills_shared_store,
+                    skills_dir: prev.skills_dir,
+                    source: prev.source,
+                    version_probe: prev.version_probe,
                 },
             );
             continue;
@@ -639,6 +707,19 @@ pub fn hydrate(defs: &[CustomAgentDef]) -> Vec<(String, CustomAgentError)> {
                             .filter(|s| !s.is_empty())
                             .map(intern),
                         skills_shared_store: def.skills_shared_store,
+                        skills_dir: def
+                            .skills_dir
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(intern),
+                        source: def.source,
+                        version_probe: def
+                            .version_probe
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(intern),
                     },
                 );
             }
@@ -673,15 +754,28 @@ pub fn display_name(registry_id: &str) -> Option<&'static str> {
     get(registry_id).map(|m| m.name)
 }
 
-/// Whether a registered custom agent declared it reads the shared
-/// `.agents/skills` store. `false` for unregistered ids — a deleted agent
-/// must drop out of the skills surfaces rather than keep a phantom column.
-pub fn skills_shared_store(registry_id: &str) -> bool {
+/// A registered custom agent's skills declaration — the shared-store flag and
+/// the dedicated directory, together. See [`CustomAgentDef::skills_shared_store`]
+/// and [`CustomAgentDef::skills_dir`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CustomSkillsDecl {
+    pub shared_store: bool,
+    pub dir: Option<&'static str>,
+}
+
+/// The skills declaration for `registry_id`. Everything-off for unregistered
+/// ids — a deleted agent must drop out of the skills surfaces rather than keep
+/// a phantom column.
+pub fn skills_decl(registry_id: &str) -> CustomSkillsDecl {
     registry()
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .get(registry_id)
-        .is_some_and(|e| e.skills_shared_store)
+        .map(|e| CustomSkillsDecl {
+            shared_store: e.skills_shared_store,
+            dir: e.skills_dir,
+        })
+        .unwrap_or_default()
 }
 
 /// Display icon for a registered custom agent — a `data:` URL in the normal
@@ -692,6 +786,26 @@ pub fn icon_for(registry_id: &str) -> Option<&'static str> {
         .unwrap_or_else(|e| e.into_inner())
         .get(registry_id)
         .and_then(|e| e.icon)
+}
+
+/// Where a registered definition came from. `None` when the id is not
+/// registered.
+pub fn source_of(registry_id: &str) -> Option<CustomAgentSource> {
+    registry()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(registry_id)
+        .map(|e| e.source)
+}
+
+/// The user-declared version-probe command for a registered definition, if
+/// any. See [`CustomAgentDef::version_probe`].
+pub fn version_probe_of(registry_id: &str) -> Option<&'static str> {
+    registry()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(registry_id)
+        .and_then(|e| e.version_probe)
 }
 
 /// True when `registry_id` currently resolves to launch metadata.
@@ -778,6 +892,9 @@ mod tests {
             },
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         }
     }
 
@@ -882,6 +999,9 @@ mod tests {
             },
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         }
     }
 
@@ -1121,21 +1241,102 @@ mod tests {
         let _guard = hydrate_guard();
         let mut def = npx_def("skills-flag-agent");
         assert!(hydrate(std::slice::from_ref(&def)).is_empty());
-        assert!(
-            !skills_shared_store("skills-flag-agent"),
+        assert_eq!(
+            skills_decl("skills-flag-agent"),
+            CustomSkillsDecl::default(),
             "undeclared agents stay out of the skills surfaces"
         );
 
-        // Flipping the declaration changes the fingerprint, so the same
-        // hydrate path republishes and the accessor flips with it.
+        // Flipping a declaration changes the fingerprint, so the same hydrate
+        // path republishes and the accessor flips with it — for the shared
+        // store and the dedicated directory alike.
         def.skills_shared_store = true;
+        def.skills_dir = Some("/opt/agent/skills".into());
         assert!(hydrate(std::slice::from_ref(&def)).is_empty());
-        assert!(skills_shared_store("skills-flag-agent"));
+        let decl = skills_decl("skills-flag-agent");
+        assert!(decl.shared_store);
+        assert_eq!(decl.dir, Some("/opt/agent/skills"));
 
-        // An unregistered (deleted) id reads as false — a phantom column must
-        // not survive its agent.
+        // A blank directory reads as undeclared rather than as an empty path.
+        def.skills_dir = Some("   ".into());
+        assert!(hydrate(std::slice::from_ref(&def)).is_empty());
+        assert_eq!(skills_decl("skills-flag-agent").dir, None);
+
+        // An unregistered (deleted) id reads as all-off — a phantom column
+        // must not survive its agent.
         assert!(hydrate(&[]).is_empty());
-        assert!(!skills_shared_store("skills-flag-agent"));
+        assert_eq!(skills_decl("skills-flag-agent"), CustomSkillsDecl::default());
+    }
+
+    #[test]
+    fn source_and_version_probe_survive_hydrate_and_gate_by_registration() {
+        let _guard = hydrate_guard();
+        let mut def = npx_def("provenance-agent");
+        assert!(hydrate(std::slice::from_ref(&def)).is_empty());
+        assert_eq!(
+            source_of("provenance-agent"),
+            Some(CustomAgentSource::Registry)
+        );
+        assert_eq!(version_probe_of("provenance-agent"), None);
+
+        def.source = CustomAgentSource::Manual;
+        def.version_probe = Some("qwen --version".into());
+        assert!(hydrate(std::slice::from_ref(&def)).is_empty());
+        assert_eq!(
+            source_of("provenance-agent"),
+            Some(CustomAgentSource::Manual)
+        );
+        assert_eq!(version_probe_of("provenance-agent"), Some("qwen --version"));
+
+        // A blank probe reads as undeclared rather than as an empty command.
+        def.version_probe = Some("   ".into());
+        assert!(hydrate(std::slice::from_ref(&def)).is_empty());
+        assert_eq!(version_probe_of("provenance-agent"), None);
+
+        assert!(hydrate(&[]).is_empty());
+        assert_eq!(source_of("provenance-agent"), None);
+    }
+
+    #[test]
+    fn a_custom_uvx_agent_advertises_its_own_cli_as_system_fallback() {
+        // The uvx launch path falls back to `system_cmd` when the uv runner is
+        // absent; for a custom agent the user's own install of the CLI is that
+        // fallback, with the same entry-script args.
+        let def = CustomAgentDef {
+            registry_id: "uvx-fallback-agent".to_string(),
+            name: "Fast Agent".into(),
+            description: String::new(),
+            version: "0.9.24".into(),
+            distribution_kind: CustomDistributionKind::Uvx,
+            spec: CustomAgentSpec {
+                uvx: Some(UvxSpec {
+                    package: "fast-agent-acp==0.9.24".into(),
+                    args: vec!["--acp".into()],
+                    cmd: Some("fast-agent".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+        };
+        let meta = build_meta(&def).expect("builds");
+        match meta.distribution {
+            AgentDistribution::Uvx {
+                cmd,
+                args,
+                system_cmd,
+                ..
+            } => {
+                assert_eq!(system_cmd, Some((cmd, args)));
+                assert_eq!(cmd, "fast-agent");
+                assert_eq!(args, ["--acp"]);
+            }
+            _ => panic!("expected a uvx distribution"),
+        }
     }
 
     #[test]

@@ -24,6 +24,11 @@ import {
   useTabStore,
 } from "@/stores/tab-store"
 import { leafIds } from "@/lib/tab-group-layout"
+import {
+  buildNewConversationDraftStorageKey,
+  loadMessageInputDraftV2,
+  saveMessageInputDraftV2,
+} from "@/lib/message-input-draft"
 
 const listOpenedTabsMock = vi.fn()
 const saveOpenedTabsMock = vi.fn()
@@ -2060,6 +2065,204 @@ describe("TabProvider tab groups", () => {
     expect(groupOfId("conv-1-codex-1")).not.toBe(movedGroup)
   })
 
+  // Drafts are device-local (no DB row before the first send), so without the
+  // blob carrying them a "conversation | new conversation" split lost the whole
+  // right-hand group on restart: no members → normalizeTree collapses it.
+  it("restores draft tabs into their own groups, keeping a draft-only group alive", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true)])
+    const home = leaves()[0]
+    act(() => {
+      store().splitTab("conv-1-codex-1", "right", { move: false })
+    })
+    const g1 = newLeafBeside(home)
+    const draft = store().rawTabs.find((t) => t.conversationId == null)!
+    expect(groupOfId(draft.id)).toBe(g1)
+
+    const blob = JSON.parse(localStorage.getItem("workspace:tab-groups:v1")!)
+    expect(blob.drafts).toHaveLength(1)
+    expect(blob.drafts[0]).toMatchObject({ id: draft.id, group: g1 })
+    expect(blob.activeDraft).toBe(draft.id)
+
+    first.unmount()
+    act(() => {
+      resetTabStore()
+    })
+    await renderWithTabs([tabItem(1, 1, true)])
+
+    expect(selectIsSplit(store())).toBe(true)
+    const restoredDraft = store().rawTabs.find((t) => t.conversationId == null)
+    expect(restoredDraft?.id).toBe(draft.id)
+    expect(restoredDraft?.folderId).toBe(1)
+    expect(groupOfId(draft.id)).toBe(g1)
+    // Draft focus is device-local state; it comes back with the draft.
+    expect(store().activeTabId).toBe(draft.id)
+    expect(store().groupSelection[g1]).toBe(draft.id)
+  })
+
+  // A transient backend failure must not be mistaken for "the user closed
+  // everything": the empty tab set would prune every assignment, collapse the
+  // layout, write that ruin over the blob, and sweep every per-tab composer key
+  // as orphaned — losing both the remembered layout and unsent text for good.
+  it("keeps the saved layout and composer drafts when the tab fetch fails", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true)])
+    const home = leaves()[0]
+    act(() => {
+      store().splitTab("conv-1-codex-1", "right", { move: false })
+    })
+    const g1 = newLeafBeside(home)
+    const draft = store().rawTabs.find((t) => t.conversationId == null)!
+    const goodBlob = localStorage.getItem("workspace:tab-groups:v1")!
+    // Unsent text in BOTH drafts' composers (per-tab keys).
+    saveMessageInputDraftV2(buildNewConversationDraftStorageKey(draft.id), {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "wip" }] },
+      ],
+    })
+
+    first.unmount()
+    act(() => {
+      resetTabStore()
+    })
+    listOpenedTabsMock.mockRejectedValueOnce(new Error("backend down"))
+    const second = renderTabs()
+    await act(async () => {})
+    // Let the idle-scheduled sweep (synchronous in jsdom) have its chance.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+
+    // The on-disk layout is untouched, so the next good launch still restores it.
+    expect(localStorage.getItem("workspace:tab-groups:v1")).toBe(goodBlob)
+    // The unsent text survives.
+    expect(
+      loadMessageInputDraftV2(buildNewConversationDraftStorageKey(draft.id))
+    ).toMatchObject({ kind: "doc" })
+    // The device-local draft is still shown (not a blank workspace), in its group.
+    expect(store().rawTabs.some((t) => t.id === draft.id)).toBe(true)
+    expect(groupOfId(draft.id)).toBe(g1)
+    // Nothing is pushed at the server off the back of a failed read.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    })
+    expect(saveOpenedTabsMock).not.toHaveBeenCalled()
+
+    // The refetch that follows the subscription rescues the session: the
+    // conversation tab returns and persistence resumes.
+    second.unmount()
+  })
+
+  // The rescue must go by the snapshot's CONTENTS while the tab set is unknown.
+  // `opened_tabs_version` defaults to 0 when the metadata key is missing, so a
+  // populated set can arrive as version 0 — losing a `snap.version > version`
+  // comparison and leaving the drafts-only state to be pruned and persisted.
+  it("adopts the recovery refetch even when its version does not advance", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true)])
+    const home = leaves()[0]
+    act(() => {
+      store().splitTab("conv-1-codex-1", "right", { move: false })
+    })
+    const g1 = newLeafBeside(home)
+    const draft = store().rawTabs.find((t) => t.conversationId == null)!
+
+    first.unmount()
+    act(() => {
+      resetTabStore()
+    })
+    // Hydration fails, then the post-subscription refetch answers with the real
+    // tabs stamped version 0 (the same value the failed session still holds).
+    listOpenedTabsMock.mockRejectedValueOnce(new Error("backend down"))
+    listOpenedTabsMock.mockResolvedValue({
+      items: [tabItem(1, 1, true)],
+      version: 0,
+    })
+    const second = renderTabs()
+    await act(async () => {})
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+
+    // The conversation tab is back alongside the restored draft, each in its
+    // own group — the split survived the failed launch.
+    expect(store().rawTabs.some((t) => t.id === "conv-1-codex-1")).toBe(true)
+    expect(store().rawTabs.some((t) => t.id === draft.id)).toBe(true)
+    expect(selectIsSplit(store())).toBe(true)
+    expect(groupOfId("conv-1-codex-1")).toBe(home)
+    expect(groupOfId(draft.id)).toBe(g1)
+    second.unmount()
+  })
+
+  it("restores drafts without dirtying the synced payload", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true)])
+    act(() => {
+      store().splitTab("conv-1-codex-1", "right", { move: false })
+    })
+    first.unmount()
+    act(() => {
+      resetTabStore()
+    })
+    saveOpenedTabsMock.mockClear()
+
+    await renderWithTabs([tabItem(1, 1, true)])
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    })
+
+    // The restore focuses the draft, which means no tab carries is_active. That
+    // baseline is seeded at hydrate, so no CAS save (and no cross-client focus
+    // broadcast) fires just from launching.
+    expect(saveOpenedTabsMock).not.toHaveBeenCalled()
+  })
+
+  it("drops a restored draft whose folder is gone and collapses its group", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true)])
+    const home = leaves()[0]
+    act(() => {
+      // Draft on folder 2, moved into its own group.
+      store().openNewConversationTab(2, "/other", { targetGroup: home })
+    })
+    const draft = store().rawTabs.find((t) => t.conversationId == null)!
+    act(() => {
+      store().splitTab("conv-1-codex-1", "right", { move: true })
+    })
+    expect(selectIsSplit(store())).toBe(true)
+
+    // Restart with folder 2 deleted while the app was closed.
+    first.unmount()
+    act(() => {
+      resetTabStore()
+    })
+    useAppWorkspaceStore.setState({
+      folders: [defaultFoldersMock[0]],
+      allFolders: [defaultFoldersMock[0]],
+    })
+    await renderWithTabs([tabItem(1, 1, true)])
+
+    expect(store().rawTabs.some((t) => t.id === draft.id)).toBe(false)
+    expect(selectIsSplit(store())).toBe(false)
+  })
+
+  it("loads a pre-drafts blob (no `drafts` field) unchanged", async () => {
+    const first = await renderWithTabs([tabItem(1, 1, true), tabItem(1, 2)])
+    act(() => {
+      store().splitTab("conv-1-codex-2", "right", { move: true })
+    })
+    const movedGroup = groupOfId("conv-1-codex-2")
+    const blob = JSON.parse(localStorage.getItem("workspace:tab-groups:v1")!)
+    delete blob.drafts
+    delete blob.activeDraft
+    first.unmount()
+    localStorage.setItem("workspace:tab-groups:v1", JSON.stringify(blob))
+    act(() => {
+      resetTabStore()
+    })
+    await renderWithTabs([tabItem(1, 1, true), tabItem(1, 2)])
+
+    expect(selectIsSplit(store())).toBe(true)
+    expect(groupOfId("conv-1-codex-2")).toBe(movedGroup)
+    expect(store().rawTabs.some((t) => t.conversationId == null)).toBe(false)
+  })
+
   it("prunes a restored group whose tabs no longer exist after hydration", async () => {
     const first = await renderWithTabs([tabItem(1, 1, true), tabItem(1, 2)])
     act(() => {
@@ -2243,53 +2446,65 @@ describe("TabProvider tab groups", () => {
       expect(saveOpenedTabsMock).toHaveBeenCalled()
     })
 
-    it("lets a dragged draft join a group that already holds one, without dirtying the synced payload", async () => {
+    // A draft is its group's own scratch slot (own composer text, own folder /
+    // agent context), and every group can spawn one from its own strip — so it
+    // never changes groups. All three routes must agree, or the UI and the store
+    // disagree about where a group's draft lives.
+    it("refuses to move a draft between groups (drag, menu, and split-and-move)", async () => {
       await renderWithTabs([tabItem(1, 1, true), tabItem(1, 2)])
       const home = leaves()[0]
-      // Seed g1 with a split draft, then a second draft in the home group
-      // (per-group creation singleton allows one per group).
       act(() => {
         store().splitTab("conv-1-codex-1", "right", { move: false })
       })
       const g1 = newLeafBeside(home)
       const g1Draft = store().rawTabs.find(
         (t) => t.conversationId == null && groupOfId(t.id) === g1
-      )
+      )!
       expect(g1Draft).toBeTruthy()
+
+      // Drag drop (with index) and menu move (no index) are both rejected.
+      act(() => {
+        store().moveTabToGroup(g1Draft.id, home, { index: 0 })
+      })
+      expect(groupOfId(g1Draft.id)).toBe(g1)
+      act(() => {
+        store().moveTabToGroup(g1Draft.id, home)
+      })
+      expect(groupOfId(g1Draft.id)).toBe(g1)
+
+      // Split-and-move on a draft is a no-op too (plain split still seeds a
+      // fresh draft in the new group — covered above).
+      const leavesBefore = leaves().length
+      act(() => {
+        store().splitTab(g1Draft.id, "down", { move: true })
+      })
+      expect(leaves()).toHaveLength(leavesBefore)
+      expect(groupOfId(g1Draft.id)).toBe(g1)
+    })
+
+    it("still reorders a draft WITHIN its own group", async () => {
+      await renderWithTabs([tabItem(1, 1, true), tabItem(1, 2)])
+      const home = leaves()[0]
       act(() => {
         store().openNewConversationTab(1, "/w1", { targetGroup: home })
       })
-      const homeDraft = store().rawTabs.find(
-        (t) => t.conversationId == null && groupOfId(t.id) === home
-      )
-      expect(homeDraft).toBeTruthy()
+      const draft = store().rawTabs.find((t) => t.conversationId == null)!
+      const homeTabs = store().tabs.filter((t) => groupOfId(t.id) === home)
+      expect(homeTabs.map((t) => t.id)).toEqual([
+        "conv-1-codex-1",
+        "conv-1-codex-2",
+        draft.id,
+      ])
 
-      // Focusing the drafts flips is_active off the bound tabs, which is a
-      // legitimate (pre-existing) save. Flush it so the assertion below
-      // isolates the DRAG itself.
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 700))
-      })
-      saveOpenedTabsMock.mockClear()
-
-      // Drag the home draft into g1: two drafts in one group is allowed — the
-      // singleton is a creation-time dedupe, not a hard invariant.
       act(() => {
-        store().moveTabToGroup(homeDraft!.id, g1, { index: 99 })
+        store().reorderGroupTabs(home, [homeTabs[2], homeTabs[0], homeTabs[1]])
       })
 
-      const g1Drafts = store().rawTabs.filter(
-        (t) => t.conversationId == null && groupOfId(t.id) === g1
-      )
-      expect(g1Drafts.map((t) => t.id)).toEqual([g1Draft!.id, homeDraft!.id])
-      expect(store().activeTabId).toBe(homeDraft!.id)
-
-      // Drafts never enter the synced payload, so even the index (reorder)
-      // path stays save-free when only a draft moved.
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 700))
-      })
-      expect(saveOpenedTabsMock).not.toHaveBeenCalled()
+      expect(
+        store()
+          .rawTabs.filter((t) => groupOfId(t.id) === home)
+          .map((t) => t.id)
+      ).toEqual([draft.id, "conv-1-codex-1", "conv-1-codex-2"])
     })
   })
 

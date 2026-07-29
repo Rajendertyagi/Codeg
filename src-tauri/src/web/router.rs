@@ -753,6 +753,10 @@ pub fn build_router(
             post(handlers::acp::acp_add_registry_agent),
         )
         .route(
+            "/acp_current_platform",
+            post(handlers::acp::acp_current_platform),
+        )
+        .route(
             "/acp_list_agent_skills",
             post(handlers::acp::acp_list_agent_skills),
         )

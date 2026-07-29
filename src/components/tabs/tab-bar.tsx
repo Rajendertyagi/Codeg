@@ -317,6 +317,10 @@ export function TabBar({ groupId }: TabBarProps) {
     >
       {groupTabs.map((tab, index) => {
         const folderInfo = folderIndex.get(tab.folderId)
+        // Drafts are group-bound: no cross-group drag, no move / split-and-move
+        // menu items. Within-group sorting (the Reorder.Group itself) is
+        // untouched. See `moveTabToGroup` for why.
+        const isDraft = tab.conversationId == null
         // Neighbours of the active tab inset their workspace-bg baseline so the
         // active tab's transparent reverse-corner foot (which flares over them)
         // doesn't leave a stray line under it (globals.css `data-adjacent-active`).
@@ -339,10 +343,13 @@ export function TabBar({ groupId }: TabBarProps) {
             folderName={folderInfo?.name ?? null}
             folderBranch={branches.get(tab.folderId) ?? null}
             isSplit={isSplit}
-            canSplitMove={canSplitMove}
+            canSplitMove={canSplitMove && !isDraft}
+            canMoveToGroup={!isDraft}
             moveTargets={moveTargets}
-            onTabDrag={crossDragEnabled ? handleTabDrag : undefined}
-            onTabDragEnd={crossDragEnabled ? handleTabDragEnd : undefined}
+            onTabDrag={crossDragEnabled && !isDraft ? handleTabDrag : undefined}
+            onTabDragEnd={
+              crossDragEnabled && !isDraft ? handleTabDragEnd : undefined
+            }
             onSwitch={switchTab}
             onClose={closeTab}
             onCloseOthers={closeOtherTabs}

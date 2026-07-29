@@ -57,6 +57,7 @@ import { QuickActions } from "@/components/chat/quick-actions"
 import type { ComposerInjectContent } from "@/components/chat/message-input"
 import { TileScrollContainer } from "@/components/conversations/tile-scroll-container"
 import { GroupSplitHandle } from "@/components/conversations/group-split-handle"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { TabBar } from "@/components/tabs/tab-bar"
 import { TabDragGhost } from "@/components/tabs/tab-drag-ghost"
 import { useSidebarContext } from "@/contexts/sidebar-context"
@@ -111,6 +112,7 @@ import {
   saveModePreference,
 } from "@/lib/selector-prefs-storage"
 import {
+  adoptLegacyNewConversationDraft,
   buildConversationDraftStorageKey,
   buildNewConversationDraftStorageKey,
   clearMessageInputDraft,
@@ -510,12 +512,21 @@ const ConversationTabView = memo(function ConversationTabView({
     !(selectedAgentNotInstalled && !hasPersistedConversation) &&
     !(hasPersistedConversation && detailError) &&
     !(hasPersistedConversation && acpLoadError)
+  // Draft composer text is keyed PER TAB while unbound: each split group has its
+  // own draft, and a single shared key made them overwrite each other. The key
+  // survives restarts with the tab id (persisted in the group blob).
   const draftStorageKey = useMemo(() => {
     if (dbConversationId != null) {
       return buildConversationDraftStorageKey(dbConversationId)
     }
-    return buildNewConversationDraftStorageKey()
-  }, [dbConversationId])
+    return buildNewConversationDraftStorageKey(tabId)
+  }, [dbConversationId, tabId])
+  // One-shot handover of the pre-per-tab shared draft, so an in-flight draft
+  // isn't stranded by the upgrade (no-ops for every later draft tab).
+  useEffect(() => {
+    if (dbConversationId != null) return
+    adoptLegacyNewConversationDraft(draftStorageKey)
+  }, [dbConversationId, draftStorageKey])
   // Use the per-tab workingDir (derived from the tab's own folderId by the
   // parent) rather than the active folder's path — otherwise switching tabs
   // briefly exposes the previous folder's path to the ACP auto-connect
@@ -1092,7 +1103,7 @@ const ConversationTabView = memo(function ConversationTabView({
               effectiveConversationId
             )
           }
-          clearMessageInputDraft(buildNewConversationDraftStorageKey())
+          clearMessageInputDraft(buildNewConversationDraftStorageKey(tabId))
           refreshConversations()
 
           // Now that the row exists, kick off the actual prompt with the
@@ -1122,7 +1133,7 @@ const ConversationTabView = memo(function ConversationTabView({
           const draftText = draft.displayText.trim()
           if (draftText) {
             saveMessageInputDraft(
-              buildNewConversationDraftStorageKey(),
+              buildNewConversationDraftStorageKey(tabId),
               draftText
             )
           }
@@ -1661,91 +1672,101 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     >
       {isWelcomeMode ? (
-        <div className="relative isolate flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto">
-          <div className="flex-1" />
-          <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-6 px-4 py-4">
-            <WelcomeHero />
-            <QuickActions
-              onSelect={handleQuickAction}
-              agentType={selectedAgent}
-            />
-            <div className="flex justify-center">
-              <AgentSelector
-                defaultAgentType={selectedAgent}
-                onSelect={handleAgentSelect}
-                onFallback={handleAgentFallback}
-                onAgentsLoaded={(agents) => {
-                  setAgentsLoaded(true)
-                  setUsableAgentCount(
-                    agents.filter((agent) => agent.enabled && agent.available)
-                      .length
-                  )
-                }}
-                onOpenAgentsSettings={handleOpenAgentsSettings}
-                disabled={isConnecting || dbConversationId != null}
+        // Same overlay scrollbar as the sidebar / file lists (os-theme-codeg)
+        // instead of the platform's native bar. `min-h-full` on the inner column
+        // keeps the original layout: content parked between two spacers, the
+        // page scrolling only once it outgrows the viewport.
+        <ScrollArea
+          className="relative isolate h-full min-h-0"
+          x="hidden"
+          y="scroll"
+        >
+          <div className="flex min-h-full flex-col">
+            <div className="flex-1" />
+            <div className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-6 px-4 py-4">
+              <WelcomeHero />
+              <QuickActions
+                onSelect={handleQuickAction}
+                agentType={selectedAgent}
               />
-            </div>
-            {composerBlockedMessage ? (
-              <div className="flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                <button
-                  type="button"
-                  onClick={handleOpenAgentsSettings}
-                  title={composerBlockedMessage}
-                  className="min-w-0 flex-1 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left transition-colors hover:text-destructive/80"
-                >
-                  {composerBlockedMessage}
-                </button>
-                {selectedAgentNotInstalled ? (
+              <div className="flex justify-center">
+                <AgentSelector
+                  defaultAgentType={selectedAgent}
+                  onSelect={handleAgentSelect}
+                  onFallback={handleAgentFallback}
+                  onAgentsLoaded={(agents) => {
+                    setAgentsLoaded(true)
+                    setUsableAgentCount(
+                      agents.filter((agent) => agent.enabled && agent.available)
+                        .length
+                    )
+                  }}
+                  onOpenAgentsSettings={handleOpenAgentsSettings}
+                  disabled={isConnecting || dbConversationId != null}
+                />
+              </div>
+              {composerBlockedMessage ? (
+                <div className="flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   <button
                     type="button"
-                    onClick={() => setComposerDiagnosticsOpen(true)}
-                    className="shrink-0 rounded border border-destructive/40 px-2 py-0.5 font-medium transition-colors hover:bg-destructive/10"
+                    onClick={handleOpenAgentsSettings}
+                    title={composerBlockedMessage}
+                    className="min-w-0 flex-1 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left transition-colors hover:text-destructive/80"
                   >
-                    {tDiag("button")}
+                    {composerBlockedMessage}
                   </button>
-                ) : null}
-              </div>
-            ) : null}
-            <ChatInput
-              // composerConnStatus (not connStatus): a chat draft mid-reconnect
-              // reads "connecting" until the connection's cwd matches, so the
-              // send affordance stays disabled until handleSend would accept it.
-              status={composerConnStatus}
-              promptCapabilities={conn.promptCapabilities}
-              defaultPath={workingDirForConnection}
-              agentName={getAgentLabel(selectedAgent)}
-              onFocus={handleFocus}
-              onSend={handleSend}
-              onCancel={handleCancel}
-              modes={connectionModes}
-              configOptions={connectionConfigOptions}
-              modeLoading={modeLoading}
-              configOptionsLoading={configOptionsLoading}
-              selectorsLoading={selectorsLoading}
-              selectedModeId={selectedModeId}
-              onModeChange={handleModeChange}
-              onConfigOptionChange={handleSetConfigOption}
-              agentType={selectedAgent}
-              availableCommands={connectionCommands}
-              attachmentTabId={tabId}
-              draftStorageKey={draftStorageKey}
-              isActive={isActive}
-              showActiveFlow={showActiveFlow}
-              onAddFeedback={
-                feedback.featureEnabled ? feedback.openDialog : undefined
-              }
-              feedbackAddDisabled={!feedback.canSubmit}
-              injectContent={quickActionInject}
-              onInjectConsumed={handleQuickActionConsumed}
-              flush
-              tall
-            />
+                  {selectedAgentNotInstalled ? (
+                    <button
+                      type="button"
+                      onClick={() => setComposerDiagnosticsOpen(true)}
+                      className="shrink-0 rounded border border-destructive/40 px-2 py-0.5 font-medium transition-colors hover:bg-destructive/10"
+                    >
+                      {tDiag("button")}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <ChatInput
+                // composerConnStatus (not connStatus): a chat draft mid-reconnect
+                // reads "connecting" until the connection's cwd matches, so the
+                // send affordance stays disabled until handleSend would accept it.
+                status={composerConnStatus}
+                promptCapabilities={conn.promptCapabilities}
+                defaultPath={workingDirForConnection}
+                agentName={getAgentLabel(selectedAgent)}
+                onFocus={handleFocus}
+                onSend={handleSend}
+                onCancel={handleCancel}
+                modes={connectionModes}
+                configOptions={connectionConfigOptions}
+                modeLoading={modeLoading}
+                configOptionsLoading={configOptionsLoading}
+                selectorsLoading={selectorsLoading}
+                selectedModeId={selectedModeId}
+                onModeChange={handleModeChange}
+                onConfigOptionChange={handleSetConfigOption}
+                agentType={selectedAgent}
+                availableCommands={connectionCommands}
+                attachmentTabId={tabId}
+                draftStorageKey={draftStorageKey}
+                isActive={isActive}
+                showActiveFlow={showActiveFlow}
+                onAddFeedback={
+                  feedback.featureEnabled ? feedback.openDialog : undefined
+                }
+                feedbackAddDisabled={!feedback.canSubmit}
+                injectContent={quickActionInject}
+                onInjectConsumed={handleQuickActionConsumed}
+                flush
+                tall
+              />
+            </div>
+            <div className="flex-1" />
+            <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6">
+              <WelcomeTip />
+            </div>
           </div>
-          <div className="flex-1" />
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-6">
-            <WelcomeTip />
-          </div>
-        </div>
+        </ScrollArea>
       ) : showDraftHeader ? (
         <div className="flex h-full min-h-0 flex-col">
           <div className="px-4 pt-3 pb-2">

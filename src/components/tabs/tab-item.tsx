@@ -1,11 +1,15 @@
 "use client"
 
-import { memo, useCallback, useMemo, useRef } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef } from "react"
 import { Reorder } from "motion/react"
 import type { PanInfo } from "motion/react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
+import {
+  acquireDragSelectionGuard,
+  releaseDragSelectionGuard,
+} from "@/lib/drag-selection-guard"
 import type { ConversationStatus } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import {
@@ -49,6 +53,11 @@ interface TabItemProps {
   /** This tab's group has ≥ 2 tabs, so "Split and Move" leaves a non-empty
    *  group behind (moving the only tab would just shift the group). */
   canSplitMove: boolean
+  /** This tab may change groups at all. False for DRAFTS: an unsent draft is the
+   *  group's own scratch slot (its composer text, folder and agent live with the
+   *  group), and every group can spawn one from its own strip. Only the move
+   *  affordances are hidden — the group-management items stay. */
+  canMoveToGroup: boolean
   moveTargets: TabMoveTarget[]
   /** Cross-group drag (split-group strips only): pointer tracking during the
    *  drag and the drop commit. Undefined = single-group strip, no cross-group
@@ -90,6 +99,7 @@ export const TabItem = memo(function TabItem({
   folderBranch,
   isSplit,
   canSplitMove,
+  canMoveToGroup,
   moveTargets,
   onTabDrag,
   onTabDragEnd,
@@ -137,11 +147,35 @@ export const TabItem = memo(function TabItem({
     onEnd: onTouchSortingEnd,
     onDragSettle: clearResidualStyles,
   })
-  // gestureHandlers carries its own onDragEnd (long-press cleanup + post-drag
-  // click suppression). The cross-group drop hook must COMPOSE with it, not
-  // clobber it via spread order.
-  const { onDragEnd: longPressDragEnd, ...restGestureHandlers } =
-    gestureHandlers
+  // gestureHandlers carries its own onDragStart/onDragEnd (long-press cleanup +
+  // post-drag click suppression). Everything below must COMPOSE with them, not
+  // clobber them via spread order.
+  const {
+    onDragStart: longPressDragStart,
+    onDragEnd: longPressDragEnd,
+    ...restGestureHandlers
+  } = gestureHandlers
+
+  // Every tab drag suppresses text selection document-wide — within-group
+  // sorting included, and on the unsplit strip too. Released on drag end and on
+  // unmount, so a tab closed (or reparented) mid-drag can't strand the guard.
+  const guardHeldRef = useRef(false)
+  const acquireGuard = useCallback(() => {
+    if (guardHeldRef.current) return
+    guardHeldRef.current = true
+    acquireDragSelectionGuard()
+  }, [])
+  const releaseGuard = useCallback(() => {
+    if (!guardHeldRef.current) return
+    guardHeldRef.current = false
+    releaseDragSelectionGuard()
+  }, [])
+  useEffect(() => releaseGuard, [releaseGuard])
+
+  const handleDragStart = useCallback(() => {
+    acquireGuard()
+    longPressDragStart()
+  }, [acquireGuard, longPressDragStart])
 
   const handleDragMove = useCallback(
     (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
@@ -152,10 +186,11 @@ export const TabItem = memo(function TabItem({
 
   const handleDragEnd = useCallback(
     (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+      releaseGuard()
       longPressDragEnd()
       onTabDragEnd?.(tab, event, info)
     },
-    [longPressDragEnd, onTabDragEnd, tab]
+    [releaseGuard, longPressDragEnd, onTabDragEnd, tab]
   )
 
   const handleClick = useCallback(() => {
@@ -210,6 +245,7 @@ export const TabItem = memo(function TabItem({
       dragListener={!isCoarsePointer}
       whileDrag={whileDrag}
       {...restGestureHandlers}
+      onDragStart={handleDragStart}
       onDrag={onTabDrag ? handleDragMove : undefined}
       onDragEnd={handleDragEnd}
       onLayoutAnimationComplete={clearResidualStyles}
@@ -368,34 +404,38 @@ export const TabItem = memo(function TabItem({
           </ContextMenuItem>
           {isSplit && (
             <>
-              {moveTargets.length === 1 ? (
-                <ContextMenuItem onSelect={handleMoveToOpposite}>
-                  {t("moveToOppositeGroup")}
-                </ContextMenuItem>
-              ) : (
-                <ContextMenuSub>
-                  <ContextMenuSubTrigger>
-                    {t("moveToGroup")}
-                  </ContextMenuSubTrigger>
-                  <ContextMenuSubContent>
-                    {moveTargets.map((target) => (
-                      <ContextMenuItem
-                        key={target.groupId}
-                        onSelect={() => onMoveToGroup(tab.id, target.groupId)}
-                      >
-                        <span className="shrink-0">
-                          {t("groupLabel", { index: target.index })}
-                        </span>
-                        {target.title && (
-                          <span className="max-w-40 truncate text-muted-foreground">
-                            {target.title}
+              {/* Move affordances only — `moveTargets` still drives the
+                  "Unsplit All" gate below, so a draft keeps every
+                  group-management item. */}
+              {canMoveToGroup &&
+                (moveTargets.length === 1 ? (
+                  <ContextMenuItem onSelect={handleMoveToOpposite}>
+                    {t("moveToOppositeGroup")}
+                  </ContextMenuItem>
+                ) : (
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>
+                      {t("moveToGroup")}
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {moveTargets.map((target) => (
+                        <ContextMenuItem
+                          key={target.groupId}
+                          onSelect={() => onMoveToGroup(tab.id, target.groupId)}
+                        >
+                          <span className="shrink-0">
+                            {t("groupLabel", { index: target.index })}
                           </span>
-                        )}
-                      </ContextMenuItem>
-                    ))}
-                  </ContextMenuSubContent>
-                </ContextMenuSub>
-              )}
+                          {target.title && (
+                            <span className="max-w-40 truncate text-muted-foreground">
+                              {target.title}
+                            </span>
+                          )}
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                ))}
               <ContextMenuItem onSelect={onToggleSplitOrientation}>
                 {t("changeSplitterOrientation")}
               </ContextMenuItem>

@@ -7,6 +7,7 @@ import {
   getAgentInitial,
   getCustomAgentDisplayVersion,
   isCustomAgentType,
+  isMonochromeSvgDataUrl,
   subscribeCustomAgentDisplay,
 } from "@/lib/custom-agents"
 import { cn } from "@/lib/utils"
@@ -463,6 +464,44 @@ export function AgentIcon({ agentType, className }: AgentIconProps) {
   )
 }
 
+/**
+ * A monochrome custom-agent mark, drawn as a CSS mask filled with
+ * `currentColor` so it follows the theme — registry marks are `currentColor`
+ * SVGs, which an `<img>` renders black and therefore invisible in dark mode.
+ * Pinned to `text-foreground` like the compiled-in mono marks; an explicit
+ * `text-*` in `className` still wins.
+ */
+export function MaskedMonoIcon({
+  iconUrl,
+  className,
+}: {
+  iconUrl: string
+  className?: string
+}) {
+  // Only base64 `data:` URLs reach here (see `isMonochromeSvgDataUrl`), whose
+  // alphabet is safe inside a CSS `url("…")` verbatim.
+  const mask = `url("${iconUrl}")`
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block shrink-0 bg-current text-foreground",
+        className
+      )}
+      style={{
+        WebkitMaskImage: mask,
+        WebkitMaskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        WebkitMaskSize: "contain",
+        maskImage: mask,
+        maskRepeat: "no-repeat",
+        maskPosition: "center",
+        maskSize: "contain",
+      }}
+    />
+  )
+}
+
 function CustomAgentIcon({ agentType, className }: AgentIconProps) {
   // The icon map is hydrated asynchronously from the agent list; re-render when
   // it lands so the mark replaces the placeholder initial on its own.
@@ -478,6 +517,10 @@ function CustomAgentIcon({ agentType, className }: AgentIconProps) {
   // without needing an effect to clear the flag.
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
   const failed = iconUrl !== null && failedUrl === iconUrl
+
+  if (iconUrl && isMonochromeSvgDataUrl(iconUrl)) {
+    return <MaskedMonoIcon iconUrl={iconUrl} className={className} />
+  }
 
   if (iconUrl && !failed) {
     return (

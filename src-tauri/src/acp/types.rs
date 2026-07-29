@@ -62,9 +62,22 @@ pub struct EventEnvelope {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AcpEvent {
     /// Agent returned text content (streaming delta)
-    ContentDelta { text: String },
+    ContentDelta {
+        text: String,
+        /// `_meta.claudeCode.parentToolUseId` of a subagent chunk
+        /// (claude-agent-acp ≥0.63 with the `subagent-transcript`
+        /// capability advertised). `None` = main-thread content. Skip-none
+        /// keeps the wire shape byte-identical for every other agent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
+    },
     /// Agent thinking/reasoning
-    Thinking { text: String },
+    Thinking {
+        text: String,
+        /// Same contract as `ContentDelta::parent_tool_use_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
+    },
     /// Raw SDK message forwarded from Claude ACP extension notification
     ClaudeSdkMessage {
         session_id: String,
@@ -656,6 +669,11 @@ pub struct AcpAgentInfo {
     pub description: String,
     pub available: bool,
     pub distribution_type: String,
+    /// For custom agents, where the definition came from (`registry` |
+    /// `manual`); `None` for built-ins. A manual definition's
+    /// `registry_version` is user-typed, so the version-status display shows
+    /// only the local version for those.
+    pub custom_source: Option<String>,
     pub enabled: bool,
     pub sort_order: i32,
     pub installed_version: Option<String>,
@@ -1139,6 +1157,7 @@ mod envelope_tests {
             connection_id: "conn-1".to_string(),
             payload: AcpEvent::ContentDelta {
                 text: "hello".to_string(),
+                parent_tool_use_id: None,
             },
         };
         let json = serde_json::to_value(&env).unwrap();

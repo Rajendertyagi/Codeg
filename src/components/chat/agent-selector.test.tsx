@@ -27,6 +27,7 @@ function agent(
     description: "",
     available: true,
     distribution_type: "system",
+    custom_source: null,
     enabled: true,
     sort_order: 0,
     installed_version: null,

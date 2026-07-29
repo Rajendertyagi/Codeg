@@ -9,6 +9,7 @@ import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import {
+  pruneOrphanDraftsOnce,
   runCorrectionOnce,
   runRecoveryOnce,
   useTabStore,
@@ -176,11 +177,15 @@ export function TabProvider({ children }: TabProviderProps) {
     runCorrectionOnce()
   }, [agentsFresh, tabsHydrated, foldersHydrated])
 
-  // Post-hydration recovery: a draft-only session hydrates to zero tabs; never
-  // leave the workspace blank.
+  // Once tabs AND folders are in: drop restored drafts whose folder is gone
+  // (hydration is deliberately folder-blind), then — only if that leaves nothing
+  // at all — recover a draft so the workspace is never blank. Order matters: an
+  // orphaned draft must not suppress recovery. State is re-read after the prune
+  // because the closure's `rawTabs` predates it.
   useEffect(() => {
     if (!tabsHydrated || !foldersHydrated) return
-    if (rawTabs.length > 0) return
+    pruneOrphanDraftsOnce()
+    if (useTabStore.getState().rawTabs.length > 0) return
     runRecoveryOnce()
   }, [tabsHydrated, foldersHydrated, rawTabs])
 

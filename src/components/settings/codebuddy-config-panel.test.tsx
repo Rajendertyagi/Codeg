@@ -21,6 +21,7 @@ function makeAgent(env: Record<string, string>): AcpAgentInfo {
     description: "",
     available: true,
     distribution_type: "npx",
+    custom_source: null,
     enabled: true,
     sort_order: 0,
     installed_version: null,

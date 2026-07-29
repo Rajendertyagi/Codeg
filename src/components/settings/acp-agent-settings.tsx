@@ -25,6 +25,7 @@ import {
   Loader2,
   Minus,
   PackagePlus,
+  Pencil,
   Plug,
   Plus,
   RefreshCw,
@@ -36,7 +37,11 @@ import {
 import { isDesktop, openUrl } from "@/lib/platform"
 import { getActiveRemoteConnectionId } from "@/lib/transport"
 import { toast } from "sonner"
-import { customAgentId, isCustomAgentType } from "@/lib/custom-agents"
+import {
+  customAgentId,
+  isCustomAgentType,
+  setCustomAgentDisplay,
+} from "@/lib/custom-agents"
 import { AgentIcon } from "@/components/agent-icon"
 import { AddCustomAgentDialog } from "@/components/settings/add-custom-agent-dialog"
 import { CustomAgentSkillsToggle } from "@/components/settings/custom-agent-skills-toggle"
@@ -294,6 +299,25 @@ interface UiCheckItem {
   fixes: UiFixAction[]
 }
 
+/**
+ * Fix kinds that run a package operation. Only one of these may run at a time
+ * across ALL agents, so while any of them is busy anywhere, every button whose
+ * kind is listed here is disabled — and dimmed, so the lockout is visible on
+ * agents other than the busy one.
+ */
+const PACKAGE_ACTION_FIX_KINDS: ReadonlyArray<UiFixAction["kind"]> = [
+  "download_binary",
+  "upgrade_binary",
+  "install_npx",
+  "upgrade_npx",
+  "uninstall_binary",
+  "uninstall_npx",
+  "redownload_binary",
+  "install_opencode_plugins",
+  "custom_install",
+  "install_uv",
+]
+
 type AcpTranslator = (
   key: string,
   values?: Record<string, string | number>
@@ -308,6 +332,23 @@ function acpText(
 ): string {
   if (!acpTranslator) return fallback
   return acpTranslator(key, values)
+}
+
+/**
+ * Publish a freshly fetched agent list into the custom-agent display map
+ * (names + icons behind `getAgentLabel` / `getAgentIconUrl`). The map is
+ * normally hydrated by `useAcpAgents`, but that hook lives in the workspace
+ * surfaces — the settings window fetches its own list, so without this every
+ * custom agent here falls back to the initial-letter glyph.
+ */
+function publishAgentDisplay(list: AcpAgentInfo[]): void {
+  setCustomAgentDisplay(
+    list.map((agent) => ({
+      agentType: agent.agent_type,
+      name: agent.name,
+      iconUrl: agent.icon_url,
+    }))
+  )
 }
 
 function statusTone(status: CheckStatus): string {
@@ -3325,11 +3366,17 @@ export function buildVersionCheck(
   const remoteVersion = agent.registry_version ?? "unknown"
   const localVersion =
     agent.installed_version ?? acpText("version.notInstalled", "Not installed")
-  const versionText = acpText(
-    "version.remoteLocal",
-    "Remote: {remoteVersion} · Local: {localVersion}",
-    { remoteVersion, localVersion }
-  )
+  // A manually written definition has no registry behind it — its stored
+  // version is whatever the user typed — so "Remote:" would be comparing
+  // against noise. Every message shows the local side alone.
+  const manualSource = agent.custom_source === "manual"
+  const versionText = manualSource
+    ? acpText("version.localOnly", "Local: {localVersion}", { localVersion })
+    : acpText(
+        "version.remoteLocal",
+        "Remote: {remoteVersion} · Local: {localVersion}",
+        { remoteVersion, localVersion }
+      )
   const installAction: RunningActionKind =
     agent.distribution_type === "binary" ? "download_binary" : "install_npx"
   const upgradeAction: RunningActionKind =
@@ -3421,6 +3468,27 @@ export function buildVersionCheck(
         {
           label: acpText("actions.install", "Install"),
           kind: installAction,
+          payload: agent.agent_type,
+        },
+      ]),
+    }
+  }
+
+  // Manual definitions stop here: installed is the whole story, and the
+  // registry-comparison branches below would only manufacture "upgrade
+  // available" noise against a user-typed version.
+  if (manualSource) {
+    return {
+      check_id: "version_status",
+      label: acpText("version.statusLabel", "Version Status"),
+      status: "pass",
+      message: acpText("version.localInstalled", "{versionText}. Installed.", {
+        versionText,
+      }),
+      fixes: withCustomInstall([
+        {
+          label: acpText("actions.uninstall", "Uninstall"),
+          kind: uninstallAction,
           payload: agent.agent_type,
         },
       ]),
@@ -4305,6 +4373,12 @@ export function AcpAgentSettings() {
   const [agents, setAgents] = useState<AcpAgentInfo[]>([])
   const [loadingAgents, setLoadingAgents] = useState(true)
   const [addCustomOpen, setAddCustomOpen] = useState(false)
+  // Registry id of the custom agent being edited; non-null renders the edit
+  // instance of the add dialog (its own instance so the two flows never share
+  // form state).
+  const [editCustomAgentId, setEditCustomAgentId] = useState<string | null>(
+    null
+  )
   const [removingCustomAgent, setRemovingCustomAgent] = useState(false)
   const [loadingError, setLoadingError] = useState<string | null>(null)
   const [checkState, setCheckState] = useState<
@@ -4327,6 +4401,8 @@ export function AcpAgentSettings() {
   >({})
   const [modelProviders, setModelProviders] = useState<ModelProviderInfo[]>([])
   const [uninstallConfirmAgent, setUninstallConfirmAgent] =
+    useState<AcpAgentInfo | null>(null)
+  const [removeConfirmAgent, setRemoveConfirmAgent] =
     useState<AcpAgentInfo | null>(null)
   const [customInstallAgent, setCustomInstallAgent] =
     useState<AcpAgentInfo | null>(null)
@@ -4444,6 +4520,7 @@ export function AcpAgentSettings() {
         listModelProviders().catch(() => [] as ModelProviderInfo[]),
       ])
       setAgents(next)
+      publishAgentDisplay(next)
       setModelProviders(providers)
       setDrafts((prev) => {
         const updated = { ...prev }
@@ -4830,6 +4907,7 @@ export function AcpAgentSettings() {
     try {
       const fresh = await acpListAgents()
       setAgents(fresh)
+      publishAgentDisplay(fresh)
       const grok = fresh.find((a) => a.agent_type === "grok")
       if (grok) {
         setDrafts((prev) => ({ ...prev, grok: buildAgentDraft(grok) }))
@@ -5060,13 +5138,15 @@ export function AcpAgentSettings() {
    * Remove a custom agent's definition. Recorded transcripts are kept — the
    * conversations that reference this agent are still readable afterwards,
    * they just cannot be resumed. Deleting them is a separate, explicit action.
+   *
+   * Confirmation happens in the `removeConfirmAgent` AlertDialog, never via
+   * `window.confirm`: the Tauri webview does not reliably block on the native
+   * prompt, so the deletion used to run before the user answered.
    */
   const handleRemoveCustomAgent = useCallback(
     async (agent: AcpAgentInfo) => {
       const id = customAgentId(agent.agent_type)
       if (!id) return
-      if (!window.confirm(t("customAgentRemoveConfirm", { name: agent.name })))
-        return
       setRemovingCustomAgent(true)
       try {
         await acpDeleteCustomAgent(id, false)
@@ -5225,6 +5305,18 @@ export function AcpAgentSettings() {
     await runPreflight(agent.agent_type)
   }
 
+  const confirmRemoveCustomAgent = useCallback(() => {
+    if (!removeConfirmAgent) return
+    const target = removeConfirmAgent
+    handleRemoveCustomAgent(target)
+      .catch((err) => {
+        console.error("[Settings] remove custom agent failed:", err)
+      })
+      .finally(() => {
+        setRemoveConfirmAgent(null)
+      })
+  }, [handleRemoveCustomAgent, removeConfirmAgent])
+
   const confirmUninstall = useCallback(() => {
     if (!uninstallConfirmAgent) return
     const target = uninstallConfirmAgent
@@ -5283,6 +5375,13 @@ export function AcpAgentSettings() {
     pendingOrderRef.current = reordered.map((agent) => agent.agent_type)
   }, [])
 
+  // One package operation at a time across ALL agents: while any
+  // install/upgrade/uninstall runs, every agent's package-action buttons are
+  // disabled — the busy flag is keyed per agent, so without this, selecting
+  // another agent in the list offers a second, concurrent install. The
+  // spinner stays precise via the per-agent `runningActionKind`.
+  const anyBinaryActionBusy = Object.values(busyBinaryAction).some(Boolean)
+
   const renderCheck = (agent: AcpAgentInfo, check: UiCheckItem) => {
     const checkKey = `${agent.agent_type}:${check.check_id}`
     const expanded = expandedChecks[checkKey] ?? check.status !== "pass"
@@ -5324,55 +5423,62 @@ export function AcpAgentSettings() {
             </div>
             {check.fixes.length > 0 && (
               <div className="flex flex-wrap gap-1.5 justify-end max-w-[220px] shrink-0">
-                {check.fixes.map((fix, index) => (
-                  <Button
-                    key={`${fix.label}-${index}`}
-                    size="xs"
-                    variant="outline"
-                    className="h-6 bg-muted/30 hover:bg-muted/50 disabled:bg-muted/30 disabled:opacity-100"
-                    disabled={
-                      ("disabled" in fix && fix.disabled === true) ||
-                      (Boolean(busyBinaryAction[agent.agent_type]) &&
-                        [
-                          "download_binary",
-                          "upgrade_binary",
-                          "install_npx",
-                          "upgrade_npx",
-                          "uninstall_binary",
-                          "uninstall_npx",
-                          "redownload_binary",
-                          "install_opencode_plugins",
-                          "custom_install",
-                          "install_uv",
-                        ].includes(fix.kind))
-                    }
-                    onClick={() => {
-                      handleFixAction(agent, fix).catch((err) => {
-                        console.error("[Settings] fix action failed:", err)
-                      })
-                    }}
-                  >
-                    {runningActionKind[agent.agent_type] === fix.kind ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : fix.kind === "download_binary" ||
-                      fix.kind === "install_npx" ||
-                      fix.kind === "install_uv" ? (
-                      <Download className="h-3 w-3" />
-                    ) : fix.kind === "upgrade_binary" ||
-                      fix.kind === "upgrade_npx" ||
-                      fix.kind === "redownload_binary" ? (
-                      <Wrench className="h-3 w-3" />
-                    ) : fix.kind === "uninstall_binary" ||
-                      fix.kind === "uninstall_npx" ? (
-                      <Trash2 className="h-3 w-3" />
-                    ) : fix.kind === "install_opencode_plugins" ? (
-                      <Download className="h-3 w-3" />
-                    ) : fix.kind === "custom_install" ? (
-                      <PackagePlus className="h-3 w-3" />
-                    ) : null}
-                    {fix.label}
-                  </Button>
-                ))}
+                {check.fixes.map((fix, index) => {
+                  const busyGated =
+                    anyBinaryActionBusy &&
+                    PACKAGE_ACTION_FIX_KINDS.includes(fix.kind)
+                  const running =
+                    runningActionKind[agent.agent_type] === fix.kind
+                  return (
+                    <Button
+                      key={`${fix.label}-${index}`}
+                      size="xs"
+                      variant="outline"
+                      className={cn(
+                        "h-6 bg-muted/30 hover:bg-muted/50",
+                        // Two disabled looks: while the global one-package-op-
+                        // at-a-time gate is busy, every parked package action
+                        // dims (backend-disabled or not) so the lockout shows
+                        // on agents other than the busy one; only the button
+                        // showing the spinner, and — when the gate is idle — a
+                        // backend-declared inapplicable fix, keep the full-
+                        // opacity chip look.
+                        busyGated && !running
+                          ? "disabled:opacity-50"
+                          : "disabled:bg-muted/30 disabled:opacity-100"
+                      )}
+                      disabled={
+                        ("disabled" in fix && fix.disabled === true) ||
+                        busyGated
+                      }
+                      onClick={() => {
+                        handleFixAction(agent, fix).catch((err) => {
+                          console.error("[Settings] fix action failed:", err)
+                        })
+                      }}
+                    >
+                      {runningActionKind[agent.agent_type] === fix.kind ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : fix.kind === "download_binary" ||
+                        fix.kind === "install_npx" ||
+                        fix.kind === "install_uv" ? (
+                        <Download className="h-3 w-3" />
+                      ) : fix.kind === "upgrade_binary" ||
+                        fix.kind === "upgrade_npx" ||
+                        fix.kind === "redownload_binary" ? (
+                        <Wrench className="h-3 w-3" />
+                      ) : fix.kind === "uninstall_binary" ||
+                        fix.kind === "uninstall_npx" ? (
+                        <Trash2 className="h-3 w-3" />
+                      ) : fix.kind === "install_opencode_plugins" ? (
+                        <Download className="h-3 w-3" />
+                      ) : fix.kind === "custom_install" ? (
+                        <PackagePlus className="h-3 w-3" />
+                      ) : null}
+                      {fix.label}
+                    </Button>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -7597,6 +7703,19 @@ export function AcpAgentSettings() {
         onOpenChange={setAddCustomOpen}
         onAdded={() => void refreshAgents()}
       />
+
+      {/* Keyed by the id so switching agents never leaks a previous form. */}
+      {editCustomAgentId !== null && (
+        <AddCustomAgentDialog
+          key={editCustomAgentId}
+          open
+          editRegistryId={editCustomAgentId}
+          onOpenChange={(next) => {
+            if (!next) setEditCustomAgentId(null)
+          }}
+          onAdded={() => void refreshAgents()}
+        />
+      )}
 
       {loadingError && (
         <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
@@ -11018,6 +11137,28 @@ supports_websockets = true`}
                   // surface — plus the skills declaration and removing the
                   // agent.
                   <>
+                    <div className="space-y-3 rounded-md border bg-muted/10 p-3">
+                      <div>
+                        <label className="text-xs font-medium">
+                          {t("customAgentEdit")}
+                        </label>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {t("customAgentEditHint")}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setEditCustomAgentId(
+                            customAgentId(selectedAgent.agent_type)
+                          )
+                        }
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        {t("customAgentEdit")}
+                      </Button>
+                    </div>
                     <CustomAgentSkillsToggle
                       registryId={customAgentId(selectedAgent.agent_type) ?? ""}
                     />
@@ -11035,9 +11176,7 @@ supports_websockets = true`}
                         size="sm"
                         className="text-destructive hover:text-destructive"
                         disabled={removingCustomAgent}
-                        onClick={() =>
-                          void handleRemoveCustomAgent(selectedAgent)
-                        }
+                        onClick={() => setRemoveConfirmAgent(selectedAgent)}
                       >
                         {removingCustomAgent ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -11742,6 +11881,41 @@ supports_websockets = true`}
                   {t("actions.confirmUninstall")}
                 </>
               )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(removeConfirmAgent)}
+        onOpenChange={(open) => {
+          if (!open) setRemoveConfirmAgent(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("customAgentRemove")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("customAgentRemoveConfirm", {
+                name: removeConfirmAgent?.name ?? "Agent",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removingCustomAgent}>
+              {t("actions.cancel")}
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={confirmRemoveCustomAgent}
+              disabled={removingCustomAgent}
+            >
+              {removingCustomAgent ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              {t("customAgentRemove")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

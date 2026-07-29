@@ -44,6 +44,7 @@ function makeAgent(agentType: AgentType, sortOrder: number): AcpAgentInfo {
     description: "",
     available: true,
     distribution_type: "npm",
+    custom_source: null,
     enabled: true,
     sort_order: sortOrder,
     installed_version: null,

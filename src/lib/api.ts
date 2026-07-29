@@ -798,9 +798,18 @@ export interface CustomAgentInfo {
   iconUrl: string | null
   /**
    * User declaration that the agent reads the shared `.agents/skills` store;
-   * gates the skills matrices.
+   * with `skillsDir`, gates the skills matrices.
    */
   skillsSharedStore: boolean
+  /** The agent's own skills directory (absolute), when declared. */
+  skillsDir: string | null
+  /**
+   * "registry" | "manual". Every whole-definition re-save must send it back,
+   * or the definition's provenance would reset.
+   */
+  source: string
+  /** Optional command that prints the locally installed version. */
+  versionProbe: string | null
   /** False when the definition cannot launch here (e.g. no build for this OS). */
   launchable: boolean
   problem: string | null
@@ -838,6 +847,14 @@ export async function acpSaveCustomAgent(params: {
   spec: CustomAgentSpec
   iconUrl?: string | null
   skillsSharedStore?: boolean
+  skillsDir?: string | null
+  /**
+   * "registry" | "manual". Omitted = the backend keeps the stored row's
+   * provenance (or "manual" for a new row).
+   */
+  source?: string
+  /** Optional version-probe command; full-replace like the skills fields. */
+  versionProbe?: string | null
 }): Promise<void> {
   return getTransport().call("acp_save_custom_agent", { params })
 }
@@ -867,6 +884,15 @@ export async function acpAddRegistryAgent(
     registryId,
     distributionKind,
   })
+}
+
+/**
+ * The platform key (`darwin-aarch64`, …) binary distributions are keyed by on
+ * the machine that runs installs — the server in server mode, hence a backend
+ * question rather than a userAgent sniff.
+ */
+export async function acpCurrentPlatform(): Promise<string> {
+  return getTransport().call("acp_current_platform", {})
 }
 
 export async function codexRequestDeviceCode(): Promise<{

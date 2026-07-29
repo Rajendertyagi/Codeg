@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  buildSpecTemplate,
   parseManualSpec,
   specKinds,
 } from "@/components/settings/add-custom-agent-dialog"
@@ -56,6 +57,58 @@ describe("parseManualSpec", () => {
     expect(parseManualSpec('{"something": "else"}').error).toBe(
       "noDistribution"
     )
+  })
+
+  it("rejects input whose distribution publishes no channel", () => {
+    // Without an explicit error these parse "successfully" and the form just
+    // sits unready with no explanation.
+    expect(parseManualSpec('{"id": "x", "distribution": {}}').error).toBe(
+      "noDistribution"
+    )
+    expect(
+      parseManualSpec('{"id": "x", "distribution": {"binary": {}}}').error
+    ).toBe("noDistribution")
+    expect(parseManualSpec('{"binary": {}}').error).toBe("noDistribution")
+  })
+})
+
+describe("buildSpecTemplate", () => {
+  it("every template parses back to exactly its own channel", () => {
+    for (const kind of ["npx", "uvx", "binary"] as const) {
+      const result = parseManualSpec(
+        buildSpecTemplate(kind, "darwin-aarch64") ?? ""
+      )
+      expect(result.error).toBeUndefined()
+      expect(specKinds(result.spec ?? {})).toEqual([kind])
+    }
+  })
+
+  it("keys the binary example by the platform it was asked for", () => {
+    const result = parseManualSpec(
+      buildSpecTemplate("binary", "windows-x86_64") ?? ""
+    )
+    const entry = result.spec?.binary?.["windows-x86_64"]
+    expect(entry?.archive).toContain("windows-x86_64")
+    expect(entry?.cmd).toBeTruthy()
+  })
+
+  it("refuses a binary template until the platform is known", () => {
+    // Minting a guessed key (say linux-x86_64 on a mac) would read as
+    // authoritative and then fail validation at save; the button stays gated
+    // and the builder returns nothing rather than something wrong.
+    expect(buildSpecTemplate("binary", null)).toBeNull()
+    // The package channels carry no platform and stay available regardless.
+    expect(buildSpecTemplate("npx", null)).not.toBeNull()
+    expect(buildSpecTemplate("uvx", null)).not.toBeNull()
+  })
+
+  it("npx and uvx templates teach the cmd field", () => {
+    expect(
+      parseManualSpec(buildSpecTemplate("npx", null) ?? "").spec?.npx?.cmd
+    ).toBeTruthy()
+    expect(
+      parseManualSpec(buildSpecTemplate("uvx", null) ?? "").spec?.uvx?.cmd
+    ).toBeTruthy()
   })
 })
 

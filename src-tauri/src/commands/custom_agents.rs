@@ -41,6 +41,14 @@ pub struct CustomAgentInfo {
     /// Mirrors [`CustomAgentDef::skills_shared_store`] so the edit form can
     /// prefill the declaration.
     pub skills_shared_store: bool,
+    /// Mirrors [`CustomAgentDef::skills_dir`] — the agent's own skills
+    /// directory, already normalized to an absolute path.
+    pub skills_dir: Option<String>,
+    /// `registry` | `manual`. The edit form and every whole-definition
+    /// re-save must send it back, or provenance would reset.
+    pub source: String,
+    /// Mirrors [`CustomAgentDef::version_probe`] for the edit form.
+    pub version_probe: Option<String>,
     /// False when the stored definition cannot produce launch metadata (e.g.
     /// a binary-only agent with no release for this platform). The row still
     /// lists, with the reason, instead of vanishing.
@@ -66,6 +74,9 @@ fn info_from_def(def: &CustomAgentDef) -> CustomAgentInfo {
         spec: def.spec.clone(),
         icon_url: def.icon_url.clone(),
         skills_shared_store: def.skills_shared_store,
+        skills_dir: def.skills_dir.clone(),
+        source: def.source.as_str().to_string(),
+        version_probe: def.version_probe.clone(),
         launchable: problem.is_none(),
         problem,
     }
@@ -85,6 +96,10 @@ pub async fn acp_save_custom_agent_core(
 ) -> Result<(), AcpError> {
     let mut def = def;
     def.icon_url = normalize_icon(def.icon_url.take()).await;
+    // Both runtimes save through here, so this is where the dedicated skills
+    // directory is pinned down to an absolute path (or rejected) — the skills
+    // surfaces read it back without a workspace to resolve against.
+    def.skills_dir = normalize_skills_dir(def.skills_dir.take())?;
     custom_agent_service::upsert(&db.conn, &def)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
@@ -118,10 +133,6 @@ pub async fn acp_delete_custom_agent_core(
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
 
-    // MCP assignments are configuration that belongs to the agent — always
-    // dropped with it, unlike the transcripts below (history, opt-in).
-    crate::commands::mcp::remove_custom_agent_mcp_store(&registry_id);
-
     // Conversations keep their `custom:<id>` rows either way; dropping the
     // transcripts is what actually loses history, so it is opt-in.
     if delete_transcripts {
@@ -150,6 +161,14 @@ pub async fn acp_fetch_registry_catalog_core(
     remote_registry::fetch_catalog(&installed)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))
+}
+
+/// The platform key (`darwin-aarch64`, …) binary distributions are keyed by on
+/// this machine. The manual add form asks for it to prefill a binary template
+/// that actually applies — and in server mode "this machine" is the server,
+/// where installs run, so the answer has to come from the backend.
+pub fn acp_current_platform_core() -> String {
+    registry::current_platform().to_string()
 }
 
 /// Add an agent straight from the ACP registry by id.
@@ -210,6 +229,42 @@ pub async fn acp_add_registry_agent_core(
     // The registry's `icon` rides along on `def`; `acp_save_custom_agent_core`
     // inlines it.
     acp_save_custom_agent_core(def, db, emitter).await
+}
+
+/// Pin a declared skills directory down to a stored, absolute path.
+///
+/// Blank input reads as "not declared". A leading `~` is expanded so the form
+/// accepts the spelling every skills doc uses; anything still relative after
+/// that is rejected rather than silently resolved against whatever the
+/// process's working directory happens to be. Deliberately NOT part of
+/// `custom_registry::validate` — a bad skills path must never make the agent
+/// itself unlaunchable (hydrate skips rows that fail validation).
+fn normalize_skills_dir(raw: Option<String>) -> Result<Option<String>, AcpError> {
+    let Some(raw) = raw else { return Ok(None) };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let expanded = expand_home(trimmed);
+    if !expanded.is_absolute() {
+        return Err(AcpError::protocol(format!(
+            "skills directory must be an absolute path (got {trimmed:?})"
+        )));
+    }
+    Ok(Some(expanded.to_string_lossy().into_owned()))
+}
+
+/// `~` / `~/…` (and the `~\…` Windows spelling) resolved against the home
+/// directory; anything else passes through untouched.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    let home = || dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    if path == "~" {
+        return home();
+    }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        return home().join(rest);
+    }
+    std::path::PathBuf::from(path)
 }
 
 /// Largest icon codeg will inline. Registry marks are 650 B–5 KB SVGs, so this
@@ -410,6 +465,22 @@ pub struct SaveCustomAgentParams {
     /// older frontends keep the agent out of the skills surfaces.
     #[serde(default)]
     pub skills_shared_store: bool,
+    /// See [`CustomAgentDef::skills_dir`]. Normalized (and possibly rejected)
+    /// by the save path, so the form can send what the user typed.
+    #[serde(default)]
+    pub skills_dir: Option<String>,
+    /// See [`CustomAgentDef::source`]. `None` preserves the stored row's value
+    /// (or `manual` for a brand-new row) — a caller that doesn't know the
+    /// provenance can never flip it. Resolved in
+    /// [`acp_save_custom_agent_params_core`], the only params path with DB
+    /// access.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// See [`CustomAgentDef::version_probe`]. Full-replace like the skills
+    /// fields: every save carries the whole declaration, so a save that
+    /// omits it clears it.
+    #[serde(default)]
+    pub version_probe: Option<String>,
 }
 
 impl SaveCustomAgentParams {
@@ -430,8 +501,43 @@ impl SaveCustomAgentParams {
             spec: self.spec,
             icon_url: self.icon_url,
             skills_shared_store: self.skills_shared_store,
+            skills_dir: self.skills_dir,
+            // Placeholder — `acp_save_custom_agent_params_core` resolves the
+            // real value (params override / stored row / Manual).
+            source: Default::default(),
+            version_probe: self
+                .version_probe
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
         })
     }
+}
+
+/// Save through the params surface (both runtimes' `acp_save_custom_agent`).
+///
+/// Split from [`acp_save_custom_agent_core`] because resolving the definition
+/// source needs the DB: an absent `params.source` keeps the stored row's
+/// provenance (a registry-added agent edited through a partial caller must not
+/// silently become "manual"), and only a genuinely new row defaults to
+/// `Manual` — the params surface is the manual form.
+pub async fn acp_save_custom_agent_params_core(
+    params: SaveCustomAgentParams,
+    db: &AppDatabase,
+    emitter: &EventEmitter,
+) -> Result<(), AcpError> {
+    let source = match params.source.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => custom_registry::CustomAgentSource::parse(raw),
+        None => custom_agent_service::get(&db.conn, params.registry_id.trim())
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?
+            .map(|row| custom_registry::CustomAgentSource::parse(&row.source))
+            .unwrap_or(custom_registry::CustomAgentSource::Manual),
+    };
+    let mut def = params.into_def()?;
+    def.source = source;
+    acp_save_custom_agent_core(def, db, emitter).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -450,7 +556,7 @@ pub async fn acp_save_custom_agent(
     app: tauri::AppHandle,
 ) -> Result<(), AcpError> {
     let emitter = EventEmitter::Tauri(app);
-    acp_save_custom_agent_core(params.into_def()?, &db, &emitter).await
+    acp_save_custom_agent_params_core(params, &db, &emitter).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -471,6 +577,12 @@ pub async fn acp_fetch_registry_catalog(
     db: State<'_, AppDatabase>,
 ) -> Result<Vec<RegistryCatalogAgent>, AcpError> {
     acp_fetch_registry_catalog_core(&db).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub fn acp_current_platform() -> String {
+    acp_current_platform_core()
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -513,6 +625,9 @@ mod tests {
             spec: CustomAgentSpec::default(),
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         };
         assert!(params.into_def().is_err());
     }
@@ -528,6 +643,9 @@ mod tests {
             spec: CustomAgentSpec::default(),
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         };
         assert_eq!(params.into_def().unwrap().registry_id, "goose");
     }
@@ -557,10 +675,53 @@ mod tests {
             },
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         };
         let info = info_from_def(&def);
         assert!(!info.launchable);
         assert!(info.problem.unwrap().contains("no binary release"));
+    }
+
+    #[test]
+    fn skills_dir_normalization_expands_home_and_rejects_relative_paths() {
+        // HOME is pinned so a parallel test rewriting it cannot flip the
+        // expansion mid-test; expectations still derive from `dirs::home_dir()`
+        // itself, which ignores $HOME on Windows.
+        temp_env::with_var("HOME", Some("/tmp/codeg-skills-home"), || {
+            let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+
+            // Blank input reads as "not declared".
+            assert_eq!(normalize_skills_dir(None).unwrap(), None);
+            assert_eq!(normalize_skills_dir(Some("   ".into())).unwrap(), None);
+
+            // `~` spellings land on the home directory.
+            assert_eq!(
+                normalize_skills_dir(Some("~/qwen/skills".into())).unwrap(),
+                Some(home.join("qwen/skills").to_string_lossy().into_owned())
+            );
+            assert_eq!(
+                normalize_skills_dir(Some("~".into())).unwrap(),
+                Some(home.to_string_lossy().into_owned())
+            );
+
+            // An absolute path passes through, trimmed.
+            let absolute = home.join("elsewhere");
+            assert_eq!(
+                normalize_skills_dir(Some(format!("  {}  ", absolute.display()))).unwrap(),
+                Some(absolute.to_string_lossy().into_owned())
+            );
+
+            // Relative paths are rejected rather than silently resolved
+            // against whatever the process's working directory happens to be.
+            for bad in ["skills", "./skills", "../skills", "~elsewhere/skills"] {
+                assert!(
+                    normalize_skills_dir(Some(bad.into())).is_err(),
+                    "{bad:?} must be rejected"
+                );
+            }
+        });
     }
 
     #[tokio::test]
@@ -670,6 +831,9 @@ mod tests {
             },
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         };
         let info = info_from_def(&def);
         assert!(info.launchable);

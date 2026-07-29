@@ -1155,11 +1155,7 @@ pub async fn acp_save_custom_agent(
     Json(body): Json<AcpSaveCustomAgentBody>,
 ) -> Result<Json<()>, AppCommandError> {
     let emitter = state.emitter.clone();
-    let def = body
-        .params
-        .into_def()
-        .map_err(|e| AppCommandError::configuration_invalid(e.to_string()))?;
-    custom_agent_commands::acp_save_custom_agent_core(def, &state.db, &emitter)
+    custom_agent_commands::acp_save_custom_agent_params_core(body.params, &state.db, &emitter)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
@@ -1220,4 +1216,8 @@ pub async fn acp_add_registry_agent(
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
     Ok(Json(()))
+}
+
+pub async fn acp_current_platform() -> Json<String> {
+    Json(custom_agent_commands::acp_current_platform_core())
 }

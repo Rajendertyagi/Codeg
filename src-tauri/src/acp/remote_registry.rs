@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
-use crate::acp::custom_registry::{CustomAgentDef, CustomAgentSpec, CustomDistributionKind};
+use crate::acp::custom_registry::{
+    CustomAgentDef, CustomAgentSource, CustomAgentSpec, CustomDistributionKind,
+};
 use crate::acp::registry;
 use crate::app_error::AppCommandError;
 use crate::models::agent::AgentType;
@@ -324,6 +326,11 @@ pub fn catalog_entry_to_def(
         // The ACP registry catalog does not describe skill directories; the
         // user opts in from the edit form after adding.
         skills_shared_store: false,
+        skills_dir: None,
+        source: CustomAgentSource::Registry,
+        // No probe declared by the registry; the system-install version probe
+        // falls back to running the command with `--version`.
+        version_probe: None,
     })
 }
 

@@ -1448,6 +1448,9 @@ mod tests {
             },
             icon_url: None,
             skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
         };
         let agent = crate::models::agent::AgentType::custom("office-pack-agent").unwrap();
 
