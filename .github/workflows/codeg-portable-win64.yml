@@ -54,7 +54,7 @@ jobs:
           cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force -Path binaries | Out-Null
           Copy-Item "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" `
-            "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
+            "binaries/codeg-mcp.exe" -Force
 
       - name: Patch tauri.conf.json (skip installer, skip beforeBuildCommand)
         shell: pwsh
@@ -78,7 +78,7 @@ jobs:
           $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
 
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
-          Copy-Item -Path "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Destination $dir -Force
+          Copy-Item -Path "src-tauri/binaries/codeg-mcp.exe" -Destination $dir -Force
 
           if (Test-Path "out") {
             New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
