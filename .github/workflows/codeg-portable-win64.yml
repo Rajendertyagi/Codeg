@@ -69,19 +69,6 @@ jobs:
         shell: pwsh
         run: pnpm tauri build --target x86_64-pc-windows-msvc
 
-      - name: Create portable launcher
-        shell: pwsh
-        run: |
-          $bat = @'
-          @echo off
-          cd /d "%~dp0"
-          set "CODEG_HOME=%~dp0data"
-          set "CODEG_DATA_DIR=%~dp0data"
-          set "CODEG_STATIC_DIR=%~dp0web"
-          start "" "%~dp0codeg.exe"
-          '@
-          $bat | Out-File -FilePath start-codeg-portable.bat -Encoding ascii
-
       - name: Assemble portable directory
         shell: pwsh
         run: |
@@ -97,8 +84,6 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
             Copy-Item -Recurse -Path "out/*" -Destination "$dir/web" -Force
           }
-
-          Copy-Item -Path "start-codeg-portable.bat" -Destination $dir -Force
 
           Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item -Path $_.FullName -Destination $dir -Force }
