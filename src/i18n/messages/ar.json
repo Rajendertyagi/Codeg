@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value}ث",
         "toolUseCount": "{count} استخدام للأداة"
       },
+      "jsonTree": {
+        "viewRaw": "عرض JSON الخام",
+        "viewTree": "عرض الشجرة",
+        "fields": "{count, plural, zero {لا حقول} one {حقل واحد} two {حقلان} few {# حقول} many {# حقلًا} other {# حقل}}",
+        "items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}"
+      },
       "tool": {
         "parameters": "المعلمات",
         "error": "خطأ",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} ملف إضافي",
         "timeoutMs": "المهلة: {timeout}ms",
         "backgroundTrue": "الخلفية: true",
+        "scriptToolCalls": "{count, plural, zero {صفر استدعاء أداة} one {استدعاء أداة واحد} two {استدعاءا أداة} few {# استدعاءات أداة} many {# استدعاء أداة} other {# استدعاء أداة}}",
         "offset": "الإزاحة: {offset}",
         "limit": "الحد: {limit}",
         "pages": "الصفحات: {pages}",
         "mode": "الوضع: {mode}",
         "cell": "الخلية: {cell}",
+        "shellSession": "الجلسة {id}",
         "pathLabel": "المسار:",
         "globLabel": "نمط glob:",
         "typeLabel": "النوع:",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "تحرير",
           "command": "أمر",
+          "script": "سكربت",
+          "waitCommand": "انتظار {command}",
+          "waitCell": "انتظار الجلسة {id}",
+          "terminateCommand": "إنهاء {command}",
+          "terminateCell": "إنهاء الجلسة {id}",
+          "stdinChars": "إدخال {chars}",
           "todoWrite": "TodoWrite (تحديث المهام)",
           "read": "قراءة",
           "write": "كتابة",

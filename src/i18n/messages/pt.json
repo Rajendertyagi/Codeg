@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value} s",
         "toolUseCount": "{count, plural, one {# uso de ferramenta} other {# usos de ferramenta}}"
       },
+      "jsonTree": {
+        "viewRaw": "Ver JSON bruto",
+        "viewTree": "Ver árvore",
+        "fields": "{count, plural, one {# campo} other {# campos}}",
+        "items": "{count, plural, one {# item} other {# itens}}"
+      },
       "tool": {
         "parameters": "Parâmetros",
         "error": "Erro",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} arquivos a mais",
         "timeoutMs": "Tempo limite: {timeout}ms",
         "backgroundTrue": "Segundo plano: true",
+        "scriptToolCalls": "{count, plural, one {# chamada de ferramenta} other {# chamadas de ferramenta}}",
         "offset": "Deslocamento: {offset}",
         "limit": "Limite: {limit}",
         "pages": "Páginas: {pages}",
         "mode": "Modo: {mode}",
         "cell": "Célula: {cell}",
+        "shellSession": "Sessão {id}",
         "pathLabel": "Caminho:",
         "globLabel": "Padrão glob:",
         "typeLabel": "Tipo:",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "Editar",
           "command": "Comando",
+          "script": "Script",
+          "waitCommand": "Aguardar {command}",
+          "waitCell": "Aguardar sessão {id}",
+          "terminateCommand": "Encerrar {command}",
+          "terminateCell": "Encerrar sessão {id}",
+          "stdinChars": "Entrada {chars}",
           "todoWrite": "TodoWrite (atualização de tarefas)",
           "read": "Ler",
           "write": "Escrever",

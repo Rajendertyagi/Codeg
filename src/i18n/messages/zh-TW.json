@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value} 秒",
         "toolUseCount": "{count} 次工具呼叫"
       },
+      "jsonTree": {
+        "viewRaw": "檢視原始 JSON",
+        "viewTree": "檢視樹狀檢視",
+        "fields": "{count} 個欄位",
+        "items": "{count} 項"
+      },
       "tool": {
         "parameters": "參數",
         "error": "錯誤",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} 個更多檔案",
         "timeoutMs": "逾時：{timeout}ms",
         "backgroundTrue": "背景：true",
+        "scriptToolCalls": "呼叫 {count} 個工具",
         "offset": "位移：{offset}",
         "limit": "限制：{limit}",
         "pages": "頁碼：{pages}",
         "mode": "模式：{mode}",
         "cell": "儲存格：{cell}",
+        "shellSession": "工作階段 {id}",
         "pathLabel": "路徑：",
         "globLabel": "Glob：",
         "typeLabel": "類型：",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "編輯",
           "command": "命令",
+          "script": "腳本",
+          "waitCommand": "等待 {command}",
+          "waitCell": "等待工作階段 {id}",
+          "terminateCommand": "終止 {command}",
+          "terminateCell": "終止工作階段 {id}",
+          "stdinChars": "輸入 {chars}",
           "todoWrite": "待辦",
           "read": "讀取",
           "write": "寫入",

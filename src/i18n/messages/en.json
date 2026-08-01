@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value}s",
         "toolUseCount": "{count} tool {count, plural, one {use} other {uses}}"
       },
+      "jsonTree": {
+        "viewRaw": "Show raw JSON",
+        "viewTree": "Show tree",
+        "fields": "{count, plural, one {# field} other {# fields}}",
+        "items": "{count, plural, one {# item} other {# items}}"
+      },
       "tool": {
         "parameters": "Parameters",
         "error": "Error",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} more files",
         "timeoutMs": "Timeout: {timeout}ms",
         "backgroundTrue": "Background: true",
+        "scriptToolCalls": "{count, plural, one {# tool call} other {# tool calls}}",
         "offset": "Offset: {offset}",
         "limit": "Limit: {limit}",
         "pages": "Pages: {pages}",
         "mode": "Mode: {mode}",
         "cell": "Cell: {cell}",
+        "shellSession": "Session {id}",
         "pathLabel": "Path:",
         "globLabel": "Glob:",
         "typeLabel": "Type:",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "Edit",
           "command": "Command",
+          "script": "Script",
+          "waitCommand": "Wait {command}",
+          "waitCell": "Wait cell {id}",
+          "terminateCommand": "Terminate {command}",
+          "terminateCell": "Terminate cell {id}",
+          "stdinChars": "Stdin {chars}",
           "todoWrite": "TodoWrite",
           "read": "Read",
           "write": "Write",

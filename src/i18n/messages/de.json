@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value} Sek",
         "toolUseCount": "{count, plural, one {# Tool-Aufruf} other {# Tool-Aufrufe}}"
       },
+      "jsonTree": {
+        "viewRaw": "Rohes JSON anzeigen",
+        "viewTree": "Baum anzeigen",
+        "fields": "{count, plural, one {# Feld} other {# Felder}}",
+        "items": "{count, plural, one {# Eintrag} other {# Einträge}}"
+      },
       "tool": {
         "parameters": "Parameter",
         "error": "Fehler",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} weitere Dateien",
         "timeoutMs": "Zeitlimit: {timeout}ms",
         "backgroundTrue": "Hintergrund: true",
+        "scriptToolCalls": "{count, plural, one {# Tool-Aufruf} other {# Tool-Aufrufe}}",
         "offset": "Versatz: {offset}",
         "limit": "Grenze: {limit}",
         "pages": "Seiten: {pages}",
         "mode": "Modus: {mode}",
         "cell": "Zelle: {cell}",
+        "shellSession": "Sitzung {id}",
         "pathLabel": "Pfad:",
         "globLabel": "Glob-Muster:",
         "typeLabel": "Typ:",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "Bearbeiten",
           "command": "Befehl",
+          "script": "Skript",
+          "waitCommand": "Warten {command}",
+          "waitCell": "Sitzung {id} abwarten",
+          "terminateCommand": "Beenden {command}",
+          "terminateCell": "Sitzung {id} beenden",
+          "stdinChars": "Eingabe {chars}",
           "todoWrite": "TodoWrite (Aufgaben aktualisieren)",
           "read": "Lesen",
           "write": "Schreiben",

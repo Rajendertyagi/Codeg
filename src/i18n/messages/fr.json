@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value} s",
         "toolUseCount": "{count, plural, one {# appel d'outil} other {# appels d'outil}}"
       },
+      "jsonTree": {
+        "viewRaw": "Afficher le JSON brut",
+        "viewTree": "Afficher l'arborescence",
+        "fields": "{count, plural, one {# champ} other {# champs}}",
+        "items": "{count, plural, one {# élément} other {# éléments}}"
+      },
       "tool": {
         "parameters": "Paramètres",
         "error": "Erreur",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} fichiers supplémentaires",
         "timeoutMs": "Délai d'expiration : {timeout}ms",
         "backgroundTrue": "Arrière-plan : true",
+        "scriptToolCalls": "{count, plural, one {# appel d'outil} other {# appels d'outil}}",
         "offset": "Décalage : {offset}",
         "limit": "Limite : {limit}",
         "pages": "Pages : {pages}",
         "mode": "Mode : {mode}",
         "cell": "Cellule : {cell}",
+        "shellSession": "Session {id}",
         "pathLabel": "Chemin :",
         "globLabel": "Glob :",
         "typeLabel": "Type :",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "Modifier",
           "command": "Commande",
+          "script": "Script",
+          "waitCommand": "Attendre {command}",
+          "waitCell": "Attendre la session {id}",
+          "terminateCommand": "Terminer {command}",
+          "terminateCell": "Terminer la session {id}",
+          "stdinChars": "Entrée {chars}",
           "todoWrite": "TodoWrite (mise à jour des tâches)",
           "read": "Lire",
           "write": "Écrire",

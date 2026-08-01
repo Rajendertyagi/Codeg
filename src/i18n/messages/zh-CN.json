@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value} 秒",
         "toolUseCount": "{count} 次工具调用"
       },
+      "jsonTree": {
+        "viewRaw": "查看原始 JSON",
+        "viewTree": "查看树状视图",
+        "fields": "{count} 个字段",
+        "items": "{count} 项"
+      },
       "tool": {
         "parameters": "参数",
         "error": "错误",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} 个更多文件",
         "timeoutMs": "超时：{timeout}ms",
         "backgroundTrue": "后台：true",
+        "scriptToolCalls": "调用 {count} 个工具",
         "offset": "偏移：{offset}",
         "limit": "限制：{limit}",
         "pages": "页码：{pages}",
         "mode": "模式：{mode}",
         "cell": "单元：{cell}",
+        "shellSession": "会话 {id}",
         "pathLabel": "路径：",
         "globLabel": "Glob：",
         "typeLabel": "类型：",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "编辑",
           "command": "命令",
+          "script": "脚本",
+          "waitCommand": "等待 {command}",
+          "waitCell": "等待会话 {id}",
+          "terminateCommand": "终止 {command}",
+          "terminateCell": "终止会话 {id}",
+          "stdinChars": "输入 {chars}",
           "todoWrite": "待办",
           "read": "读取",
           "write": "写入",

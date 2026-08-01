@@ -2655,6 +2655,12 @@
         "elapsedSeconds": "{value}秒",
         "toolUseCount": "{count} 回のツール使用"
       },
+      "jsonTree": {
+        "viewRaw": "生の JSON を表示",
+        "viewTree": "ツリー表示",
+        "fields": "{count} 個のフィールド",
+        "items": "{count} 件"
+      },
       "tool": {
         "parameters": "パラメーター",
         "error": "エラー",
@@ -2724,11 +2730,13 @@
         "moreFiles": "+{count} 件の追加ファイル",
         "timeoutMs": "タイムアウト: {timeout}ms",
         "backgroundTrue": "バックグラウンド: true",
+        "scriptToolCalls": "{count} 個のツールを呼び出し",
         "offset": "オフセット: {offset}",
         "limit": "上限: {limit}",
         "pages": "ページ: {pages}",
         "mode": "モード: {mode}",
         "cell": "セル: {cell}",
+        "shellSession": "セッション {id}",
         "pathLabel": "パス:",
         "globLabel": "Glob パターン:",
         "typeLabel": "タイプ:",
@@ -2805,6 +2813,12 @@
         "title": {
           "edit": "編集",
           "command": "コマンド",
+          "script": "スクリプト",
+          "waitCommand": "待機 {command}",
+          "waitCell": "セッション {id} を待機",
+          "terminateCommand": "停止 {command}",
+          "terminateCell": "セッション {id} を停止",
+          "stdinChars": "入力 {chars}",
           "todoWrite": "TodoWrite（タスク更新）",
           "read": "読み取り",
           "write": "書き込み",
