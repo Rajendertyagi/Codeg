@@ -1,0 +1,8 @@
+name: Build Portable Win64 Plugin
+on:
+  workflow_dispatch:
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This is just a UI placeholder"
