@@ -893,7 +893,8 @@ function getToolIcon(
   if (
     name === "enterplanmode" ||
     name === "exitplanmode" ||
-    name === "switch_mode"
+    name === "switch_mode" ||
+    name === "plan_review"
   )
     return <ListTodoIcon className={ICON_CLASS} />
   if (name === "attempt_completion")
@@ -1121,11 +1122,12 @@ function deriveToolTitle(
     if (sk) return `Skill: ${sk}`
   }
 
-  // EnterPlanMode / ExitPlanMode / SwitchMode
+  // EnterPlanMode / ExitPlanMode / SwitchMode / codex plan_review
   if (
     name === "enterplanmode" ||
     name === "exitplanmode" ||
-    name === "switch_mode"
+    name === "switch_mode" ||
+    name === "plan_review"
   ) {
     const plan = getField("plan")
     if (plan) {
@@ -2511,6 +2513,7 @@ const ToolCallPart = memo(function ToolCallPart({
       toolNameLower === "switch_mode" ||
       toolNameLower === "enterplanmode" ||
       toolNameLower === "exitplanmode" ||
+      toolNameLower === "plan_review" ||
       isFileTool) &&
     !part.errorText
   // codex-acp #288: the context-compaction lifecycle is a `tool_call` tagged
@@ -2668,19 +2671,22 @@ const ToolCallPart = memo(function ToolCallPart({
     )
   }
 
-  // Plan-mode transition tools (EnterPlanMode/ExitPlanMode/switch_mode): render
-  // the plan directly via a dedicated card instead of folding into a misleading
-  // "思考 N 次" tool-group. `toolNameLower` is the underscore-preserving
-  // `tool-call-normalization` form, so `switch_mode` keeps its underscore here.
+  // Plan-mode transition tools (EnterPlanMode/ExitPlanMode/switch_mode, and
+  // codex's plan_review gate): render the plan directly via a dedicated card
+  // instead of folding into a misleading "思考 N 次" tool-group. `toolNameLower`
+  // is the underscore-preserving `tool-call-normalization` form, so
+  // `switch_mode` / `plan_review` keep their underscore here.
   if (
     toolNameLower === "enterplanmode" ||
     toolNameLower === "exitplanmode" ||
-    toolNameLower === "switch_mode"
+    toolNameLower === "switch_mode" ||
+    toolNameLower === "plan_review"
   ) {
     return (
       <PlanModeCard
         toolName={toolNameLower}
         input={part.input ?? null}
+        output={part.output ?? null}
         errorText={part.errorText ?? null}
         state={part.state}
       />

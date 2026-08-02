@@ -994,12 +994,17 @@ pub async fn get_folder_conversation_core(
         let at = summary.agent_type;
         let eid = ext_id.clone();
         let db_created_at = summary.created_at;
-        let folder_path_for_fallback = {
-            let folder = folder_service::get_folder_by_id(conn, summary.folder_id)
+        // Prefer the recorded origin cwd (set when a removed task worktree's
+        // conversations were re-parented) over the current folder's path — the
+        // session file still carries the ORIGINAL cwd, so matching on the new
+        // parent folder would never find it.
+        let folder_path_for_fallback = match summary.origin_cwd.clone() {
+            Some(cwd) => Some(cwd),
+            None => folder_service::get_folder_by_id(conn, summary.folder_id)
                 .await
                 .ok()
-                .flatten();
-            folder.map(|f| f.path)
+                .flatten()
+                .map(|f| f.path),
         };
         tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
             let parser: Box<dyn AgentParser> = match at {
@@ -2040,6 +2045,7 @@ mod tests {
             parent_id: Some(1),
             parent_tool_use_id: Some(parent_tool_use_id.into()),
             delegation_call_id: Some("call-1".into()),
+            origin_cwd: None,
         }
     }
 
