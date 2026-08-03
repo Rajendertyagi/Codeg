@@ -463,6 +463,75 @@ describe("AcpConnectionsProvider permission request details", () => {
     }
   })
 
+  it("queues multiple pending permissions and retires only the answered one", async () => {
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+    })
+
+    const handlers = latestAttachHandlers()
+
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "permission_request",
+      request_id: "req-q1",
+      tool_call: {
+        kind: "execute",
+        status: "pending",
+        toolCallId: "call_q1",
+      },
+      options: [{ option_id: "allow", name: "Allow", kind: "allow_once" }],
+    })
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "permission_request",
+      request_id: "req-q2",
+      tool_call: {
+        kind: "execute",
+        status: "pending",
+        toolCallId: "call_q2",
+      },
+      options: [{ option_id: "allow", name: "Allow", kind: "allow_once" }],
+    })
+
+    let conn = h.store!.getConnection(TAB)!
+    expect(conn.pendingPermission?.request_id).toBe("req-q1")
+    expect(conn.pendingPermissions?.map((p) => p.request_id)).toEqual([
+      "req-q1",
+      "req-q2",
+    ])
+
+    // Resolving the OLDER request must fall back to the newer one instead of
+    // wiping the whole slot.
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "permission_resolved",
+      request_id: "req-q1",
+    })
+
+    conn = h.store!.getConnection(TAB)!
+    expect(conn.pendingPermission?.request_id).toBe("req-q2")
+    expect(conn.pendingPermissions?.map((p) => p.request_id)).toEqual([
+      "req-q2",
+    ])
+
+    // Retiring the last queued entry empties both views.
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "permission_resolved",
+      request_id: "req-q2",
+    })
+
+    conn = h.store!.getConnection(TAB)!
+    expect(conn.pendingPermission).toBeNull()
+    expect(conn.pendingPermissions).toEqual([])
+  })
+
   it("hydrates snapshot permission details from active tool call input", async () => {
     await mountProvider()
 
