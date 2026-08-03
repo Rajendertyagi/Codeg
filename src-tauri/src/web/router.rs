@@ -1146,6 +1146,15 @@ pub fn build_router(
             "/quick_messages_reorder",
             post(handlers::quick_messages::quick_messages_reorder),
         )
+        // ─── Global auto-accept (custom plugin) ───
+        .route(
+            "/get_auto_approve_global",
+            post(handlers::auto_approve::auto_approve_global_get),
+        )
+        .route(
+            "/toggle_auto_approve_global",
+            post(handlers::auto_approve::auto_approve_global_toggle),
+        )
         // ─── Automations ───
         .route(
             "/automation_list",

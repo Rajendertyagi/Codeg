@@ -26,6 +26,8 @@ import {
   Scissors,
   Search,
   Send,
+  Shield,
+  ShieldCheck,
   Command,
   Sparkles,
   Square,
@@ -83,6 +85,8 @@ import {
   uploadLocalPathToRemote,
   isEmptyAttachmentError,
   openSettingsWindow,
+  getGlobalAutoApprove,
+  toggleGlobalAutoApprove,
   type SettingsSection,
   UPLOAD_MAX_BYTES,
   UPLOAD_I18N_KEY_TOO_LARGE,
@@ -578,6 +582,40 @@ export function MessageInput({
   // subset); office is a fixed static set. `tQa` supplies office labels/prompts.
   const locale = useLocale()
   const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
+  // Auto-accept shield (custom plugin): when on, the backend answers tool
+  // permission requests automatically instead of parking a card. The toggle is
+  // GLOBAL (app-wide, persisted in `app_metadata`), so every composer shows the
+  // same shared state ΓÇö no conversation context is consulted.
+  const [autoApprove, setAutoApprove] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getGlobalAutoApprove()
+      .then((result) => {
+        console.log("[AutoApprove] Current global state is:", result.enabled)
+        if (!cancelled) setAutoApprove(result.enabled)
+      })
+      .catch((err) => {
+        console.error("[MessageInput] load auto-approve failed:", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const handleToggleAutoApprove = useCallback(async () => {
+    try {
+      const result = await toggleGlobalAutoApprove()
+      console.log("[AutoApprove] Toggled global state to:", result.enabled)
+      setAutoApprove(result.enabled)
+    } catch (err) {
+      console.error("[MessageInput] toggle auto-approve failed:", err)
+    }
+  }, [])
+  const autoApproveOnLabel = t.has("autoApproveOn")
+    ? t("autoApproveOn")
+    : "Auto-accept: on"
+  const autoApproveOffLabel = t.has("autoApproveOff")
+    ? t("autoApproveOff")
+    : "Auto-accept: off"
   const experts = useBuiltInExperts()
   const science = useBuiltInScience()
   const {
@@ -2955,6 +2993,26 @@ export function MessageInput({
           label={t("modeLabel")}
         />
       )}
+      <Button
+        onClick={handleToggleAutoApprove}
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "h-8 w-8",
+          autoApprove ? "text-emerald-500" : "text-red-500"
+        )}
+        title={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
+        aria-label={
+          autoApprove ? autoApproveOnLabel : autoApproveOffLabel
+        }
+        aria-pressed={autoApprove}
+      >
+        {autoApprove ? (
+          <ShieldCheck className="size-4" />
+        ) : (
+          <Shield className="size-4" />
+        )}
+      </Button>
     </>
   )
 

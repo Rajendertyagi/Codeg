@@ -2596,6 +2596,18 @@ export async function automationCancelRun(runId: number): Promise<void> {
   return getTransport().call("automation_cancel_run", { runId })
 }
 
+// Global auto-accept (custom plugin)
+
+/** Read whether global auto-accept (the shield) is on. */
+export async function getGlobalAutoApprove(): Promise<{ enabled: boolean }> {
+  return getTransport().call("get_auto_approve_global")
+}
+
+/** Toggle global auto-accept; resolves with the new state. */
+export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
+  return getTransport().call("toggle_auto_approve_global")
+}
+
 // Work tasks
 
 export async function workTaskList(
