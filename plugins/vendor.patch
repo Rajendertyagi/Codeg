@@ -1,0 +1,1203 @@
+﻿diff --git a/src-tauri/src/acp/connection.rs b/src-tauri/src/acp/connection.rs
+index abbcabf1..e4c7c3c2 100644
+--- a/src-tauri/src/acp/connection.rs
++++ b/src-tauri/src/acp/connection.rs
+@@ -4607,6 +4607,36 @@ async fn handle_permission_request(
+         }
+     }
+ 
++    // Auto-accept gate (custom plugin): when the GLOBAL auto-accept toggle is
++    // on, answer the request with the first "allow" option the agent offered ΓÇö
++    // BEFORE it is parked or broadcast, so no subscriber (permission dialog,
++    // chat-channel relay, webhook) ever sees a stuck card. Resolves exactly
++    // like the `ConnectionCommand::RespondPermission` path (respond_selected ->
++    // `PermissionResolved`) so the agent sees an ordinary selected outcome.
++    // The toggle is app-wide (persisted in `app_metadata`); it deliberately
++    // consults no conversation/folder/sender context. When the toggle is off ΓÇö
++    // or the request offers no allow option ΓÇö fall through to the existing
++    // flow unchanged (never manufacture an approval the agent didn't offer).
++    let approved = crate::custom_plugins::custom_auto_approve::is_auto_approved()
++        .await
++        .unwrap_or(false);
++    tracing::warn!(
++        "auto-approve gate: approved={} option_kinds={:?}",
++        approved,
++        options.iter().map(|o| &o.kind).collect::<Vec<_>>()
++    );
++    if approved {
++        if let Some(allow_option) = options
++            .iter()
++            .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
++        {
++            PendingPermission::Acp(responder).respond_selected(allow_option.option_id.clone());
++            emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id })
++                .await;
++            return;
++        }
++    }
++
+     perms
+         .lock()
+         .await
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index cc670429..c71bb5b4 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -9,6 +9,10 @@
+ 
+ pub mod acp;
+ pub mod acp_transcript;
++// Custom Codeg plugins live outside the upstream crate tree (`plugins/backend/`)
++// so they survive upstream merges; see `plugins/backend/mod.rs`.
++#[path = "../../plugins/backend/mod.rs"]
++pub mod custom_plugins;
+ pub use acp::{
+     idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
+ };
+@@ -78,6 +82,7 @@ mod tauri_app {
+     };
+     use crate::terminal::manager::TerminalManager;
+     use crate::{db, git_credential, network, paths, process, web};
++    use crate::custom_plugins;
+     use tauri::Manager;
+ 
+     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
+@@ -703,6 +708,36 @@ mod tauri_app {
+                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
+                 }
+ 
++                // Custom workflows scheduler (custom plugin): fires user-defined
++                // scheduled prompts into their target conversations. JSON lives
++                // next to the SQLite DB in the effective data dir.
++                custom_plugins::custom_cron::set_data_dir(&effective_data_dir);
++                let cron_engine = custom_plugins::custom_cron::CustomCronEngine::new(
++                    crate::db::AppDatabase {
++                        conn: app.state::<crate::db::AppDatabase>().conn.clone(),
++                    },
++                    app.state::<ConnectionManager>().clone_ref(),
++                );
++                tauri::async_runtime::spawn(cron_engine.run());
++
++                // Global auto-accept flag (custom plugin): hydrate the in-process
++                // cache from `app_metadata` before any permission request can
++                // reach the gate (fail-closed OFF until loaded; the web handlers
++                // and toggles re-load lazily, so this is only a warm-up).
++                let auto_approve_db = crate::db::AppDatabase {
++                    conn: app.state::<crate::db::AppDatabase>().conn.clone(),
++                };
++                tauri::async_runtime::spawn(async move {
++                    if let Err(e) =
++                        custom_plugins::custom_auto_approve::init_global_auto_approve(
++                            &auto_approve_db,
++                        )
++                        .await
++                    {
++                        tracing::warn!("init_global_auto_approve failed: {e}");
++                    }
++                });
++
+                 // Single-window workspace: ensure the main window exists.
+                 // Workspace state (open folders, opened tabs, active tab) is
+                 // restored by the frontend via `list_open_folder_details` /
+@@ -1235,6 +1270,13 @@ mod tauri_app {
+                 automation_commands::automation_compute_next_run,
+                 automation_commands::automation_run_now,
+                 automation_commands::automation_cancel_run,
++                custom_plugins::toggle_auto_approve_global,
++                custom_plugins::get_auto_approve_global,
++                custom_plugins::save_custom_workflow,
++                custom_plugins::delete_custom_workflow,
++                custom_plugins::list_custom_workflows,
++                custom_plugins::set_custom_workflow_enabled,
++                custom_plugins::run_custom_workflow_now,
+                 work_task_commands::work_task_list,
+                 work_task_commands::work_task_get,
+                 work_task_commands::work_task_events,
+diff --git a/src-tauri/src/web/handlers/auto_approve.rs b/src-tauri/src/web/handlers/auto_approve.rs
+index 35e72f0d..2678cdcd 100644
+--- a/src-tauri/src/web/handlers/auto_approve.rs
++++ b/src-tauri/src/web/handlers/auto_approve.rs
+@@ -1,27 +1,44 @@
+-use axum::Json;
+-use serde::Deserialize;
++use std::sync::Arc;
+ 
+-use crate::app_error::AppCommandError;
+-use crate::custom_plugins::custom_auto_approve;
++use axum::{Extension, Json};
+ 
+-#[derive(Deserialize)]
+-#[serde(rename_all = "camelCase")]
+-pub struct ConversationAutoApproveParams {
+-    pub conversation_id: i32,
+-}
++use crate::app_error::{AppCommandError, AppErrorCode};
++use crate::app_state::AppState;
++use crate::custom_plugins::custom_auto_approve;
++use crate::custom_plugins::{AutoApproveGetResult, AutoApproveToggleResult};
+ 
+-pub async fn conversation_auto_approve_get(
+-    Json(params): Json<ConversationAutoApproveParams>,
+-) -> Result<Json<bool>, AppCommandError> {
+-    Ok(Json(custom_auto_approve::get_conversation_auto_approve(
+-        params.conversation_id,
+-    )))
++/// Read the GLOBAL auto-accept state (persisted in `app_metadata`). No
++/// conversation/sender scoping: the toggle is app-wide and applies to every
++/// permission-request surface.
++pub async fn auto_approve_global_get(
++    Extension(state): Extension<Arc<AppState>>,
++) -> Result<Json<AutoApproveGetResult>, AppCommandError> {
++    match custom_auto_approve::get_global_auto_approve(&state.db).await {
++        Ok(enabled) => Ok(Json(AutoApproveGetResult { enabled })),
++        Err(e) => {
++            tracing::warn!("auto_approve_global_get failed: error={e}");
++            Err(AppCommandError::new(
++                AppErrorCode::DatabaseError,
++                format!("auto-approve read failed: {e}"),
++            ))
++        }
++    }
+ }
+ 
+-pub async fn conversation_auto_approve_toggle(
+-    Json(params): Json<ConversationAutoApproveParams>,
+-) -> Result<Json<bool>, AppCommandError> {
+-    Ok(Json(custom_auto_approve::toggle_conversation_auto_approve(
+-        params.conversation_id,
+-    )))
++/// Flip the GLOBAL auto-accept toggle; resolves with the new state. Persists to
++/// `app_metadata` before returning, so the permission-request gate sees the new
++/// value immediately and it survives restarts.
++pub async fn auto_approve_global_toggle(
++    Extension(state): Extension<Arc<AppState>>,
++) -> Result<Json<AutoApproveToggleResult>, AppCommandError> {
++    match custom_auto_approve::toggle_global_auto_approve(&state.db).await {
++        Ok(enabled) => Ok(Json(AutoApproveToggleResult { enabled })),
++        Err(e) => {
++            tracing::warn!("auto_approve_global_toggle failed: error={e}");
++            Err(AppCommandError::new(
++                AppErrorCode::DatabaseError,
++                format!("auto-approve toggle failed: {e}"),
++            ))
++        }
++    }
+ }
+diff --git a/src-tauri/src/web/handlers/mod.rs b/src-tauri/src/web/handlers/mod.rs
+index 20b68fcb..21b02ab4 100644
+--- a/src-tauri/src/web/handlers/mod.rs
++++ b/src-tauri/src/web/handlers/mod.rs
+@@ -1,11 +1,13 @@
+ pub mod acp;
+ pub mod app_update;
++pub mod auto_approve;
+ pub mod automation;
+ pub mod background;
+ pub mod backup;
+ pub mod chat_channel;
+ pub mod conversations;
+ pub mod custom_skills;
++pub mod custom_workflows;
+ pub mod delegation;
+ mod error;
+ pub mod event_metrics;
+diff --git a/src-tauri/src/web/router.rs b/src-tauri/src/web/router.rs
+index 05c9b01d..975fc42d 100644
+--- a/src-tauri/src/web/router.rs
++++ b/src-tauri/src/web/router.rs
+@@ -1146,6 +1146,15 @@ pub fn build_router(
+             "/quick_messages_reorder",
+             post(handlers::quick_messages::quick_messages_reorder),
+         )
++        // ─── Global auto-accept (custom plugin) ───
++        .route(
++            "/get_auto_approve_global",
++            post(handlers::auto_approve::auto_approve_global_get),
++        )
++        .route(
++            "/toggle_auto_approve_global",
++            post(handlers::auto_approve::auto_approve_global_toggle),
++        )
+         // ─── Automations ───
+         .route(
+             "/automation_list",
+@@ -1188,6 +1197,27 @@ pub fn build_router(
+             "/automation_cancel_run",
+             post(handlers::automation::automation_cancel_run),
+         )
++        // ─── Custom workflows (custom plugin) ───
++        .route(
++            "/save_custom_workflow",
++            post(handlers::custom_workflows::custom_workflow_save),
++        )
++        .route(
++            "/delete_custom_workflow",
++            post(handlers::custom_workflows::custom_workflow_delete),
++        )
++        .route(
++            "/list_custom_workflows",
++            post(handlers::custom_workflows::custom_workflow_list),
++        )
++        .route(
++            "/set_custom_workflow_enabled",
++            post(handlers::custom_workflows::custom_workflow_set_enabled),
++        )
++        .route(
++            "/run_custom_workflow_now",
++            post(handlers::custom_workflows::custom_workflow_run_now),
++        )
+         // ─── Work tasks ───
+         .route("/work_task_list", post(handlers::work_task::work_task_list))
+         .route("/work_task_get", post(handlers::work_task::work_task_get))
+diff --git a/src/components/chat/conversation-shell.tsx b/src/components/chat/conversation-shell.tsx
+index 4c5a1d7c..93e18fb0 100644
+--- a/src/components/chat/conversation-shell.tsx
++++ b/src/components/chat/conversation-shell.tsx
+@@ -35,6 +35,9 @@ interface ConversationShellProps {
+   error: string | null
+   claudeApiRetry: ClaudeApiRetryState | null
+   pendingPermission: PendingPermission | null
++  /** All awaiting-decision permissions, oldest first. Defaults to
++   *  `[pendingPermission]` when omitted; renders one card per entry. */
++  pendingPermissions?: PendingPermission[]
+   pendingQuestion: PendingQuestion | null
+   /** Awaiting-answer multiple-choice `ask_user_question`. */
+   pendingAskQuestion: PendingQuestionState | null
+@@ -110,6 +113,7 @@ export function ConversationShell({
+   error,
+   claudeApiRetry,
+   pendingPermission,
++  pendingPermissions,
+   pendingQuestion,
+   pendingAskQuestion,
+   pendingPlanApproval,
+@@ -215,10 +219,18 @@ export function ConversationShell({
+       {topBanner}
+       <div className="flex-1 min-h-0">{children}</div>
+ 
+-      <PermissionDialog
+-        permission={pendingPermission}
+-        onRespond={onRespondPermission}
+-      />
++      {(pendingPermissions && pendingPermissions.length > 0
++        ? pendingPermissions
++        : pendingPermission
++          ? [pendingPermission]
++          : []
++      ).map((permission) => (
++        <PermissionDialog
++          key={permission.request_id}
++          permission={permission}
++          onRespond={onRespondPermission}
++        />
++      ))}
+ 
+       <QuestionDialog question={pendingQuestion} onAnswer={onAnswerQuestion} />
+ 
+diff --git a/src/components/chat/message-input.tsx b/src/components/chat/message-input.tsx
+index 1c40c5b5..27584842 100644
+--- a/src/components/chat/message-input.tsx
++++ b/src/components/chat/message-input.tsx
+@@ -26,6 +26,8 @@ import {
+   Scissors,
+   Search,
+   Send,
++  Shield,
++  ShieldCheck,
+   Command,
+   Sparkles,
+   Square,
+@@ -83,6 +85,8 @@ import {
+   uploadLocalPathToRemote,
+   isEmptyAttachmentError,
+   openSettingsWindow,
++  getGlobalAutoApprove,
++  toggleGlobalAutoApprove,
+   type SettingsSection,
+   UPLOAD_MAX_BYTES,
+   UPLOAD_I18N_KEY_TOO_LARGE,
+@@ -578,6 +582,40 @@ export function MessageInput({
+   // subset); office is a fixed static set. `tQa` supplies office labels/prompts.
+   const locale = useLocale()
+   const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
++  // Auto-accept shield (custom plugin): when on, the backend answers tool
++  // permission requests automatically instead of parking a card. The toggle is
++  // GLOBAL (app-wide, persisted in `app_metadata`), so every composer shows the
++  // same shared state ΓÇö no conversation context is consulted.
++  const [autoApprove, setAutoApprove] = useState(false)
++  useEffect(() => {
++    let cancelled = false
++    getGlobalAutoApprove()
++      .then((result) => {
++        console.log("[AutoApprove] Current global state is:", result.enabled)
++        if (!cancelled) setAutoApprove(result.enabled)
++      })
++      .catch((err) => {
++        console.error("[MessageInput] load auto-approve failed:", err)
++      })
++    return () => {
++      cancelled = true
++    }
++  }, [])
++  const handleToggleAutoApprove = useCallback(async () => {
++    try {
++      const result = await toggleGlobalAutoApprove()
++      console.log("[AutoApprove] Toggled global state to:", result.enabled)
++      setAutoApprove(result.enabled)
++    } catch (err) {
++      console.error("[MessageInput] toggle auto-approve failed:", err)
++    }
++  }, [])
++  const autoApproveOnLabel = t.has("autoApproveOn")
++    ? t("autoApproveOn")
++    : "Auto-accept: on"
++  const autoApproveOffLabel = t.has("autoApproveOff")
++    ? t("autoApproveOff")
++    : "Auto-accept: off"
+   const experts = useBuiltInExperts()
+   const science = useBuiltInScience()
+   const {
+@@ -2955,6 +2993,26 @@ export function MessageInput({
+           label={t("modeLabel")}
+         />
+       )}
++      <Button
++        onClick={handleToggleAutoApprove}
++        variant="ghost"
++        size="icon"
++        className={cn(
++          "h-8 w-8",
++          autoApprove ? "text-emerald-500" : "text-red-500"
++        )}
++        title={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
++        aria-label={
++          autoApprove ? autoApproveOnLabel : autoApproveOffLabel
++        }
++        aria-pressed={autoApprove}
++      >
++        {autoApprove ? (
++          <ShieldCheck className="size-4" />
++        ) : (
++          <Shield className="size-4" />
++        )}
++      </Button>
+     </>
+   )
+ 
+diff --git a/src/components/chat/permission-dialog.test.tsx b/src/components/chat/permission-dialog.test.tsx
+index c2faf073..5181194a 100644
+--- a/src/components/chat/permission-dialog.test.tsx
++++ b/src/components/chat/permission-dialog.test.tsx
+@@ -27,7 +27,9 @@ function renderWithIntl(ui: React.ReactElement) {
+ 
+ const baseOptions = [
+   { option_id: "allow", name: "Allow once", kind: "allow_once" },
++  { option_id: "always", name: "Always Allow", kind: "allow_always" },
+   { option_id: "reject", name: "Reject", kind: "reject_once" },
++  { option_id: "rejectAlways", name: "Reject Always", kind: "reject_always" },
+ ]
+ 
+ describe("PermissionDialog", () => {
+@@ -75,7 +77,7 @@ describe("PermissionDialog", () => {
+     expect(screen.queryByText("git diff")).toBeInTheDocument()
+   })
+ 
+-  it("renders every option as a button", () => {
++  it("renders standardized Allow once / Always allow / Deny buttons", () => {
+     const permission: PendingPermission = {
+       request_id: "req-2",
+       tool_call: null,
+@@ -87,7 +89,33 @@ describe("PermissionDialog", () => {
+     expect(
+       screen.getByRole("button", { name: "Allow once" })
+     ).toBeInTheDocument()
+-    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument()
++    expect(
++      screen.getByRole("button", { name: "Always allow" })
++    ).toBeInTheDocument()
++    expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument()
++    // reject_always is consumed by the single Deny button; its agent-named
++    // label must not leak as an extra button.
++    expect(
++      screen.queryByRole("button", { name: "Reject Always" })
++    ).not.toBeInTheDocument()
++  })
++
++  it("renders agent-named buttons for kinds outside the standard set", () => {
++    const permission: PendingPermission = {
++      request_id: "req-extras",
++      tool_call: null,
++      options: [
++        { option_id: "accept", name: "Accept plan", kind: "accept_plan" },
++        { option_id: "other", name: "Continue", kind: "other" },
++      ],
++    }
++    renderWithIntl(
++      <PermissionDialog permission={permission} onRespond={() => {}} />
++    )
++    expect(
++      screen.getByRole("button", { name: "Accept plan" })
++    ).toBeInTheDocument()
++    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
+   })
+ 
+   it("invokes onRespond with the request_id + chosen option_id when clicked", () => {
+diff --git a/src/components/chat/permission-dialog.tsx b/src/components/chat/permission-dialog.tsx
+index d6dcf314..27b43ad2 100644
+--- a/src/components/chat/permission-dialog.tsx
++++ b/src/components/chat/permission-dialog.tsx
+@@ -301,19 +301,68 @@ export function PermissionDialog({
+       </div>
+ 
+       <div className="mt-3 flex flex-wrap gap-2">
+-        {permission.options.map((opt) => {
+-          const isReject = opt.kind.startsWith("reject")
+-          return (
++        {/* Standardized OpenChamber-style buttons mapped from the ACP option
++            kinds. Kinds outside allow_once / allow_always / reject_* (e.g.
++            accept labels from the question bridge) render as their own
++            agent-named buttons so no option is ever lost. */}
++        {(() => {
++          const allowOnce = permission.options.find(
++            (opt) => opt.kind === "allow_once"
++          )
++          const allowAlways = permission.options.find(
++            (opt) => opt.kind === "allow_always"
++          )
++          const deny = permission.options.find(
++            (opt) =>
++              opt.kind === "reject_once" || opt.kind === "reject_always"
++          )
++          const extras = permission.options.filter(
++            (opt) => opt !== allowOnce && opt !== allowAlways && opt !== deny
++          )
++          const buttons: {
++            optionId: string
++            label: string
++            variant: "default" | "outline" | "destructive"
++          }[] = []
++          if (allowOnce) {
++            buttons.push({
++              optionId: allowOnce.option_id,
++              label: t("allowOnce"),
++              variant: "default",
++            })
++          }
++          if (allowAlways) {
++            buttons.push({
++              optionId: allowAlways.option_id,
++              label: t("allowAlways"),
++              variant: "default",
++            })
++          }
++          if (deny) {
++            buttons.push({
++              optionId: deny.option_id,
++              label: t("deny"),
++              variant: "destructive",
++            })
++          }
++          for (const opt of extras) {
++            buttons.push({
++              optionId: opt.option_id,
++              label: opt.name,
++              variant: opt.kind.startsWith("reject") ? "outline" : "default",
++            })
++          }
++          return buttons.map((btn) => (
+             <Button
+-              key={opt.option_id}
+-              variant={isReject ? "outline" : "default"}
++              key={btn.optionId}
++              variant={btn.variant}
+               className="h-auto min-h-9 whitespace-normal break-words text-left"
+-              onClick={() => onRespond(permission.request_id, opt.option_id)}
++              onClick={() => onRespond(permission.request_id, btn.optionId)}
+             >
+-              {opt.name}
++              {btn.label}
+             </Button>
+-          )
+-        })}
++          ))
++        })()}
+       </div>
+     </div>
+   )
+diff --git a/src/components/conversations/conversation-detail-panel.tsx b/src/components/conversations/conversation-detail-panel.tsx
+index 9968f474..97dfec73 100644
+--- a/src/components/conversations/conversation-detail-panel.tsx
++++ b/src/components/conversations/conversation-detail-panel.tsx
+@@ -1643,6 +1643,7 @@ const ConversationTabView = memo(function ConversationTabView({
+       error={conn.error}
+       claudeApiRetry={conn.claudeApiRetry}
+       pendingPermission={conn.pendingPermission}
++      pendingPermissions={conn.pendingPermissions}
+       pendingQuestion={conn.pendingQuestion}
+       pendingAskQuestion={conn.pendingAskQuestion}
+       pendingPlanApproval={conn.pendingPlanApproval}
+diff --git a/src/components/layout/sidebar.tsx b/src/components/layout/sidebar.tsx
+index 760c1837..bd08c621 100644
+--- a/src/components/layout/sidebar.tsx
++++ b/src/components/layout/sidebar.tsx
+@@ -9,6 +9,7 @@ import {
+   Search,
+   ListTodo,
+   SquarePen,
++  Workflow,
+   Zap,
+   type LucideIcon,
+ } from "lucide-react"
+@@ -436,6 +437,12 @@ export function Sidebar() {
+             ) : null
+           }
+         />
++        <SidebarNavButton
++          icon={Workflow}
++          label="Custom Workflows"
++          active={routeId === "custom-workflows"}
++          onClick={() => setRoute("custom-workflows")}
++        />
+       </div>
+ 
+       {/* On mobile, clicking a conversation card auto-closes the Sheet */}
+diff --git a/src/components/workbench/workbench-content.tsx b/src/components/workbench/workbench-content.tsx
+index 8314d2da..7b544387 100644
+--- a/src/components/workbench/workbench-content.tsx
++++ b/src/components/workbench/workbench-content.tsx
+@@ -10,6 +10,7 @@ import {
+   AutomationsPageTitle,
+ } from "@/components/automations/automations-page"
+ import { TasksPage, TasksPageTitle } from "@/components/tasks/tasks-page"
++import { CustomWorkflowsPage } from "../../../plugins/frontend/custom-page"
+ 
+ /**
+  * Registry of full-page routes that take over the main content region. The
+@@ -21,6 +22,7 @@ import { TasksPage, TasksPageTitle } from "@/components/tasks/tasks-page"
+ const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
+   automations: AutomationsPage,
+   tasks: TasksPage,
++  "custom-workflows": CustomWorkflowsPage,
+ }
+ 
+ /** Optional per-route content for the window-chrome strip above the page
+diff --git a/src/contexts/acp-connections-context.test.tsx b/src/contexts/acp-connections-context.test.tsx
+index 8a730be7..3258aada 100644
+--- a/src/contexts/acp-connections-context.test.tsx
++++ b/src/contexts/acp-connections-context.test.tsx
+@@ -463,6 +463,75 @@ describe("AcpConnectionsProvider permission request details", () => {
+     }
+   })
+ 
++  it("queues multiple pending permissions and retires only the answered one", async () => {
++    await mountProvider()
++
++    await act(async () => {
++      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
++    })
++
++    const handlers = latestAttachHandlers()
++
++    emitAcpEvent(handlers, {
++      seq: 1,
++      connection_id: "spawned-conn",
++      type: "permission_request",
++      request_id: "req-q1",
++      tool_call: {
++        kind: "execute",
++        status: "pending",
++        toolCallId: "call_q1",
++      },
++      options: [{ option_id: "allow", name: "Allow", kind: "allow_once" }],
++    })
++    emitAcpEvent(handlers, {
++      seq: 2,
++      connection_id: "spawned-conn",
++      type: "permission_request",
++      request_id: "req-q2",
++      tool_call: {
++        kind: "execute",
++        status: "pending",
++        toolCallId: "call_q2",
++      },
++      options: [{ option_id: "allow", name: "Allow", kind: "allow_once" }],
++    })
++
++    let conn = h.store!.getConnection(TAB)!
++    expect(conn.pendingPermission?.request_id).toBe("req-q1")
++    expect(conn.pendingPermissions?.map((p) => p.request_id)).toEqual([
++      "req-q1",
++      "req-q2",
++    ])
++
++    // Resolving the OLDER request must fall back to the newer one instead of
++    // wiping the whole slot.
++    emitAcpEvent(handlers, {
++      seq: 3,
++      connection_id: "spawned-conn",
++      type: "permission_resolved",
++      request_id: "req-q1",
++    })
++
++    conn = h.store!.getConnection(TAB)!
++    expect(conn.pendingPermission?.request_id).toBe("req-q2")
++    expect(conn.pendingPermissions?.map((p) => p.request_id)).toEqual([
++      "req-q2",
++    ])
++
++    // Retiring the last queued entry empties both views.
++    emitAcpEvent(handlers, {
++      seq: 4,
++      connection_id: "spawned-conn",
++      type: "permission_resolved",
++      request_id: "req-q2",
++    })
++
++    conn = h.store!.getConnection(TAB)!
++    expect(conn.pendingPermission).toBeNull()
++    expect(conn.pendingPermissions).toEqual([])
++  })
++
+   it("hydrates snapshot permission details from active tool call input", async () => {
+     await mountProvider()
+ 
+diff --git a/src/contexts/acp-connections-context.tsx b/src/contexts/acp-connections-context.tsx
+index cb510d14..2cd2da4f 100644
+--- a/src/contexts/acp-connections-context.tsx
++++ b/src/contexts/acp-connections-context.tsx
+@@ -179,6 +179,11 @@ export interface ConnectionState {
+   usage: SessionUsageUpdateInfo | null
+   liveMessage: LiveMessage | null
+   pendingPermission: PendingPermission | null
++  /** All awaiting-decision permissions for this connection, oldest first.
++   *  Multiple requests can pile up in one turn when the shield is off; each
++   *  is rendered as its own card and answered individually. `pendingPermission`
++   *  above is a back-compat view of `pendingPermissions[0]`. */
++  pendingPermissions?: PendingPermission[]
+   /** In-flight user prompt for the current turn — set from a `user_message`
+    *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
+    *  the runtime as a synthesized user turn; `null` outside an active turn. */
+@@ -806,6 +811,63 @@ function mergePendingPermissionWithLiveMessage(
+   return mergePendingPermissionWithLiveInfo(pendingPermission, liveInfo)
+ }
+ 
++/** Rewrites the permission fields so `pendingPermission` is always
++ *  `pendingPermissions[0]` (or null when the queue is empty). Spread this
++ *  alongside any other connection field changes. */
++function pendingPermissionSlot(
++  pendingPermissions: PendingPermission[] | undefined
++): Pick<ConnectionState, "pendingPermission" | "pendingPermissions"> {
++  const queue = pendingPermissions ?? []
++  return {
++    pendingPermissions: queue,
++    pendingPermission: queue.length > 0 ? queue[0] : null,
++  }
++}
++
++/** Upsert into the queue: replace the entry with the same request_id, else
++ *  append (oldest first). */
++function upsertPendingPermission(
++  queue: PendingPermission[] | undefined,
++  permission: PendingPermission
++): PendingPermission[] {
++  const existing = (queue ?? []).findIndex(
++    (p) => p.request_id === permission.request_id
++  )
++  if (existing === -1) return [...(queue ?? []), permission]
++  const next = (queue ?? []).slice()
++  next[existing] = permission
++  return next
++}
++
++/** Remove by request_id; `undefined` clears the whole queue (unconditional
++ *  clears, e.g. cancel paths). */
++function removePendingPermission(
++  queue: PendingPermission[] | undefined,
++  requestId: string | undefined
++): PendingPermission[] {
++  if (requestId === undefined) return []
++  return (queue ?? []).filter((p) => p.request_id !== requestId)
++}
++
++/** Merge live tool-call info into every queued permission (the single-slot
++ *  helper above only touches one entry). Returns the same array reference
++ *  when nothing changed. */
++function mergePermissionsWithLiveInfo(
++  pendingPermissions: PendingPermission[] | undefined,
++  liveInfo: ToolCallInfo | null
++): PendingPermission[] {
++  if (!liveInfo || pendingPermissions === undefined) {
++    return pendingPermissions ?? []
++  }
++  let changed = false
++  const next = pendingPermissions.map((pending) => {
++    const merged = mergePendingPermissionWithLiveInfo(pending, liveInfo)
++    if (merged !== pending) changed = true
++    return merged ?? pending
++  })
++  return changed ? next : pendingPermissions
++}
++
+ function extractPermissionToolTitle(toolCall: unknown): string | null {
+   const record = asRecord(toolCall)
+   if (!record) return null
+@@ -1391,7 +1453,11 @@ function connectionsReducer(
+         availableCommands: action.patch.availableCommands,
+         usage: action.patch.usage,
+         liveMessage: hydratedLiveMessage,
+-        pendingPermission: hydratedPendingPermission,
++        ...pendingPermissionSlot(
++          hydratedPendingPermission !== null
++            ? [hydratedPendingPermission]
++            : current.pendingPermissions
++        ),
+         pendingAskQuestion: action.patch.pendingAskQuestion,
+         pendingPlanApproval: action.patch.pendingPlanApproval,
+         pendingUserMessage: action.patch.pendingUserMessage,
+@@ -1658,9 +1724,8 @@ function connectionsReducer(
+       next.set(action.contextKey, {
+         ...conn,
+         liveMessage: nextLiveMessage,
+-        pendingPermission: mergePendingPermissionWithLiveInfo(
+-          conn.pendingPermission,
+-          nextInfo
++        ...pendingPermissionSlot(
++          mergePermissionsWithLiveInfo(conn.pendingPermissions, nextInfo)
+         ),
+         claudeApiRetry: null,
+       })
+@@ -1708,9 +1773,8 @@ function connectionsReducer(
+             conn.outOfTurnToolCalls,
+             merged
+           ),
+-          pendingPermission: mergePendingPermissionWithLiveInfo(
+-            conn.pendingPermission,
+-            merged
++          ...pendingPermissionSlot(
++            mergePermissionsWithLiveInfo(conn.pendingPermissions, merged)
+           ),
+         })
+         return next
+@@ -1815,9 +1879,8 @@ function connectionsReducer(
+       next.set(action.contextKey, {
+         ...conn,
+         liveMessage: nextLiveMessage,
+-        pendingPermission: mergePendingPermissionWithLiveInfo(
+-          conn.pendingPermission,
+-          nextInfo
++        ...pendingPermissionSlot(
++          mergePermissionsWithLiveInfo(conn.pendingPermissions, nextInfo)
+         ),
+         claudeApiRetry: null,
+       })
+@@ -1921,11 +1984,13 @@ function connectionsReducer(
+       next.set(action.contextKey, {
+         ...conn,
+         liveMessage: updatedLiveMessage,
+-        pendingPermission: {
+-          request_id: action.request_id,
+-          tool_call: permissionToolCall,
+-          options: action.options,
+-        },
++        ...pendingPermissionSlot(
++          upsertPendingPermission(conn.pendingPermissions, {
++            request_id: action.request_id,
++            tool_call: permissionToolCall,
++            options: action.options,
++          })
++        ),
+       })
+       return next
+     }
+@@ -1933,16 +1998,29 @@ function connectionsReducer(
+     case "PERMISSION_CLEARED": {
+       const conn = state.get(action.contextKey)
+       if (!conn) return state
+-      if (
+-        action.requestId !== undefined &&
+-        conn.pendingPermission?.request_id !== action.requestId
+-      ) {
+-        return state
++      const queue = conn.pendingPermissions
++      if (queue === undefined || queue.length === 0) {
++        // Legacy single-slot state (hydrated or test-constructed): keep the
++        // stale-event guard, then clear the slot directly.
++        if (
++          action.requestId !== undefined &&
++          conn.pendingPermission?.request_id !== action.requestId
++        ) {
++          return state
++        }
++        const next = new Map(state)
++        next.set(action.contextKey, {
++          ...conn,
++          pendingPermission: null,
++        })
++        return next
+       }
+       const next = new Map(state)
+       next.set(action.contextKey, {
+         ...conn,
+-        pendingPermission: null,
++        ...pendingPermissionSlot(
++          removePendingPermission(queue, action.requestId)
++        ),
+       })
+       return next
+     }
+diff --git a/src/contexts/workbench-route-context.tsx b/src/contexts/workbench-route-context.tsx
+index e9a2f619..73441e50 100644
+--- a/src/contexts/workbench-route-context.tsx
++++ b/src/contexts/workbench-route-context.tsx
+@@ -18,7 +18,11 @@ import {
+  * component in WORKBENCH_ROUTES, and add a SidebarNavButton that calls
+  * `setRoute("<id>")`. Nothing else needs to change.
+  */
+-export type WorkbenchRouteId = "conversations" | "automations" | "tasks"
++export type WorkbenchRouteId =
++  | "conversations"
++  | "automations"
++  | "tasks"
++  | "custom-workflows"
+ 
+ interface WorkbenchRouteContextValue {
+   routeId: WorkbenchRouteId
+diff --git a/src/hooks/use-connection.ts b/src/hooks/use-connection.ts
+index 6c1699e0..a18c25cc 100644
+--- a/src/hooks/use-connection.ts
++++ b/src/hooks/use-connection.ts
+@@ -60,6 +60,9 @@ export interface UseConnectionReturn {
+   configOptions: SessionConfigOptionInfo[] | null
+   availableCommands: AvailableCommandInfo[] | null
+   pendingPermission: PendingPermission | null
++  /** The full queue of unanswered tool-call permissions (multi-card rendering).
++   *  `pendingPermission` is the back-compat head-of-queue view (`queue[0]`). */
++  pendingPermissions: PendingPermission[] | undefined
+   pendingUserMessage: PendingUserMessage | null
+   pendingQuestion: PendingQuestion | null
+   pendingAskQuestion: PendingQuestionState | null
+@@ -217,6 +220,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
+     connection?.configOptions ?? cached?.configOptions ?? null
+   const availableCommands = connection?.availableCommands ?? null
+   const pendingPermission = connection?.pendingPermission ?? null
++  const pendingPermissions = connection?.pendingPermissions
+   const pendingUserMessage = connection?.pendingUserMessage ?? null
+   const pendingQuestion = connection?.pendingQuestion ?? null
+   const pendingAskQuestion = connection?.pendingAskQuestion ?? null
+@@ -320,6 +324,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
+       configOptions,
+       availableCommands,
+       pendingPermission,
++      pendingPermissions,
+       pendingUserMessage,
+       pendingQuestion,
+       pendingAskQuestion,
+@@ -359,6 +364,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
+       configOptions,
+       availableCommands,
+       pendingPermission,
++      pendingPermissions,
+       pendingUserMessage,
+       pendingQuestion,
+       pendingAskQuestion,
+diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
+index 3c2aee55..8ca955d0 100644
+--- a/src/i18n/messages/en.json
++++ b/src/i18n/messages/en.json
+@@ -2424,6 +2424,8 @@
+         "noModels": "No models found",
+         "cancel": "Cancel",
+         "send": "Send",
++        "autoApproveOn": "Auto-accept on: tool permission requests are answered automatically",
++        "autoApproveOff": "Auto-accept off: tool permission requests require your approval",
+         "forkAndSend": "Fork & Send",
+         "queueMessage": "Queue message",
+         "steerIntoTurn": "Insert into current turn",
+@@ -2603,6 +2605,9 @@
+         "plan": "Plan",
+         "allowedActions": "Allowed actions",
+         "targetMode": "Target mode: {mode}",
++        "allowOnce": "Allow once",
++        "allowAlways": "Always allow",
++        "deny": "Deny",
+         "optionGrants": "What each option grants",
+         "changeScopeSession": "This session",
+         "changeScopeProcess": "This run",
+@@ -4252,6 +4257,54 @@
+     "eventUserAction": "User action",
+     "eventDiffStat": "Change snapshot"
+   },
++  "CustomWorkflows": {
++    "title": "Custom Workflows",
++    "new": "New workflow",
++    "onboardTitle": "Create a custom workflow",
++    "onboardHint": "A scheduled prompt that always fires into the same chat thread — pick the conversation, set the cadence, and let Codeg run on autopilot.",
++    "selectHint": "Select a workflow or create a new one.",
++    "name": "Name",
++    "namePlaceholder": "e.g. Morning standup recap",
++    "targetChat": "Target chat",
++    "targetChatPlaceholder": "Choose the conversation to fire into",
++    "noConversations": "No conversations available yet — open a chat first.",
++    "cron": "Schedule",
++    "cronPlaceholder": "0 9 * * *",
++    "cronBuilder": "Schedule…",
++    "prompt": "Prompt",
++    "promptPlaceholder": "What should the agent do on this schedule?",
++    "save": "Save",
++    "cancel": "Cancel",
++    "delete": "Delete",
++    "deleteTitle": "Delete this workflow?",
++    "deleteDescription": "The scheduled prompt will be removed and will no longer fire.",
++    "runNow": "Run now",
++    "edit": "Edit",
++    "enabled": "Enabled",
++    "disabled": "Disabled",
++    "enable": "Enable",
++    "disable": "Disable",
++    "lastRun": "Last run",
++    "lastError": "Last error",
++    "neverRun": "Never",
++    "runCount": "Runs",
++    "statusFailed": "Failed",
++    "statusIdle": "Idle",
++    "statusRunning": "Running",
++    "statusSuccess": "Success",
++    "untitled": "Untitled",
++    "noWorkflows": "No custom workflows yet.",
++    "noMatches": "No workflows match the filter.",
++    "filterAll": "All",
++    "filterEnabled": "Enabled",
++    "filterDisabled": "Disabled",
++    "moreActions": "More actions",
++    "refresh": "Refresh",
++    "saved": "Workflow saved",
++    "deleted": "Workflow deleted",
++    "ranNow": "Workflow fired into the conversation",
++    "target": "Target"
++  },
+   "CustomSkillsSettings": {
+     "loading": "Loading custom skills…",
+     "category": "Custom",
+diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
+index ef5dc82c..5eda78a0 100644
+--- a/src/i18n/messages/zh-CN.json
++++ b/src/i18n/messages/zh-CN.json
+@@ -2424,6 +2424,8 @@
+         "noModels": "未找到模型",
+         "cancel": "取消",
+         "send": "发送",
++        "autoApproveOn": "自动接受已开启：工具权限请求将自动批准",
++        "autoApproveOff": "自动接受已关闭：工具权限请求需要你批准",
+         "forkAndSend": "分叉发送",
+         "queueMessage": "加入队列",
+         "steerIntoTurn": "插入当前回合",
+@@ -2603,6 +2605,9 @@
+         "plan": "计划",
+         "allowedActions": "允许的操作",
+         "targetMode": "目标模式：{mode}",
++        "allowOnce": "允许一次",
++        "allowAlways": "始终允许",
++        "deny": "拒绝",
+         "optionGrants": "各选项将授予的权限",
+         "changeScopeSession": "本次会话",
+         "changeScopeProcess": "本次运行",
+@@ -4252,6 +4257,54 @@
+     "eventUserAction": "用户操作",
+     "eventDiffStat": "变更快照"
+   },
++  "CustomWorkflows": {
++    "title": "自定义工作流",
++    "new": "新建工作流",
++    "onboardTitle": "创建自定义工作流",
++    "onboardHint": "定时向同一会话线程发送提示词——选择会话、设置节奏，让 Codeg 自动运行。",
++    "selectHint": "选择工作流或新建一个。",
++    "name": "名称",
++    "namePlaceholder": "例如：每日站会摘要",
++    "targetChat": "目标会话",
++    "targetChatPlaceholder": "选择要触发的会话",
++    "noConversations": "暂无可用会话——请先打开一个聊天。",
++    "cron": "计划",
++    "cronPlaceholder": "0 9 * * *",
++    "cronBuilder": "设置计划…",
++    "prompt": "提示词",
++    "promptPlaceholder": "定时任务中智能体应执行什么操作？",
++    "save": "保存",
++    "cancel": "取消",
++    "delete": "删除",
++    "deleteTitle": "删除此工作流？",
++    "deleteDescription": "该定时提示词将被移除，不再触发。",
++    "runNow": "立即运行",
++    "edit": "编辑",
++    "enabled": "已启用",
++    "disabled": "已停用",
++    "enable": "启用",
++    "disable": "停用",
++    "lastRun": "上次运行",
++    "lastError": "上次错误",
++    "neverRun": "从未",
++    "runCount": "运行次数",
++    "statusFailed": "失败",
++    "statusIdle": "空闲",
++    "statusRunning": "运行中",
++    "statusSuccess": "成功",
++    "untitled": "未命名",
++    "noWorkflows": "暂无自定义工作流。",
++    "noMatches": "没有匹配的工作流。",
++    "filterAll": "全部",
++    "filterEnabled": "已启用",
++    "filterDisabled": "已停用",
++    "moreActions": "更多操作",
++    "refresh": "刷新",
++    "saved": "工作流已保存",
++    "deleted": "工作流已删除",
++    "ranNow": "工作流已触发到会话",
++    "target": "目标"
++  },
+   "CustomSkillsSettings": {
+     "loading": "正在加载自定义技能…",
+     "category": "自定义",
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index f025cc1e..ea16eb61 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -2422,6 +2422,8 @@
+         "noModels": "找不到模型",
+         "cancel": "取消",
+         "send": "傳送",
++        "autoApproveOn": "自動接受已開啟：工具權限請求將自動批准",
++        "autoApproveOff": "自動接受已關閉：工具權限請求需要你批准",
+         "forkAndSend": "分叉發送",
+         "queueMessage": "加入佇列",
+         "steerIntoTurn": "插入目前回合",
+@@ -2603,6 +2605,9 @@
+         "plan": "計畫",
+         "allowedActions": "允許的操作",
+         "targetMode": "目標模式：{mode}",
++        "allowOnce": "允許一次",
++        "allowAlways": "始終允許",
++        "deny": "拒絕",
+         "optionGrants": "各選項將授予的權限",
+         "changeScopeSession": "本次工作階段",
+         "changeScopeProcess": "本次執行",
+@@ -4252,6 +4257,54 @@
+     "eventUserAction": "使用者操作",
+     "eventDiffStat": "變更快照"
+   },
++  "CustomWorkflows": {
++    "title": "自訂工作流程",
++    "new": "新增工作流程",
++    "onboardTitle": "建立自訂工作流程",
++    "onboardHint": "定時向同一個對話執行緒傳送提示詞——選擇對話、設定節奏，讓 Codeg 自動執行。",
++    "selectHint": "選擇工作流程或新增一個。",
++    "name": "名稱",
++    "namePlaceholder": "例如：每日站會摘要",
++    "targetChat": "目標對話",
++    "targetChatPlaceholder": "選擇要觸發的對話",
++    "noConversations": "尚無可用對話——請先開啟一個聊天。",
++    "cron": "排程",
++    "cronPlaceholder": "0 9 * * *",
++    "cronBuilder": "設定排程…",
++    "prompt": "提示詞",
++    "promptPlaceholder": "定時工作中代理應執行什麼操作？",
++    "save": "儲存",
++    "cancel": "取消",
++    "delete": "刪除",
++    "deleteTitle": "刪除此工作流程？",
++    "deleteDescription": "該定時提示詞將被移除，慢觸發。",
++    "runNow": "立即執行",
++    "edit": "編輯",
++    "enabled": "已啟用",
++    "disabled": "已停用",
++    "enable": "啟用",
++    "disable": "停用",
++    "lastRun": "開啟上一次執行",
++    "lastError": "上一次錯誤",
++    "neverRun": "從未",
++    "runCount": "執行次數",
++    "statusFailed": "失敗",
++    "statusIdle": "閒置",
++    "statusRunning": "執行中",
++    "statusSuccess": "成功",
++    "untitled": "未命名",
++    "noWorkflows": "尚無自訂工作流程。",
++    "noMatches": "沒有符合的工作流程。",
++    "filterAll": "全部",
++    "filterEnabled": "已啟用",
++    "filterDisabled": "已停用",
++    "moreActions": "更多操作",
++    "refresh": "重新整理",
++    "saved": "工作流程已儲存",
++    "deleted": "工作流程已刪除",
++    "ranNow": "工作流程已觸發至對話",
++    "target": "目標"
++  },
+   "CustomSkillsSettings": {
+     "loading": "正在載入自訂技能…",
+     "category": "自訂",
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index 0f97412e..761f5adf 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -2596,6 +2596,62 @@ export async function automationCancelRun(runId: number): Promise<void> {
+   return getTransport().call("automation_cancel_run", { runId })
+ }
+ 
++// Global auto-accept (custom plugin)
++
++/** Read whether global auto-accept (the shield) is on. */
++export async function getGlobalAutoApprove(): Promise<{ enabled: boolean }> {
++  return getTransport().call("get_auto_approve_global")
++}
++
++/** Toggle global auto-accept; resolves with the new state. */
++export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
++  return getTransport().call("toggle_auto_approve_global")
++}
++
++// Custom Workflows (custom plugin)
++
++/** Outcome of the most recent fire, as persisted by the Rust scheduler. */
++export type WorkflowStatus = "idle" | "running" | "success" | "failed"
++
++export interface CustomWorkflow {
++  id: string
++  name: string
++  conversation_id: number
++  cron: string
++  prompt: string
++  enabled: boolean
++  last_run: string | null
++  last_status: WorkflowStatus
++  last_error: string
++  run_count: number
++  created_at: string
++}
++
++export async function listCustomWorkflows(): Promise<CustomWorkflow[]> {
++  return getTransport().call("list_custom_workflows")
++}
++
++export async function saveCustomWorkflow(
++  workflow: CustomWorkflow
++): Promise<void> {
++  return getTransport().call("save_custom_workflow", { workflow })
++}
++
++export async function deleteCustomWorkflow(id: string): Promise<void> {
++  return getTransport().call("delete_custom_workflow", { id })
++}
++
++export async function setCustomWorkflowEnabled(
++  id: string,
++  enabled: boolean
++): Promise<void> {
++  return getTransport().call("set_custom_workflow_enabled", { id, enabled })
++}
++
++export async function runCustomWorkflowNow(id: string): Promise<void> {
++  return getTransport().call("run_custom_workflow_now", { id })
++}
++
+ // Work tasks
+ 
+ export async function workTaskList(
