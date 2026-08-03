@@ -1,4 +1,4 @@
-name: Codeg Portable Winx64 Native
+name: Build Codeg Native Windows x64 (no fork code)
 
 on:
   workflow_dispatch:
@@ -16,8 +16,11 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
     steps:
-      - name: Checkout
+      - name: Checkout upstream codeg (original project, no fork code)
         uses: actions/checkout@v7
+        with:
+          repository: xintaofei/codeg
+          ref: main
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -53,9 +56,6 @@ jobs:
         run: |
           cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force -Path binaries | Out-Null
-          # Triple-suffixed name is what tauri.conf.json externalBin + build.rs
-          # expect (same convention as scripts/prepare-sidecars.mjs). Without it
-          # build.rs writes a 0-byte placeholder instead of the real binary.
           Copy-Item "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" `
             "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
 
@@ -81,9 +81,6 @@ jobs:
           $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
 
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
-          # The runtime probes for `codeg-mcp.exe` next to the exe
-          # (src-tauri/src/acp/connection.rs locate_codeg_mcp_binary), so the
-          # staged triple-suffixed binary must land under the bare name.
           Copy-Item -Path "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" `
             -Destination "$dir/codeg-mcp.exe" -Force
 
@@ -98,6 +95,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: codeg-portable-win64
+          name: codeg-native-win64
           path: dist/codeg-portable-win64/*
           retention-days: 14
