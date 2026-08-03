@@ -1,121 +1,130 @@
 # AGENTS.md
 
-This file provides guidance to Code Agent when working with code in this repository.
+Working guidance for Code Agent when working in this repository (Codeg).
 
-## 项目概述
+> **Scope note:** this file is repo-owned documentation — it encodes this repository's
+> conventions, not the user's personal instructions. Directives given by the user in
+> conversation always take precedence over this file.
 
-Codeg（Code Generation）是一个多智能体编码工作台，它将多个智能体（Claude Code、Codex CLI、OpenCode、Gemini CLI、OpenClaw、Cline 等）统一到一个工作区中，支持会话聚合和多智能体协作，支持桌面安装，服务器/Docker 部署。
+## Project
 
-## 技术栈
+Codeg (Code Generation) is a multi-agent coding workbench that unifies multiple agents
+(Claude Code, Codex CLI, OpenCode, Gemini CLI, OpenClaw, Cline, ...) into a single
+workspace: session aggregation, multi-agent collaboration, desktop install, and
+server/Docker deployment.
 
-- **桌面运行时**: Tauri 2（Rust 后端 + webview 前端）
-- **服务器运行时**: 独立 Rust 二进制（Axum HTTP + WebSocket）
-- **前端**: Next.js 16（静态导出模式）+ React 19 + TypeScript（strict）
-- **样式**: Tailwind CSS v4 + shadcn/ui（radix-maia 风格）
-- **国际化**: next-intl
-- **数据库**: SeaORM + SQLite
-- **包管理器**: pnpm
+## Tech Stack
 
-## 代码检查与测试（任务完成后进行必要的检查）
+- **Desktop runtime**: Tauri 2 (Rust backend + webview frontend)
+- **Server runtime**: standalone Rust binary (Axum HTTP + WebSocket)
+- **Frontend**: Next.js 16 (static export mode) + React 19 + TypeScript (strict)
+- **Styling**: Tailwind CSS v4 + shadcn/ui (radix-maia style)
+- **i18n**: next-intl
+- **Database**: SeaORM + SQLite
+- **Package manager**: pnpm
 
-### 前端
+## Our Workflow (hard rules)
 
-```bash
-pnpm eslint .                  # lint
-pnpm test                      # vitest 全跑（CI 用同一条命令）
-pnpm test:watch                # 开发时增量重跑
-pnpm test:coverage             # 覆盖率报告（输出到 coverage/index.html）
-pnpm build                     # 静态导出构建
-```
+1. **Branch discipline**
+   - `main` is a clean upstream mirror. NEVER commit to, modify, or merge into it.
+   - All work happens on `plugin-dev` (or a task branch off it).
+2. **Audit-first development**
+   - Architecture understanding is done as phased audits; each phase produces a report
+     under `audit/` (e.g. `audit/<phase>.md`) committed to `plugin-dev`.
+   - Report format: objective / verified facts with `file:line` citations / anatomy /
+     known gaps / next steps.
+3. **Verification gate** — nothing is "done" until it compiles and passes:
+   - Frontend: `pnpm eslint .`, `pnpm test`, `pnpm build`
+   - Rust (desktop, in `src-tauri/`): `cargo check`, `cargo test --features test-utils`,
+     `cargo clippy --all-targets --features test-utils -- -D warnings`
+   - Server: `cargo check --no-default-features --bin codeg-server`
+     and `cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings`
+   - MCP: `cargo check --no-default-features --bin codeg-mcp`
+4. **Token economy**
+   - Prefer indexed tooling over blind greps when safe (see Tooling).
+   - Keep reports, comments, and commits tight — no filler.
+5. **No unnecessary installs** — prefer portable/built-in tooling.
 
-### 后端 Rust（在 `src-tauri/` 目录下执行）
+## Tooling (available via mcpproxy MCP)
 
-```bash
-# 桌面模式（默认 feature）
-cargo check
-cargo test --features test-utils
-cargo clippy --all-targets --features test-utils -- -D warnings
+- **qartez** — codebase graph: `qartez_map`, `qartez_stats`, `qartez_refs`, `qartez_deps`,
+  `qartez_impact`, `qartez_outline`, `qartez_read`, `qartez_context`, `qartez_test_gaps`,
+  `qartez_diff_impact`, `qartez_grep`, `qartez_find`, ...
+- **codebase-memory (cbm)** — semantic knowledge graph. Project id for this repo:
+  `D-Temp-Codeg` (`index_status`, `search_graph`, `get_code_snippet`, `manage_adr`, ...)
+- **ICM** — session memory, facts, transcripts.
 
-# 服务器模式
-cargo check --no-default-features --bin codeg-server
-cargo test --no-default-features --bin codeg-server --lib
-cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings
+## Architecture
 
-# codeg-mcp 协作伴生进程（多智能体委托）
-cargo check --no-default-features --bin codeg-mcp
-cargo clippy --no-default-features --bin codeg-mcp -- -D warnings
+### Dual-mode binaries (Cargo feature flags)
 
-# 解析器快照评审（输出变化时）
-cargo insta review
-INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
-```
+- **`codeg`** (`tauri-runtime`, default): full desktop app — Tauri window, notifications,
+  auto-update
+- **`codeg-server`** (no features, `--no-default-features`): standalone server — Axum
+  HTTP API + WebSocket only
+- **`codeg-mcp`** (no features): per-launch stdio MCP companion injected into agent CLI
+  MCP configs; exposes **async** sub-agent delegation tools to the LLM
 
-## 架构
+### Shared core
 
-### 双模式运行
+- **`app_state.rs`** — `AppState` shared state; `EventEmitter` enum distinguishes
+  event emission per mode
+- **`web/event_bridge.rs`** — `EventEmitter::Tauri(AppHandle)` or
+  `EventEmitter::WebOnly(Arc<WebEventBroadcaster>)`
+- **`web/router.rs`** — Axum router taking `Arc<AppState>`
+- **`web/handlers/`** — HTTP API endpoints, all using `Extension<Arc<AppState>>`
 
-项目通过 Cargo feature flags 支持三种二进制：
+### Rust backend (`src-tauri/src/`)
 
-- **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
-- **`codeg-server`**（无 feature，`--no-default-features`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket
-- **`codeg-mcp`**（无 feature）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。
+Reads/parses agent session files on the local filesystem:
 
-### 共享核心
-
-- **`app_state.rs`** — `AppState` 共享状态结构，两种模式通过 `EventEmitter` 枚举区分事件发射方式
-- **`web/event_bridge.rs`** — `EventEmitter::Tauri(AppHandle)` 或 `EventEmitter::WebOnly(Arc<WebEventBroadcaster>)`
-- **`web/router.rs`** — Axum 路由，接受 `Arc<AppState>`
-- **`web/handlers/`** — HTTP API 端点，全部使用 `Extension<Arc<AppState>>`
-
-### Rust 后端（`src-tauri/src/`）
-
-后端负责读取和解析本地文件系统上的代理会话文件：
-
-- **`app_state.rs`** — 共享状态（db、连接管理器、终端管理器、事件广播器）
-- **`models/`** — 共享数据结构
-- **`parsers/`** — 每个智能体一个解析器
-- **`commands/`** — 业务逻辑，`_core` 函数供两种模式共用，`#[tauri::command]` 函数仅桌面模式
-- **`web/`** — Axum HTTP API + WebSocket + 静态文件服务 + 认证中间件
-- **`acp/`** — Agent Client Protocol 连接管理
+- **`app_state.rs`** — shared state (db, connection manager, terminal manager, event
+  broadcaster)
+- **`models/`** — shared data structures
+- **`parsers/`** — one parser per agent
+- **`commands/`** — business logic; `_core` functions shared by both modes,
+  `#[tauri::command]` functions desktop-only
+- **`web/`** — Axum HTTP API + WebSocket + static file serving + auth middleware
+- **`acp/`** — Agent Client Protocol connection management
 - **`db/`** — SeaORM + SQLite
 
-### 前端（`src/`）
+### Frontend (`src/`)
 
-#### 核心库（`lib/`）
+- **`lib/transport/`** — Transport abstraction (auto-switches `invoke()`/`fetch()` for
+  Tauri/Web)
+- **`lib/adapters/`** — AI response → component rendering adapters
+- **`lib/types.ts`** — TypeScript mirror of Rust models; **`lib/api.ts`** — main API
+  client; **`lib/tauri.ts`** — Tauri API wrapper
+- **`i18n/`** — next-intl; 10 languages (en, zh-CN, zh-TW, ja, ko, es, de, fr, pt, ar);
+  message files in `i18n/messages/`
 
-- **`transport/`** — Transport 抽象层（自动检测 Tauri/Web 环境切换 `invoke()`/`fetch()`）
-- **`adapters/`** — AI 响应到组件渲染的适配器
-- **`types.ts`** — Rust 模型的 TypeScript 镜像
-- **`api.ts`** — 主 API 客户端
-- **`tauri.ts`** — Tauri API 封装
+### Data flow
 
-#### 国际化（`i18n/`）
+- Desktop: frontend `invoke()` → Tauri command → business logic → data
+- Server: frontend `fetch()` → Axum HTTP API → same business logic → JSON
+- Real-time: backend events → EventEmitter (Tauri event / WebSocket broadcast) → frontend
 
-- 支持 10 种语言：英语、简体中文、繁体中文、日语、韩语、西班牙语、德语、法语、葡萄牙语、阿拉伯语
-- 使用 next-intl 框架，消息文件存放在 `i18n/messages/`
+### Conditional compilation
 
-### 数据流
+- `#[cfg(feature = "tauri-runtime")]` — desktop-only (Tauri window, notifications,
+  `tauri::State` params, ...)
+- `#[cfg_attr(feature = "tauri-runtime", tauri::command)]` — always compiled; only marked
+  as a Tauri command in desktop mode
+- `_core`-suffixed functions — plain reference params (`&AppDatabase`, `&EventEmitter`),
+  shared by web handlers and Tauri commands
 
-桌面模式：前端 `invoke()` → Tauri 命令 → 业务逻辑 → 返回数据
-服务器模式：前端 `fetch()` → Axum HTTP API → 同一业务逻辑 → 返回 JSON
-实时通信：后端事件 → EventEmitter（Tauri 事件 / WebSocket 广播）→ 前端
+## Key Constraints
 
-### 条件编译约定
+- **Static export only**: `next.config.ts` sets `output: "export"`; no dynamic routes
+  (`[param]`) — use query params instead
+- **Path alias**: `@/*` → `./src/*` (e.g. `@/lib/utils`, `@/components/ui/button`)
+- **Server deployment**: env vars `CODEG_PORT`, `CODEG_HOST`, `CODEG_TOKEN`,
+  `CODEG_DATA_DIR`, `CODEG_STATIC_DIR`
+- **Docker**: multi-stage build (Node.js + Rust), `docker-compose` one-command deploy
 
-- `#[cfg(feature = "tauri-runtime")]` — 仅桌面模式编译（Tauri 窗口、通知、`tauri::State` 参数等）
-- `#[cfg_attr(feature = "tauri-runtime", tauri::command)]` — 函数始终可用，仅在桌面模式标记为 Tauri 命令
-- `_core` 后缀函数 — 接受普通引用参数（`&AppDatabase`、`&EventEmitter`），供 Web handlers 和 Tauri 命令共用
+## Code Style
 
-## 关键约束
-
-- **仅支持静态导出**：`next.config.ts` 设置 `output: "export"`，不支持动态路由（`[param]`），必须使用查询参数替代
-- **路径别名**：`@/*` 映射到 `./src/*`，导入写法为 `@/lib/utils`、`@/components/ui/button`
-- **服务器部署**：通过环境变量配置（`CODEG_PORT`、`CODEG_HOST`、`CODEG_TOKEN`、`CODEG_DATA_DIR`、`CODEG_STATIC_DIR`）
-- **Docker 支持**：多阶段构建（Node.js + Rust），支持 `docker-compose` 一键部署
-
-## 代码风格
-
-- Prettier：无分号、尾逗号（es5）、2 空格缩进、80 字符宽度
-- ESLint：next/core-web-vitals + typescript + prettier
-- TypeScript：strict 模式，启用 `noUnusedLocals` 和 `noUnusedParameters`
-- Rust：2021 edition，使用 `thiserror` 定义错误类型
+- Prettier: no semicolons, trailing commas (es5), 2-space indent, 80-char width
+- ESLint: next/core-web-vitals + typescript + prettier
+- TypeScript: strict, `noUnusedLocals` + `noUnusedParameters`
+- Rust: 2021 edition, `thiserror` for error types
