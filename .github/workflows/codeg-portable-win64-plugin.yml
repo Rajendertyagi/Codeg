@@ -3,7 +3,7 @@ name: Build Codeg Portable Windows x64 (plugin)
 on:
   push:
     branches:
-      - feat/auto-accept
+      - plugin-dev
   workflow_dispatch:
 
 permissions:
