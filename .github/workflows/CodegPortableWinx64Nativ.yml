@@ -1,4 +1,4 @@
-name: Build Codeg Native Windows x64 (no fork code)
+name: Build Codeg Native Windows x64
 
 on:
   workflow_dispatch:
