@@ -10,6 +10,7 @@ import {
   AutomationsPageTitle,
 } from "@/components/automations/automations-page"
 import { TasksPage, TasksPageTitle } from "@/components/tasks/tasks-page"
+import { CustomWorkflowsPage } from "../../../plugins/frontend/custom-page"
 
 /**
  * Registry of full-page routes that take over the main content region. The
@@ -21,6 +22,7 @@ import { TasksPage, TasksPageTitle } from "@/components/tasks/tasks-page"
 const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
   automations: AutomationsPage,
   tasks: TasksPage,
+  "custom-workflows": CustomWorkflowsPage,
 }
 
 /** Optional per-route content for the window-chrome strip above the page

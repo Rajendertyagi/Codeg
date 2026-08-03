@@ -8,6 +8,9 @@
 
 pub mod custom_auto_approve;
 pub mod custom_cron;
+// Axum web-handler shims (needed in both desktop and server modes, unlike the
+// feature-gated Tauri command shims below).
+pub mod web_workflows;
 
 /// Toggle GLOBAL auto-accept of tool-permission requests. App-wide: when on,
 /// the permission-request gate in `handle_permission_request` answers every
