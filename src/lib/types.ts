@@ -1186,6 +1186,11 @@ export interface AutomationConfig {
   mode_id?: string | null
   config_values: Record<string, string>
   label_snapshot?: AutomationLabelSnapshot | null
+  /** When set (launch_session), each fire resumes this existing conversation
+   *  instead of creating a fresh one; absent/null keeps the legacy always-fresh
+   *  behavior. Mirrors `existing_conversation_id` in the Rust `AutomationConfig`
+   *  (stored inside the opaque config blob, so old rows default to null). */
+  existing_conversation_id?: number | null
 }
 
 export interface Automation {

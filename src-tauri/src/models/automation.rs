@@ -99,4 +99,9 @@ pub struct AutomationConfig {
     pub config_values: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub label_snapshot: Option<serde_json::Value>,
+    /// When set, `LaunchSession` fires into this existing conversation row
+    /// (resuming its external session) instead of creating a fresh conversation.
+    /// `None` (the legacy default) keeps the always-fresh behavior.
+    #[serde(default)]
+    pub existing_conversation_id: Option<i32>,
 }
