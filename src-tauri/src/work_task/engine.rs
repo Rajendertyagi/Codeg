@@ -41,6 +41,7 @@ use crate::db::entities::work_task::WorkTaskStatus;
 use crate::db::entities::{folder, folder_command};
 use crate::db::service::{conversation_service, tab_service, work_task_service};
 use crate::db::AppDatabase;
+use crate::git_repo::is_git_repo;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
     AgentType, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
@@ -727,7 +728,7 @@ impl TaskEngine {
         // "land" as a no-op tree match.
         let wt = if matches!(mode, LaunchMode::Merge { .. }) {
             self.existing_worktree(&task).await?
-        } else {
+        } else if is_git_repo(Path::new(&root.path)) {
             let wt = self.ensure_worktree(&task, &root).await?;
             // Run the folder's init command (deps install etc.) before the
             // agent ever sees the tree. Gated on the setup marker, NOT on "the
@@ -748,6 +749,14 @@ impl TaskEngine {
                 }
             }
             wt
+        } else {
+            // Non-Git folder (Local Folder): run directly in the selected
+            // directory with no worktree isolation. Git detection is a runtime
+            // property of the path, not a label on the row.
+            WorktreeRef {
+                folder_id: root.id,
+                path: root.path,
+            }
         };
 
         let _ = work_task_service::record_event(
@@ -2368,7 +2377,8 @@ async fn compose_prompt(
 
     // The standing worktree guard — a merge generation replaces it with its
     // own instructions (it exists to forbid exactly what a merge must do).
-    if !matches!(mode, LaunchMode::Merge { .. }) {
+    // Skipped for non-Git tasks (no worktree, no branch to protect).
+    if !matches!(mode, LaunchMode::Merge { .. }) && task.work_branch.is_some() {
         blocks.push(PromptInputBlock::Text {
             text: format!(
                 "—— Work task context ——\nYou are working inside a dedicated git worktree for \
