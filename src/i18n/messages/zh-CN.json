@@ -4101,7 +4101,15 @@
     "branchLocal": "本地",
     "branchRemote": "远程",
     "branchSearchPlaceholder": "搜索分支…",
-    "branchNone": "无分支"
+    "branchNone": "无分支",
+    "launchTarget": "启动目标",
+    "targetNewConversation": "新建对话",
+    "targetExistingConversation": "现有对话",
+    "conversationSearchPlaceholder": "搜索对话…",
+    "conversationNone": "没有对话",
+    "existingConversationHint": "每次触发将恢复此对话，在其中新增一轮，而不是启动新会话。",
+    "errorTargetConversation": "请选择要恢复的对话",
+    "untitledConversation": "未命名对话"
   },
   "Tasks": {
     "title": "任务看板",

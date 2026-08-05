@@ -4096,7 +4096,15 @@
     "branchLocal": "ローカル",
     "branchRemote": "リモート",
     "branchSearchPlaceholder": "ブランチを検索…",
-    "branchNone": "ブランチがありません"
+    "branchNone": "ブランチがありません",
+    "launchTarget": "起動先",
+    "targetNewConversation": "新しい会話",
+    "targetExistingConversation": "既存の会話",
+    "conversationSearchPlaceholder": "会話を検索…",
+    "conversationNone": "会話がありません",
+    "existingConversationHint": "実行のたびにこの会話を再開し、新しいターンを追加します（新しいセッションは開始しません）。",
+    "errorTargetConversation": "再開する会話を選択してください",
+    "untitledConversation": "名前のない会話"
   },
   "Tasks": {
     "title": "タスクボード",

@@ -4096,7 +4096,15 @@
     "branchLocal": "Lokal",
     "branchRemote": "Remote",
     "branchSearchPlaceholder": "Branches suchen…",
-    "branchNone": "Keine Branches"
+    "branchNone": "Keine Branches",
+    "launchTarget": "Startziel",
+    "targetNewConversation": "Neue Unterhaltung",
+    "targetExistingConversation": "Vorhandene Unterhaltung",
+    "conversationSearchPlaceholder": "Unterhaltungen durchsuchen…",
+    "conversationNone": "Keine Unterhaltungen",
+    "existingConversationHint": "Jede Ausführung setzt diese Unterhaltung fort und fügt eine neue Runde hinzu, statt eine neue Sitzung zu starten.",
+    "errorTargetConversation": "Wähle eine Unterhaltung zum Fortsetzen",
+    "untitledConversation": "Unbenannte Unterhaltung"
   },
   "Tasks": {
     "title": "Aufgabenboard",

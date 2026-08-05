@@ -4096,7 +4096,15 @@
     "branchLocal": "محلي",
     "branchRemote": "بعيد",
     "branchSearchPlaceholder": "بحث في الفروع…",
-    "branchNone": "لا توجد فروع"
+    "branchNone": "لا توجد فروع",
+    "launchTarget": "هدف التشغيل",
+    "targetNewConversation": "محادثة جديدة",
+    "targetExistingConversation": "محادثة موجودة",
+    "conversationSearchPlaceholder": "البحث في المحادثات…",
+    "conversationNone": "لا توجد محادثات",
+    "existingConversationHint": "كل تشغيل يستأنف هذه المحادثة ويضيف دورًا جديدًا إليها بدلاً من بدء جلسة جديدة.",
+    "errorTargetConversation": "اختر محادثة لاستئنافها",
+    "untitledConversation": "محادثة بدون عنوان"
   },
   "Tasks": {
     "title": "لوحة المهام",

@@ -23,6 +23,7 @@ import {
   snapshotLabels,
 } from "./agent-config-section"
 import { AutomationBranchPicker } from "./automation-branch-picker"
+import { AutomationConversationPicker } from "../../../newplugin/frontend/automation-conversation-picker"
 import {
   ComposerInvocationsPopup,
   useComposerInvocations,
@@ -33,6 +34,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
   SelectContent,
@@ -124,6 +126,15 @@ export function AutomationEditor({
   // can resolve a remote-only branch unambiguously (see is_remote_branch).
   const [isRemoteBranch, setIsRemoteBranch] = useState(
     automation?.is_remote_branch ?? false
+  )
+  // Launch target: a fresh conversation (legacy behavior, the default) or an
+  // existing conversation each fire resumes. Modeled as a radio with the pinned
+  // id alongside so switching back to "new" stays one click away.
+  const [launchTarget, setLaunchTarget] = useState<"new" | "existing">(
+    automation?.config?.existing_conversation_id != null ? "existing" : "new"
+  )
+  const [targetConversationId, setTargetConversationId] = useState<number | null>(
+    automation?.config?.existing_conversation_id ?? null
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -249,6 +260,15 @@ export function AutomationEditor({
     // The Save button is disabled in this state, so this is a race-safety net —
     // bail silently and let it re-enable once the path resolves.
     if (folderPathResolving) return
+    // An "existing conversation" target is only valid once one is actually
+    // picked; a mid-switch draft would otherwise save a doomed config.
+    if (
+      action === "launch_session" &&
+      launchTarget === "existing" &&
+      targetConversationId == null
+    ) {
+      return setError(t("errorTargetConversation"))
+    }
 
     const blocks: PromptInputBlock[] = editor
       ? docToPromptBlocks(editor)
@@ -323,6 +343,8 @@ export function AutomationEditor({
               config_values: automation.config?.config_values ?? {},
               label_snapshot:
                 automation.config?.label_snapshot ?? label_snapshot,
+              existing_conversation_id:
+                automation.config?.existing_conversation_id ?? null,
             }
           : {
               action,
@@ -331,6 +353,12 @@ export function AutomationEditor({
               mode_id,
               config_values,
               label_snapshot,
+              // Enqueue-task fires never touch the session machinery, so the
+              // target only applies to launch_session.
+              existing_conversation_id:
+                action === "launch_session" && launchTarget === "existing"
+                  ? targetConversationId
+                  : null,
             },
       }
       await onSubmit(draft)
@@ -484,6 +512,41 @@ export function AutomationEditor({
           <p className="text-xs text-muted-foreground">
             {t("actionEnqueueTaskHint")}
           </p>
+        ) : null}
+        {/* Launch target — a fresh conversation per fire (legacy) or a pinned
+            existing conversation each fire resumes. Only launch_session runs a
+            session, so the choice is hidden for enqueue_task. */}
+        {action === "launch_session" ? (
+          <div className="flex flex-col gap-2">
+            <RadioGroup
+              value={launchTarget}
+              onValueChange={(v) => setLaunchTarget(v as "new" | "existing")}
+              aria-label={t("launchTarget")}
+              className="flex w-fit flex-row gap-4"
+            >
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <RadioGroupItem value="new" />
+                {t("targetNewConversation")}
+              </label>
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <RadioGroupItem value="existing" />
+                {t("targetExistingConversation")}
+              </label>
+            </RadioGroup>
+            {launchTarget === "existing" ? (
+              <>
+                <AutomationConversationPicker
+                  agentType={agentType}
+                  value={targetConversationId}
+                  onChange={setTargetConversationId}
+                  placeholder={t("conversationSearchPlaceholder")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("existingConversationHint")}
+                </p>
+              </>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

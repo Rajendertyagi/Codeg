@@ -4096,7 +4096,15 @@
     "branchLocal": "Locale",
     "branchRemote": "Distante",
     "branchSearchPlaceholder": "Rechercher des branches…",
-    "branchNone": "Aucune branche"
+    "branchNone": "Aucune branche",
+    "launchTarget": "Cible de lancement",
+    "targetNewConversation": "Nouvelle conversation",
+    "targetExistingConversation": "Conversation existante",
+    "conversationSearchPlaceholder": "Rechercher des conversations…",
+    "conversationNone": "Aucune conversation",
+    "existingConversationHint": "Chaque exécution reprend cette conversation en ajoutant un nouveau tour, au lieu de démarrer une nouvelle session.",
+    "errorTargetConversation": "Sélectionnez une conversation à reprendre",
+    "untitledConversation": "Conversation sans titre"
   },
   "Tasks": {
     "title": "Tableau des tâches",

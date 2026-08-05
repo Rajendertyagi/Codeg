@@ -4096,7 +4096,15 @@
     "branchLocal": "로컬",
     "branchRemote": "원격",
     "branchSearchPlaceholder": "브랜치 검색…",
-    "branchNone": "브랜치 없음"
+    "branchNone": "브랜치 없음",
+    "launchTarget": "시작 대상",
+    "targetNewConversation": "새 대화",
+    "targetExistingConversation": "기존 대화",
+    "conversationSearchPlaceholder": "대화 검색…",
+    "conversationNone": "대화 없음",
+    "existingConversationHint": "실행할 때마다 이 대화를 재개하고 새 턴을 추가합니다(새 세션을 시작하지 않음).",
+    "errorTargetConversation": "재개할 대화를 선택하세요",
+    "untitledConversation": "제목 없는 대화"
   },
   "Tasks": {
     "title": "작업 보드",

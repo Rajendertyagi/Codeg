@@ -4101,7 +4101,15 @@
     "branchLocal": "Local",
     "branchRemote": "Remote",
     "branchSearchPlaceholder": "Search branches…",
-    "branchNone": "No branches"
+    "branchNone": "No branches",
+    "launchTarget": "Launch target",
+    "targetNewConversation": "New conversation",
+    "targetExistingConversation": "Existing conversation",
+    "conversationSearchPlaceholder": "Search conversations…",
+    "conversationNone": "No conversations",
+    "existingConversationHint": "Each fire resumes this conversation, adding a new turn to it instead of starting a fresh session.",
+    "errorTargetConversation": "Select a conversation to resume",
+    "untitledConversation": "Untitled conversation"
   },
   "Tasks": {
     "title": "Task Board",

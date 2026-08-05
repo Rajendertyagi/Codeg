@@ -4096,7 +4096,15 @@
     "branchLocal": "Local",
     "branchRemote": "Remota",
     "branchSearchPlaceholder": "Buscar ramas…",
-    "branchNone": "Sin ramas"
+    "branchNone": "Sin ramas",
+    "launchTarget": "Destino de lanzamiento",
+    "targetNewConversation": "Conversación nueva",
+    "targetExistingConversation": "Conversación existente",
+    "conversationSearchPlaceholder": "Buscar conversaciones…",
+    "conversationNone": "Sin conversaciones",
+    "existingConversationHint": "Cada ejecución reanuda esta conversación añadiendo un nuevo turno, en lugar de iniciar una sesión nueva.",
+    "errorTargetConversation": "Selecciona una conversación para reanudar",
+    "untitledConversation": "Conversación sin título"
   },
   "Tasks": {
     "title": "Tablero de tareas",
