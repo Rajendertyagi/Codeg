@@ -4183,6 +4183,13 @@
     "conversationNone": "Aucune conversation",
     "existingConversationHint": "Chaque exécution reprend cette conversation en ajoutant un nouveau tour, au lieu de démarrer une nouvelle session.",
     "errorTargetConversation": "Sélectionnez une conversation à reprendre",
+    "targetKind": "Racine cible",
+    "targetGitWorkspace": "Espace de travail Git",
+    "targetLocalFolder": "Dossier local",
+    "localFolderBrowse": "Parcourir…",
+    "localFolderPathPlaceholder": "Saisissez un chemin absolu",
+    "localFolderHint": "Chaque exécution travaille directement dans ce dossier, sans dépôt git, branche ni worktree.",
+    "errorLocalFolder": "Saisissez un chemin de dossier",
     "untitledConversation": "Conversation sans titre"
   },
   "Tasks": {

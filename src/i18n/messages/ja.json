@@ -4183,6 +4183,13 @@
     "conversationNone": "会話がありません",
     "existingConversationHint": "実行のたびにこの会話を再開し、新しいターンを追加します（新しいセッションは開始しません）。",
     "errorTargetConversation": "再開する会話を選択してください",
+    "targetKind": "実行先",
+    "targetGitWorkspace": "Git ワークスペース",
+    "targetLocalFolder": "ローカルフォルダー",
+    "localFolderBrowse": "参照…",
+    "localFolderPathPlaceholder": "絶対パスを入力",
+    "localFolderHint": "各実行はこのフォルダー内で直接行われます（git リポジトリ・ブランチ・ワークツリーは関与しません）。",
+    "errorLocalFolder": "フォルダーのパスを入力してください",
     "untitledConversation": "名前のない会話"
   },
   "Tasks": {

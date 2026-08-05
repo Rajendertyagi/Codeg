@@ -4183,6 +4183,13 @@
     "conversationNone": "Sin conversaciones",
     "existingConversationHint": "Cada ejecución reanuda esta conversación añadiendo un nuevo turno, en lugar de iniciar una sesión nueva.",
     "errorTargetConversation": "Selecciona una conversación para reanudar",
+    "targetKind": "Directorio de destino",
+    "targetGitWorkspace": "Espacio de trabajo Git",
+    "targetLocalFolder": "Carpeta local",
+    "localFolderBrowse": "Examinar…",
+    "localFolderPathPlaceholder": "Introduce una ruta absoluta",
+    "localFolderHint": "Cada ejecución trabaja directamente en esta carpeta, sin repositorio git, rama ni worktree.",
+    "errorLocalFolder": "Introduce una ruta de carpeta",
     "untitledConversation": "Conversación sin título"
   },
   "Tasks": {

@@ -4183,6 +4183,13 @@
     "conversationNone": "لا توجد محادثات",
     "existingConversationHint": "كل تشغيل يستأنف هذه المحادثة ويضيف دورًا جديدًا إليها بدلاً من بدء جلسة جديدة.",
     "errorTargetConversation": "اختر محادثة لاستئنافها",
+    "targetKind": "الجذر المستهدف",
+    "targetGitWorkspace": "مساحة عمل Git",
+    "targetLocalFolder": "مجلد محلي",
+    "localFolderBrowse": "استعراض…",
+    "localFolderPathPlaceholder": "أدخل مسار مجلد مطلقًا",
+    "localFolderHint": "يعمل كل تشغيل مباشرة في هذا المجلد — دون مستودع git أو فرع أو شجرة عمل.",
+    "errorLocalFolder": "أدخل مسار المجلد",
     "untitledConversation": "محادثة بدون عنوان"
   },
   "Tasks": {

@@ -4188,6 +4188,13 @@
     "conversationNone": "No conversations",
     "existingConversationHint": "Each fire resumes this conversation, adding a new turn to it instead of starting a fresh session.",
     "errorTargetConversation": "Select a conversation to resume",
+    "targetKind": "Target root",
+    "targetGitWorkspace": "Git workspace",
+    "targetLocalFolder": "Local folder",
+    "localFolderBrowse": "Browse…",
+    "localFolderPathPlaceholder": "Enter an absolute folder path",
+    "localFolderHint": "Each run executes directly in this folder — no git repo, branch, or worktree involved.",
+    "errorLocalFolder": "Enter a folder path",
     "untitledConversation": "Untitled conversation"
   },
   "Tasks": {
