@@ -113,6 +113,82 @@ export function TaskEditorDialog({
   )
 }
 
+function ConversationMismatchWarning({
+  folderId,
+  existingConversationId,
+  folders,
+  onSwitchFolder,
+  onClearConversation,
+}: {
+  folderId: number | null
+  existingConversationId: number | null
+  folders: { id: number; name: string }[]
+  onSwitchFolder: (newFolderId: number) => void
+  onClearConversation: () => void
+}) {
+  const t = useTranslations("Tasks")
+  const [mismatch, setMismatch] = useState<{
+    conversationFolderId: number
+    conversationFolderName: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (existingConversationId == null || folderId == null) {
+      setMismatch(null)
+      return
+    }
+    let cancelled = false
+    listAllConversations({ agent_type: undefined })
+      .then((conversations) => {
+        if (cancelled) return
+        const selected = conversations.find((c) => c.id === existingConversationId)
+        if (selected && selected.folder_id !== folderId) {
+          const selectedFolder = folders.find((f) => f.id === selected.folder_id)
+          setMismatch({
+            conversationFolderId: selected.folder_id,
+            conversationFolderName: selectedFolder?.name ?? `#${selected.folder_id}`,
+          })
+        } else {
+          setMismatch(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMismatch(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [existingConversationId, folderId, folders])
+
+  if (mismatch == null) return null
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2">
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        {t("conversationMismatchWarning", {
+          folderName: mismatch.conversationFolderName,
+        })}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="text-xs text-amber-600 underline-offset-2 hover:underline dark:text-amber-400"
+          onClick={() => onSwitchFolder(mismatch.conversationFolderId)}
+        >
+          {t("switchTargetFolder")}
+        </button>
+        <button
+          type="button"
+          className="text-xs text-amber-600 underline-offset-2 hover:underline dark:text-amber-400"
+          onClick={onClearConversation}
+        >
+          {t("clearConversation")}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function TaskEditorBody({
   task,
   defaultFolderId,
@@ -161,6 +237,9 @@ function TaskEditorBody({
   const [existingConversationId, setExistingConversationId] = useState<
     number | null
   >(task?.config?.existing_conversation_id ?? null)
+  const [showExistingPicker, setShowExistingPicker] = useState(
+    task?.config?.existing_conversation_id != null
+  )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -311,7 +390,7 @@ function TaskEditorBody({
     if (folderId == null) return setError(t("errorFolder"))
 
     // Validate: existing conversation must belong to the task's folder.
-    if (existingConversationId != null && existingConversationId > 0) {
+    if (existingConversationId != null) {
       const conversations = await listAllConversations({
         agent_type: agentType,
       })
@@ -532,8 +611,11 @@ function TaskEditorBody({
               <input
                 type="radio"
                 name="conversationTarget"
-                checked={existingConversationId == null}
-                onChange={() => setExistingConversationId(null)}
+                checked={!showExistingPicker}
+                onChange={() => {
+                  setShowExistingPicker(false)
+                  setExistingConversationId(null)
+                }}
               />
               {t("conversationNew")}
             </label>
@@ -541,23 +623,26 @@ function TaskEditorBody({
               <input
                 type="radio"
                 name="conversationTarget"
-                checked={existingConversationId != null}
-                onChange={() => {
-                  if (existingConversationId == null) {
-                    setExistingConversationId(-1) // sentinel: picker will open
-                  }
-                }}
+                checked={showExistingPicker}
+                onChange={() => setShowExistingPicker(true)}
               />
               {t("conversationExisting")}
             </label>
           </div>
-          {existingConversationId != null ? (
+          {showExistingPicker ? (
             <div className="flex flex-col gap-2">
               <AutomationConversationPicker
                 agentType={agentType}
-                value={existingConversationId > 0 ? existingConversationId : null}
+                value={existingConversationId}
                 onChange={setExistingConversationId}
                 placeholder={t("conversationSearchPlaceholder")}
+              />
+              <ConversationMismatchWarning
+                folderId={folderId}
+                existingConversationId={existingConversationId}
+                folders={folders}
+                onSwitchFolder={(newFolderId) => setFolderId(newFolderId)}
+                onClearConversation={() => setExistingConversationId(null)}
               />
             </div>
           ) : null}
