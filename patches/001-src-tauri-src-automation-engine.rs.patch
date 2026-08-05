@@ -1,0 +1,178 @@
+diff --git a/src-tauri/src/automation/engine.rs b/src-tauri/src/automation/engine.rs
+index 0097f5c5..f0b8d6fe 100644
+--- a/src-tauri/src/automation/engine.rs
++++ b/src-tauri/src/automation/engine.rs
+@@ -32,7 +32,7 @@ use crate::commands::folders::{
+     git_worktree_add, open_worktree_folder_core, resolve_worktree_folder_core,
+ };
+ use crate::db::entities::conversation::{self, ConversationStatus};
+-use crate::db::service::automation_service;
++use crate::db::service::{automation_service, conversation_service};
+ use crate::db::AppDatabase;
+ use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
+ use crate::models::{
+@@ -434,6 +434,39 @@ impl AutomationEngine {
+             return Err("prompt is empty".to_string());
+         }
+ 
++        // Resume target: when the config pins an existing conversation, fire into
++        // that row (resuming its external session) instead of creating a fresh
++        // conversation. The row lookup is I/O glue (core); the fresh-vs-resume
++        // decision lives in the Layer-2 backend (`newplugin_backend`). Resolved
++        // BEFORE `resolve_cwd` so a vanished/deleted target fails fast without
++        // creating a per-run worktree.
++        let pinned_target = match cfg.existing_conversation_id {
++            Some(conv_id) => Some(
++                conversation_service::get_by_id(&self.db.conn, conv_id)
++                    .await
++                    .map_err(|e| format!("target conversation {conv_id}: {e}"))?,
++            ),
++            None => None,
++        };
++        let launch_target = newplugin_backend::launch_target::decide(
++            cfg.existing_conversation_id,
++            pinned_target.as_ref().map(|conv| {
++                newplugin_backend::launch_target::TargetConversationView {
++                    id: conv.id,
++                    folder_id: conv.folder_id,
++                    external_id: conv.external_id.clone(),
++                }
++            }),
++        )
++        .map_err(|vanished| format!("target conversation {} not found", vanished.0))?;
++        let resume_session_id = match &launch_target {
++            newplugin_backend::launch_target::LaunchTarget::Fresh => None,
++            newplugin_backend::launch_target::LaunchTarget::Resume {
++                resume_session_id,
++                ..
++            } => resume_session_id.clone(),
++        };
++
+         let cwd = self.resolve_cwd(auto, run_id).await?;
+ 
+         // Announce the resolved working folder so every client's sidebar knows it
+@@ -446,10 +479,13 @@ impl AutomationEngine {
+         }
+ 
+         // Recompute env from current settings (never snapshotted); hard-fail
+-        // visibly if the agent is disabled or not installed.
+-        let runtime_env = build_session_runtime_env(&self.db, agent_type, None, &self.data_dir)
+-            .await
+-            .map_err(|e| e.to_string())?;
++        // visibly if the agent is disabled or not installed. A pinned target
++        // passes its session id so per-session env (e.g. OpenClaw's reset flag)
++        // matches a resume, exactly like the UI / work-task resume paths.
++        let runtime_env =
++            build_session_runtime_env(&self.db, agent_type, resume_session_id.as_deref(), &self.data_dir)
++                .await
++                .map_err(|e| e.to_string())?;
+         verify_agent_installed(agent_type)
+             .await
+             .map_err(|e| e.to_string())?;
+@@ -477,13 +513,15 @@ impl AutomationEngine {
+             return Ok(());
+         }
+ 
+-        // Fresh connection (session_id=None), owner-labelled "automation".
++        // New conversation ΓåÆ fresh connection (session_id=None); pinned target ΓåÆ
++        // resume its external session (`spawn_agent` dedup re-attaches an
++        // already-live one for the same session). Owner-labelled "automation".
+         let conn_id = self
+             .manager
+             .spawn_agent(
+                 agent_type,
+                 Some(cwd.working_dir.clone()),
+-                None,
++                resume_session_id,
+                 runtime_env,
+                 "automation".to_string(),
+                 self.emitter.clone(),
+@@ -493,17 +531,30 @@ impl AutomationEngine {
+             .await
+             .map_err(|e| e.to_string())?;
+ 
+-        // Create the conversation row, then adopt it in send_prompt (Branch A).
+-        let title = first_chars(&cfg.display_text, 80);
+-        let conversation_id =
+-            match create_conversation_core(&self.db.conn, cwd.folder_id, agent_type, Some(title)).await
+-            {
+-                Ok(id) => id,
+-                Err(e) => {
+-                    let _ = self.manager.disconnect(&conn_id).await;
+-                    return Err(e.to_string());
++        // Conversation row: adopt the pinned target (Branch A in
++        // send_prompt_linked, which re-flips it InProgress and backfills a fresh
++        // external session if the target never ran) or create a fresh one for a
++        // new conversation. The prompt groups under the row's own folder when
++        // resuming, the per-run worktree folder otherwise.
++        let (conversation_id, prompt_folder_id) = match launch_target {
++            newplugin_backend::launch_target::LaunchTarget::Resume {
++                conversation_id,
++                folder_id,
++                ..
++            } => (conversation_id, Some(folder_id)),
++            newplugin_backend::launch_target::LaunchTarget::Fresh => {
++                let title = first_chars(&cfg.display_text, 80);
++                match create_conversation_core(&self.db.conn, cwd.folder_id, agent_type, Some(title))
++                    .await
++                {
++                    Ok(id) => (id, Some(cwd.folder_id)),
++                    Err(e) => {
++                        let _ = self.manager.disconnect(&conn_id).await;
++                        return Err(e.to_string());
++                    }
+                 }
+-            };
++            }
++        };
+ 
+         // Surface the produced conversation in every client's sidebar the instant
+         // it exists (InProgress) ΓÇö independent of the implicit upsert inside
+@@ -544,7 +595,13 @@ impl AutomationEngine {
+         if run_no_longer_running(&self.db.conn, run_id).await {
+             self.index.lock().await.remove(&conn_id);
+             let _ = self.manager.disconnect(&conn_id).await;
+-            self.cancel_conversation(conversation_id).await;
++            // Converge only a row this launch created/flipped InProgress: a
++            // pinned target untouched by this launch keeps its status.
++            if self.conversation_status(conversation_id).await
++                == Some(ConversationStatus::InProgress)
++            {
++                self.cancel_conversation(conversation_id).await;
++            }
+             return Ok(());
+         }
+ 
+@@ -554,7 +611,7 @@ impl AutomationEngine {
+                 &self.db,
+                 &conn_id,
+                 blocks,
+-                Some(cwd.folder_id),
++                prompt_folder_id,
+                 Some(conversation_id),
+                 None,
+                 None,
+@@ -565,11 +622,18 @@ impl AutomationEngine {
+             Err(e) => {
+                 self.index.lock().await.remove(&conn_id);
+                 let _ = self.manager.disconnect(&conn_id).await;
+-                // The conversation row was created `InProgress`; with the prompt
+-                // never sent and the connection gone, no TurnComplete will flip it
+-                // and reconcile won't revisit a Failed run ΓÇö so flip it terminal
+-                // here to avoid stranding a stuck-in-progress conversation.
+-                self.cancel_conversation(conversation_id).await;
++                // A new conversation row was created `InProgress`, and a prompt on
++                // a pinned target flips its row InProgress too (in the manager)
++                // before enqueue; with the prompt never sent and the connection
++                // gone, no TurnComplete will flip it and reconcile won't revisit
++                // a Failed run ΓÇö so flip it terminal here to avoid stranding a
++                // stuck-in-progress conversation. Guard on InProgress so a pinned
++                // target whose send failed BEFORE the flip keeps its status.
++                if self.conversation_status(conversation_id).await
++                    == Some(ConversationStatus::InProgress)
++                {
++                    self.cancel_conversation(conversation_id).await;
++                }
+                 Err(e.to_string())
+             }
+         }

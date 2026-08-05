@@ -1,0 +1,210 @@
+diff --git a/src/i18n/messages/ar.json b/src/i18n/messages/ar.json
+index 25a54fef..c7d680c3 100644
+--- a/src/i18n/messages/ar.json
++++ b/src/i18n/messages/ar.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "┘à╪¡┘ä┘è",
+     "branchRemote": "╪¿╪╣┘è╪»",
+     "branchSearchPlaceholder": "╪¿╪¡╪½ ┘ü┘è ╪º┘ä┘ü╪▒┘ê╪╣ΓÇª",
+-    "branchNone": "┘ä╪º ╪¬┘ê╪¼╪» ┘ü╪▒┘ê╪╣"
++    "branchNone": "┘ä╪º ╪¬┘ê╪¼╪» ┘ü╪▒┘ê╪╣",
++    "launchTarget": "┘ç╪»┘ü ╪º┘ä╪¬╪┤╪║┘è┘ä",
++    "targetNewConversation": "┘à╪¡╪º╪»╪½╪⌐ ╪¼╪»┘è╪»╪⌐",
++    "targetExistingConversation": "┘à╪¡╪º╪»╪½╪⌐ ┘à┘ê╪¼┘ê╪»╪⌐",
++    "conversationSearchPlaceholder": "╪º┘ä╪¿╪¡╪½ ┘ü┘è ╪º┘ä┘à╪¡╪º╪»╪½╪º╪¬ΓÇª",
++    "conversationNone": "┘ä╪º ╪¬┘ê╪¼╪» ┘à╪¡╪º╪»╪½╪º╪¬",
++    "existingConversationHint": "┘â┘ä ╪¬╪┤╪║┘è┘ä ┘è╪│╪¬╪ú┘å┘ü ┘ç╪░┘ç ╪º┘ä┘à╪¡╪º╪»╪½╪⌐ ┘ê┘è╪╢┘è┘ü ╪»┘ê╪▒┘ï╪º ╪¼╪»┘è╪»┘ï╪º ╪Ñ┘ä┘è┘ç╪º ╪¿╪»┘ä╪º┘ï ┘à┘å ╪¿╪»╪í ╪¼┘ä╪│╪⌐ ╪¼╪»┘è╪»╪⌐.",
++    "errorTargetConversation": "╪º╪«╪¬╪▒ ┘à╪¡╪º╪»╪½╪⌐ ┘ä╪º╪│╪¬╪ª┘å╪º┘ü┘ç╪º",
++    "untitledConversation": "┘à╪¡╪º╪»╪½╪⌐ ╪¿╪»┘ê┘å ╪╣┘å┘ê╪º┘å"
+   },
+   "Tasks": {
+     "title": "┘ä┘ê╪¡╪⌐ ╪º┘ä┘à┘ç╪º┘à",
+diff --git a/src/i18n/messages/de.json b/src/i18n/messages/de.json
+index d37933c9..b62af06e 100644
+--- a/src/i18n/messages/de.json
++++ b/src/i18n/messages/de.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "Lokal",
+     "branchRemote": "Remote",
+     "branchSearchPlaceholder": "Branches suchenΓÇª",
+-    "branchNone": "Keine Branches"
++    "branchNone": "Keine Branches",
++    "launchTarget": "Startziel",
++    "targetNewConversation": "Neue Unterhaltung",
++    "targetExistingConversation": "Vorhandene Unterhaltung",
++    "conversationSearchPlaceholder": "Unterhaltungen durchsuchenΓÇª",
++    "conversationNone": "Keine Unterhaltungen",
++    "existingConversationHint": "Jede Ausf├╝hrung setzt diese Unterhaltung fort und f├╝gt eine neue Runde hinzu, statt eine neue Sitzung zu starten.",
++    "errorTargetConversation": "W├ñhle eine Unterhaltung zum Fortsetzen",
++    "untitledConversation": "Unbenannte Unterhaltung"
+   },
+   "Tasks": {
+     "title": "Aufgabenboard",
+diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
+index 8ca955d0..8778b842 100644
+--- a/src/i18n/messages/en.json
++++ b/src/i18n/messages/en.json
+@@ -4101,7 +4101,15 @@
+     "branchLocal": "Local",
+     "branchRemote": "Remote",
+     "branchSearchPlaceholder": "Search branchesΓÇª",
+-    "branchNone": "No branches"
++    "branchNone": "No branches",
++    "launchTarget": "Launch target",
++    "targetNewConversation": "New conversation",
++    "targetExistingConversation": "Existing conversation",
++    "conversationSearchPlaceholder": "Search conversationsΓÇª",
++    "conversationNone": "No conversations",
++    "existingConversationHint": "Each fire resumes this conversation, adding a new turn to it instead of starting a fresh session.",
++    "errorTargetConversation": "Select a conversation to resume",
++    "untitledConversation": "Untitled conversation"
+   },
+   "Tasks": {
+     "title": "Task Board",
+diff --git a/src/i18n/messages/es.json b/src/i18n/messages/es.json
+index d94a8e32..88a6ca00 100644
+--- a/src/i18n/messages/es.json
++++ b/src/i18n/messages/es.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "Local",
+     "branchRemote": "Remota",
+     "branchSearchPlaceholder": "Buscar ramasΓÇª",
+-    "branchNone": "Sin ramas"
++    "branchNone": "Sin ramas",
++    "launchTarget": "Destino de lanzamiento",
++    "targetNewConversation": "Conversaci├│n nueva",
++    "targetExistingConversation": "Conversaci├│n existente",
++    "conversationSearchPlaceholder": "Buscar conversacionesΓÇª",
++    "conversationNone": "Sin conversaciones",
++    "existingConversationHint": "Cada ejecuci├│n reanuda esta conversaci├│n a├▒adiendo un nuevo turno, en lugar de iniciar una sesi├│n nueva.",
++    "errorTargetConversation": "Selecciona una conversaci├│n para reanudar",
++    "untitledConversation": "Conversaci├│n sin t├¡tulo"
+   },
+   "Tasks": {
+     "title": "Tablero de tareas",
+diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
+index 6a45d8b0..234f1894 100644
+--- a/src/i18n/messages/fr.json
++++ b/src/i18n/messages/fr.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "Locale",
+     "branchRemote": "Distante",
+     "branchSearchPlaceholder": "Rechercher des branchesΓÇª",
+-    "branchNone": "Aucune branche"
++    "branchNone": "Aucune branche",
++    "launchTarget": "Cible de lancement",
++    "targetNewConversation": "Nouvelle conversation",
++    "targetExistingConversation": "Conversation existante",
++    "conversationSearchPlaceholder": "Rechercher des conversationsΓÇª",
++    "conversationNone": "Aucune conversation",
++    "existingConversationHint": "Chaque ex├⌐cution reprend cette conversation en ajoutant un nouveau tour, au lieu de d├⌐marrer une nouvelle session.",
++    "errorTargetConversation": "S├⌐lectionnez une conversation ├á reprendre",
++    "untitledConversation": "Conversation sans titre"
+   },
+   "Tasks": {
+     "title": "Tableau des t├óches",
+diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
+index 9f08241d..ce28a189 100644
+--- a/src/i18n/messages/ja.json
++++ b/src/i18n/messages/ja.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "πâ¡πâ╝πé½πâ½",
+     "branchRemote": "πâ¬πâóπâ╝πâê",
+     "branchSearchPlaceholder": "πâûπâ⌐πâ│πâüπéÆµñ£τ┤óΓÇª",
+-    "branchNone": "πâûπâ⌐πâ│πâüπüîπüéπéèπü╛πü¢πéô"
++    "branchNone": "πâûπâ⌐πâ│πâüπüîπüéπéèπü╛πü¢πéô",
++    "launchTarget": "Φ╡╖σïòσàê",
++    "targetNewConversation": "µû░πüùπüäΣ╝ÜΦ⌐▒",
++    "targetExistingConversation": "µùóσ¡ÿπü«Σ╝ÜΦ⌐▒",
++    "conversationSearchPlaceholder": "Σ╝ÜΦ⌐▒πéÆµñ£τ┤óΓÇª",
++    "conversationNone": "Σ╝ÜΦ⌐▒πüîπüéπéèπü╛πü¢πéô",
++    "existingConversationHint": "σ«ƒΦíîπü«πüƒπü│πü½πüôπü«Σ╝ÜΦ⌐▒πéÆσåìΘûïπüùπÇüµû░πüùπüäπé┐πâ╝πâ│πéÆΦ┐╜σèáπüùπü╛πüÖ∩╝êµû░πüùπüäπé╗πââπé╖πâºπâ│πü»Θûïσºïπüùπü╛πü¢πéô∩╝ëπÇé",
++    "errorTargetConversation": "σåìΘûïπüÖπéïΣ╝ÜΦ⌐▒πéÆΘü╕µè₧πüùπüªπüÅπüáπüòπüä",
++    "untitledConversation": "σÉìσëìπü«πü¬πüäΣ╝ÜΦ⌐▒"
+   },
+   "Tasks": {
+     "title": "πé┐πé╣πé»πâ£πâ╝πâë",
+diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
+index a802e497..539bd92f 100644
+--- a/src/i18n/messages/ko.json
++++ b/src/i18n/messages/ko.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "δí£∞╗¼",
+     "branchRemote": "∞¢ÉΩ▓⌐",
+     "branchSearchPlaceholder": "δ╕îδ₧£∞╣ÿ Ω▓Ç∞âëΓÇª",
+-    "branchNone": "δ╕îδ₧£∞╣ÿ ∞ùå∞¥î"
++    "branchNone": "δ╕îδ₧£∞╣ÿ ∞ùå∞¥î",
++    "launchTarget": "∞ï£∞₧æ δîÇ∞âü",
++    "targetNewConversation": "∞âê δîÇφÖö",
++    "targetExistingConversation": "Ω╕░∞í┤ δîÇφÖö",
++    "conversationSearchPlaceholder": "δîÇφÖö Ω▓Ç∞âëΓÇª",
++    "conversationNone": "δîÇφÖö ∞ùå∞¥î",
++    "existingConversationHint": "∞ïñφûëφòá δòîδºêδïñ ∞¥┤ δîÇφÖöδÑ╝ ∞₧¼Ω░£φòÿΩ│á ∞âê φä┤∞¥ä ∞╢öΩ░Çφò⌐δïêδïñ(∞âê ∞ä╕∞àÿ∞¥ä ∞ï£∞₧æφòÿ∞ºÇ ∞òè∞¥î).",
++    "errorTargetConversation": "∞₧¼Ω░£φòá δîÇφÖöδÑ╝ ∞äáφâ¥φòÿ∞ä╕∞Üö",
++    "untitledConversation": "∞á£δ¬⌐ ∞ùåδèö δîÇφÖö"
+   },
+   "Tasks": {
+     "title": "∞₧æ∞ùà δ│┤δô£",
+diff --git a/src/i18n/messages/pt.json b/src/i18n/messages/pt.json
+index 54351eff..d825ad8f 100644
+--- a/src/i18n/messages/pt.json
++++ b/src/i18n/messages/pt.json
+@@ -4096,7 +4096,15 @@
+     "branchLocal": "Local",
+     "branchRemote": "Remoto",
+     "branchSearchPlaceholder": "Pesquisar branchesΓÇª",
+-    "branchNone": "Sem branches"
++    "branchNone": "Sem branches",
++    "launchTarget": "Destino de execu├º├úo",
++    "targetNewConversation": "Nova conversa",
++    "targetExistingConversation": "Conversa existente",
++    "conversationSearchPlaceholder": "Pesquisar conversasΓÇª",
++    "conversationNone": "Nenhuma conversa",
++    "existingConversationHint": "Cada execu├º├úo retoma esta conversa adicionando uma nova rodada, em vez de iniciar uma nova sess├úo.",
++    "errorTargetConversation": "Selecione uma conversa para retomar",
++    "untitledConversation": "Conversa sem t├¡tulo"
+   },
+   "Tasks": {
+     "title": "Quadro de tarefas",
+diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
+index 5eda78a0..5df38706 100644
+--- a/src/i18n/messages/zh-CN.json
++++ b/src/i18n/messages/zh-CN.json
+@@ -4101,7 +4101,15 @@
+     "branchLocal": "µ£¼σ£░",
+     "branchRemote": "Φ┐£τ¿ï",
+     "branchSearchPlaceholder": "µÉ£τ┤óσêåµö»ΓÇª",
+-    "branchNone": "µùáσêåµö»"
++    "branchNone": "µùáσêåµö»",
++    "launchTarget": "σÉ»σè¿τ¢«µáç",
++    "targetNewConversation": "µû░σ╗║σ»╣Φ»¥",
++    "targetExistingConversation": "τÄ░µ£ëσ»╣Φ»¥",
++    "conversationSearchPlaceholder": "µÉ£τ┤óσ»╣Φ»¥ΓÇª",
++    "conversationNone": "µ▓íµ£ëσ»╣Φ»¥",
++    "existingConversationHint": "µ»Åµ¼íΦºªσÅæσ░åµüóσñìµ¡ñσ»╣Φ»¥∩╝îσ£¿σà╢Σ╕¡µû░σó₧Σ╕ÇΦ╜«∩╝îΦÇîΣ╕ìµÿ»σÉ»σè¿µû░Σ╝ÜΦ»¥πÇé",
++    "errorTargetConversation": "Φ»╖ΘÇëµï⌐ΦªüµüóσñìτÜäσ»╣Φ»¥",
++    "untitledConversation": "µ£¬σæ╜σÉìσ»╣Φ»¥"
+   },
+   "Tasks": {
+     "title": "Σ╗╗σèíτ£ïµ¥┐",
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index db982fad..e2429c35 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -4101,7 +4101,15 @@
+     "branchLocal": "µ£¼µ⌐ƒ",
+     "branchRemote": "Θüáτ½»",
+     "branchSearchPlaceholder": "µÉ£σ░ïσêåµö»ΓÇª",
+-    "branchNone": "τäíσêåµö»"
++    "branchNone": "τäíσêåµö»",
++    "launchTarget": "σòƒσïòτ¢«µ¿Ö",
++    "targetNewConversation": "µû░σ░ìΦ⌐▒",
++    "targetExistingConversation": "µùóµ£ëσ░ìΦ⌐▒",
++    "conversationSearchPlaceholder": "µÉ£σ░ïσ░ìΦ⌐▒ΓÇª",
++    "conversationNone": "µ▓Æµ£ëσ░ìΦ⌐▒",
++    "existingConversationHint": "µ»Åµ¼íΦº╕τÖ╝σ░çµüóσ╛⌐µ¡ñσ░ìΦ⌐▒∩╝îσ£¿σà╢Σ╕¡µû░σó₧Σ╕ÇΦ╝¬∩╝îΦÇîΣ╕ìµÿ»σòƒσïòµû░σ╖ÑΣ╜£ΘÜÄµ«╡πÇé",
++    "errorTargetConversation": "Φ½ïΘü╕µôçΦªüµüóσ╛⌐τÜäσ░ìΦ⌐▒",
++    "untitledConversation": "µ£¬σæ╜σÉìσ░ìΦ⌐▒"
+   },
+   "Tasks": {
+     "title": "Σ╗╗σïÖτ£ïµ¥┐",

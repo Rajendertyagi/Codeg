@@ -1,0 +1,30 @@
+diff --git a/src-tauri/src/models/automation.rs b/src-tauri/src/models/automation.rs
+index a5b4d308..0f454409 100644
+--- a/src-tauri/src/models/automation.rs
++++ b/src-tauri/src/models/automation.rs
+@@ -99,4 +99,9 @@ pub struct AutomationConfig {
+     pub config_values: std::collections::BTreeMap<String, String>,
+     #[serde(default)]
+     pub label_snapshot: Option<serde_json::Value>,
++    /// When set, `LaunchSession` fires into this existing conversation row
++    /// (resuming its external session) instead of creating a fresh conversation.
++    /// `None` (the legacy default) keeps the always-fresh behavior.
++    #[serde(default)]
++    pub existing_conversation_id: Option<i32>,
+ }
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 8abf0dac..232cec39 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -1186,6 +1186,11 @@ export interface AutomationConfig {
+   mode_id?: string | null
+   config_values: Record<string, string>
+   label_snapshot?: AutomationLabelSnapshot | null
++  /** When set (launch_session), each fire resumes this existing conversation
++   *  instead of creating a fresh one; absent/null keeps the legacy always-fresh
++   *  behavior. Mirrors `existing_conversation_id` in the Rust `AutomationConfig`
++   *  (stored inside the opaque config blob, so old rows default to null). */
++  existing_conversation_id?: number | null
+ }
+ 
+ export interface Automation {
