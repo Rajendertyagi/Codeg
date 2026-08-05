@@ -193,6 +193,31 @@ pub async fn add_chat_folder(
     Ok(to_detail(model))
 }
 
+/// Get-or-create the folder row a local-folder automation run anchors to.
+///
+/// The conversation row a fresh launch creates has a NOT-NULL `folder_id` FK,
+/// and the run must execute in the user's configured directory, so the folder
+/// row is anchored at that exact path. An existing non-deleted row for the path
+/// (a user-opened workspace, or a prior run's row) is reused as-is — the run
+/// then renders as a normal folder conversation. Otherwise a hidden runtime
+/// folder is minted via [`add_chat_folder`] so nothing user-facing is polluted;
+/// the frontend routes its conversations to the flat chat-mode sidebar group,
+/// the same combination the folderless-chat flow already renders.
+pub async fn get_or_create_automation_folder(
+    conn: &DatabaseConnection,
+    path: &str,
+) -> Result<FolderDetail, DbError> {
+    if let Some(row) = folder::Entity::find()
+        .filter(folder::Column::Path.eq(path))
+        .filter(folder::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+    {
+        return Ok(to_detail(row));
+    }
+    add_chat_folder(conn, path).await
+}
+
 pub async fn update_folder_color(
     conn: &DatabaseConnection,
     folder_id: i32,
