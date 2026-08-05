@@ -87,7 +87,11 @@ abbreviations.
   `get_architecture`, `get_graph_schema`, `index_repository`, `ingest_traces`.
 - **ICM** — session memory, facts, transcripts.
 
-## MCP Tool Mandate (hard rules)
+### MCP Tool Mandate (hard rules)
+
+Indexed MCP tools MUST be used before any direct file read. They are faster,
+graph-aware, and surface relationships that grep/Read cannot. Falling back to
+manual reads when an indexed tool is available is a protocol violation.
 
 Indexed MCP tools MUST be used before any direct file read. They are faster,
 graph-aware, and surface relationships that grep/Read cannot. Falling back to
