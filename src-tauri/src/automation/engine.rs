@@ -710,8 +710,10 @@ impl AutomationEngine {
                 // directory, so the folder row is anchored at the user's path.
                 // Reuse an existing row for that path (a user-opened workspace or
                 // a prior run's row) so nothing duplicate is minted; otherwise
-                // create a hidden runtime folder that never surfaces in
-                // user-facing folder lists.
+                // mint a Regular folder — a normal user folder that surfaces in
+                // the sidebar. Git detection is a runtime property of the path,
+                // not a label on the row, so the Git chrome auto-hides for
+                // non-repos.
                 let folder = folder_service::get_or_create_automation_folder(
                     &self.db.conn,
                     &working_dir,

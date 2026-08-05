@@ -199,10 +199,11 @@ pub async fn add_chat_folder(
 /// and the run must execute in the user's configured directory, so the folder
 /// row is anchored at that exact path. An existing non-deleted row for the path
 /// (a user-opened workspace, or a prior run's row) is reused as-is — the run
-/// then renders as a normal folder conversation. Otherwise a hidden runtime
-/// folder is minted via [`add_chat_folder`] so nothing user-facing is polluted;
-/// the frontend routes its conversations to the flat chat-mode sidebar group,
-/// the same combination the folderless-chat flow already renders.
+/// then renders as a normal folder conversation. Otherwise a Regular folder is
+/// minted via [`add_folder`] so the target surfaces in the sidebar like any
+/// other user folder. Git detection is a runtime property of the path, not a
+/// label on the row, so a Regular folder may or may not be a repository — the
+/// Git chrome auto-hides for non-repos.
 pub async fn get_or_create_automation_folder(
     conn: &DatabaseConnection,
     path: &str,
@@ -215,7 +216,10 @@ pub async fn get_or_create_automation_folder(
     {
         return Ok(to_detail(row));
     }
-    add_chat_folder(conn, path).await
+    let entry = add_folder(conn, path).await?;
+    get_folder_by_id(conn, entry.id)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("Folder not found after add: {path}")))
 }
 
 pub async fn update_folder_color(
