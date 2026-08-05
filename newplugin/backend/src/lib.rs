@@ -6,3 +6,4 @@
 //! is the adapter that fetches rows and applies the returned decision.
 
 pub mod launch_target;
+pub mod target_kind;
