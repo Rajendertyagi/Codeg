@@ -51,11 +51,13 @@ import {
 } from "@/components/ui/select"
 import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
 import {
+  listAllConversations,
   workTaskSettingsEffective,
   workTaskTemplateDelete,
   workTaskTemplateList,
   workTaskTemplateSave,
 } from "@/lib/api"
+import { AutomationConversationPicker } from "../../../newplugin/frontend/automation-conversation-picker"
 import type {
   AgentType,
   PromptInputBlock,
@@ -156,6 +158,9 @@ function TaskEditorBody({
   const [configValues, setConfigValues] = useState<Record<string, string>>(
     task?.config?.config_values ?? {}
   )
+  const [existingConversationId, setExistingConversationId] = useState<
+    number | null
+  >(task?.config?.existing_conversation_id ?? null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -275,6 +280,7 @@ function TaskEditorBody({
         agent_type: null,
         mode_id: null,
         config_values: {},
+        existing_conversation_id: existingConversationId,
       }
     }
     const snapshot = await agentOptions.ensure()
@@ -293,6 +299,7 @@ function TaskEditorBody({
         agent_label: getAgentLabel(agentType) ?? agentType,
         ...snapshotLabels(snapshot, mode_id, config_values),
       },
+      existing_conversation_id: existingConversationId,
     }
   }
 
@@ -302,6 +309,22 @@ function TaskEditorBody({
     if (!title.trim()) return setError(t("errorTitle"))
     if (!displayText) return setError(t("errorPrompt"))
     if (folderId == null) return setError(t("errorFolder"))
+
+    // Validate: existing conversation must belong to the task's folder.
+    if (existingConversationId != null && existingConversationId > 0) {
+      const conversations = await listAllConversations({
+        agent_type: agentType,
+      })
+      const selected = conversations.find((c) => c.id === existingConversationId)
+      if (selected && selected.folder_id !== folderId) {
+        const selectedFolder = folders.find((f) => f.id === selected.folder_id)
+        return setError(
+          t("errorConversationFolderMismatch", {
+            conversationFolder: selectedFolder?.name ?? `#${selected.folder_id}`,
+          })
+        )
+      }
+    }
 
     setSaving(true)
     try {
@@ -497,6 +520,47 @@ function TaskEditorBody({
               </SelectContent>
             </Select>
           </div>
+        </div>
+
+        {/* Conversation target — fresh (default) or resume an existing one. */}
+        <div className="flex flex-col gap-2">
+          <h3 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
+            {t("sectionConversation")}
+          </h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+              <input
+                type="radio"
+                name="conversationTarget"
+                checked={existingConversationId == null}
+                onChange={() => setExistingConversationId(null)}
+              />
+              {t("conversationNew")}
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+              <input
+                type="radio"
+                name="conversationTarget"
+                checked={existingConversationId != null}
+                onChange={() => {
+                  if (existingConversationId == null) {
+                    setExistingConversationId(-1) // sentinel: picker will open
+                  }
+                }}
+              />
+              {t("conversationExisting")}
+            </label>
+          </div>
+          {existingConversationId != null ? (
+            <div className="flex flex-col gap-2">
+              <AutomationConversationPicker
+                agentType={agentType}
+                value={existingConversationId > 0 ? existingConversationId : null}
+                onChange={setExistingConversationId}
+                placeholder={t("conversationSearchPlaceholder")}
+              />
+            </div>
+          ) : null}
         </div>
 
         {error ? (

@@ -1290,6 +1290,7 @@ export interface WorkTaskConfig {
   mode_id?: string | null
   config_values: Record<string, string>
   label_snapshot?: AutomationLabelSnapshot | null
+  existing_conversation_id?: number | null
 }
 
 export interface WorkTask {

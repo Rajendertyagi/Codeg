@@ -779,8 +779,20 @@ impl TaskEngine {
         }
 
         // Resume the previous session for retry/return/merge when we have one.
+        // For Fresh tasks, resume an existing conversation if one is pinned.
         let resume_session_id = match mode {
-            LaunchMode::Fresh => None,
+            LaunchMode::Fresh => {
+                if let Some(conv_id) = cfg.existing_conversation_id {
+                    conversation::Entity::find_by_id(conv_id)
+                        .one(&self.db.conn)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|c| c.external_id)
+                } else {
+                    None
+                }
+            }
             LaunchMode::Retry | LaunchMode::Return(_) | LaunchMode::Merge { .. } => {
                 match task.conversation_id {
                     Some(conv_id) => conversation::Entity::find_by_id(conv_id)
