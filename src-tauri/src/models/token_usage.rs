@@ -85,6 +85,11 @@ pub struct TokenUsageTotals {
     pub cache_read_tokens: u64,
     pub total_tokens: u64,
     pub turn_count: u64,
+    /// In a served report this is the *workspace* session count for the window
+    /// (see `workspace_conversation_count`), overwritten by the command layer
+    /// so it reconciles with the status bar's counter. The fold itself fills
+    /// in distinct fact conversations, which is what breakdown items and
+    /// `previous_totals` keep.
     pub conversation_count: u64,
     /// Summed generation time of the counted turns — not wall-clock time spent
     /// in the app.

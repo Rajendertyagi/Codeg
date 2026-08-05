@@ -125,7 +125,18 @@ fn clamp_i64(v: u64) -> i64 {
 /// a row that contributes nothing but inflates the turn count. `occurred_at`
 /// prefers `completed_at` (when the call finished) and falls back to the turn's
 /// own timestamp, matching how the rest of the app reads those two fields.
-pub(crate) fn facts_from_turns(turns: &[MessageTurn]) -> Vec<UsageFact> {
+/// `session_model` backfills turns whose parser records no per-turn model.
+/// Codex is the motivating case: its rollout files carry the model in
+/// `turn_context` events, which the parser folds into the *session* summary
+/// while every turn stays `model: None` — without the fallback, all of a Codex
+/// session's spend lands in the dashboard's "unknown model" slice. A turn that
+/// does name its own model always wins, so mid-session switches recorded by a
+/// parser are never overwritten.
+pub(crate) fn facts_from_turns(
+    turns: &[MessageTurn],
+    session_model: Option<&str>,
+) -> Vec<UsageFact> {
+    let session_model = session_model.map(str::trim).filter(|m| !m.is_empty());
     turns
         .iter()
         .enumerate()
@@ -147,7 +158,8 @@ pub(crate) fn facts_from_turns(turns: &[MessageTurn]) -> Vec<UsageFact> {
                 .model
                 .as_ref()
                 .map(|m| m.trim().to_string())
-                .filter(|m| !m.is_empty());
+                .filter(|m| !m.is_empty())
+                .or_else(|| session_model.map(String::from));
             Some(UsageFact {
                 turn_key,
                 occurred_at: turn.completed_at.unwrap_or(turn.timestamp),
@@ -189,7 +201,8 @@ pub(crate) fn facts_from_detail(
     detail: &DbConversationDetail,
     fallback_at: DateTime<Utc>,
 ) -> Vec<UsageFact> {
-    let per_turn = facts_from_turns(&detail.turns);
+    let session_model = detail.summary.model.as_deref();
+    let per_turn = facts_from_turns(&detail.turns, session_model);
     if !per_turn.is_empty() {
         return per_turn;
     }
@@ -474,7 +487,7 @@ pub(crate) fn aggregate_report(
             turn_count,
         })
         .collect();
-    heatmap.sort_by(|a, b| (a.weekday, a.hour).cmp(&(b.weekday, b.hour)));
+    heatmap.sort_by_key(|a| (a.weekday, a.hour));
 
     let mut top: Vec<(i32, u64, u64, DateTime<Utc>, String, i32)> = per_conversation
         .into_iter()
@@ -732,6 +745,16 @@ pub async fn token_usage_report_core(
         compare_previous: comparable,
     };
     let mut report = aggregate_report(&rows, &previous_rows, &opts);
+
+    // The headline session count follows the workspace list, not the fact
+    // table. The fold's distinct-id count includes delegation children the
+    // sidebar hides and misses sessions that never recorded usage (empty ones,
+    // agents without token counts, transcripts the agent's retention already
+    // deleted) — so with an unbounded range it would visibly disagree with the
+    // status bar's session counter. The strip's averages divide by the same
+    // number, so the cell stays self-consistent.
+    report.totals.conversation_count =
+        usage_service::workspace_conversation_count(conn, &query).await?;
 
     // Titles are the one thing the fold can't produce — resolve just the ids
     // that made the top list.
@@ -1106,7 +1129,7 @@ mod tests {
             turn("b", Some(usage(0, 0, 0, 0)), "2026-08-01T11:00:00Z"),
             turn("c", Some(usage(10, 5, 0, 0)), "2026-08-01T12:00:00Z"),
         ];
-        let facts = facts_from_turns(&turns);
+        let facts = facts_from_turns(&turns, None);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].turn_key, "c");
         assert_eq!(facts[0].total_tokens(), 15);
@@ -1120,15 +1143,36 @@ mod tests {
     fn facts_prefer_completed_at_over_timestamp() {
         let mut t = turn("a", Some(usage(1, 1, 0, 0)), "2026-08-01T10:00:00Z");
         t.completed_at = Some(ts("2026-08-01T10:05:00Z"));
-        let facts = facts_from_turns(&[t]);
+        let facts = facts_from_turns(&[t], None);
         assert_eq!(facts[0].occurred_at, ts("2026-08-01T10:05:00Z"));
     }
 
     #[test]
     fn facts_fall_back_to_positional_turn_key() {
         let t = turn("", Some(usage(1, 0, 0, 0)), "2026-08-01T10:00:00Z");
-        let facts = facts_from_turns(&[t]);
+        let facts = facts_from_turns(&[t], None);
         assert_eq!(facts[0].turn_key, "turn-0");
+    }
+
+    #[test]
+    fn facts_backfill_the_session_model_only_where_turns_have_none() {
+        // The Codex shape: usage per turn, model only at the session level.
+        let mut bare = turn("a", Some(usage(10, 5, 0, 0)), "2026-08-01T10:00:00Z");
+        bare.model = None;
+        let facts = facts_from_turns(&[bare], Some("gpt-5.5"));
+        assert_eq!(facts[0].model.as_deref(), Some("gpt-5.5"));
+
+        // A turn that names its own model keeps it — a recorded mid-session
+        // switch must not be flattened to the session default.
+        let named = turn("b", Some(usage(10, 5, 0, 0)), "2026-08-01T10:00:00Z");
+        let facts = facts_from_turns(&[named], Some("gpt-5.5"));
+        assert_eq!(facts[0].model.as_deref(), Some("claude-opus-5"));
+
+        // A whitespace-only session model is no model at all.
+        let mut blank = turn("c", Some(usage(1, 0, 0, 0)), "2026-08-01T10:00:00Z");
+        blank.model = None;
+        let facts = facts_from_turns(&[blank], Some("   "));
+        assert_eq!(facts[0].model, None);
     }
 
     fn detail(turns: Vec<MessageTurn>, stats: Option<SessionStats>) -> DbConversationDetail {

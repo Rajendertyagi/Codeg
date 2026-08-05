@@ -13,7 +13,7 @@ use crate::parsers::codex_code_mode::{
     extract_chunk_ids, extract_shell_session_ids, is_code_mode_call, parse_code_mode_script,
     script_card_input,
     split_code_mode_output, with_note, CodeModeCall, CodeModeOutput, CodeModeScript, ScriptStatus,
-    CODEX_SCRIPT_TOOL_NAME,
+    Separator, CODEX_SCRIPT_TOOL_NAME,
 };
 use crate::parsers::{
     folder_name_from_path, title_from_user_text, truncate_str, AgentParser, ParseError,
@@ -490,6 +490,18 @@ fn uncollapse_truncated_chunks(parsed: &CodeModeOutput, calls: usize) -> Option<
     if calls == 0 {
         return None;
     }
+    let (declared, body) = truncated_blob(parsed)?;
+    if body.len() != declared || declared != calls {
+        return None;
+    }
+    body.iter()
+        .all(|line| unwrap_exec_chunk_envelope(line).is_some())
+        .then(|| body.iter().map(|line| line.to_string()).collect())
+}
+
+/// The line count a collapsed blob declares, and the lines it actually kept.
+/// `declared > body.len()` means codex dropped lines to fit the cap.
+fn truncated_blob(parsed: &CodeModeOutput) -> Option<(usize, Vec<&str>)> {
     let [collapsed] = parsed.chunks.as_slice() else {
         return None;
     };
@@ -506,13 +518,175 @@ fn uncollapse_truncated_chunks(parsed: &CodeModeOutput, calls: usize) -> Option<
     if !lines.next()?.is_empty() {
         return None;
     }
-    let body: Vec<String> = lines.map(str::to_string).collect();
-    if body.len() != declared || declared != calls {
+    Some((declared, lines.collect()))
+}
+
+/// One call's share of a collapsed blob that was split on the separator lines
+/// the script printed.
+struct SeparatorSlot {
+    /// The lines this call owns. `None` means it printed nothing between its
+    /// separator and the next — which is not the same as having no separator,
+    /// hence `placed`.
+    text: Option<String>,
+    /// Whether a span of the blob could be attributed to this call at all. False
+    /// when truncation removed its separator, leaving nothing to cut on.
+    placed: bool,
+    /// Calls whose separators were truncated away, leaving their output inside
+    /// this slot with no boundary to cut on. Empty in the normal case.
+    shares_with: Vec<usize>,
+}
+
+/// At least this many separators have to be found, so a split rests on at least
+/// one proven boundary. One anchor divides nothing — it would hand the whole
+/// blob to the first call and leave the rest empty.
+const MIN_ANCHORS: usize = 2;
+
+/// The blob split on the separator lines the script printed before each result,
+/// or `None` when it cannot be read that way.
+///
+/// This is the only handle left once codex re-renders a long `text()` stream as
+/// one truncated blob: 89% of collapsed blobs are missing lines, so the counts
+/// `uncollapse_truncated_chunks` compares never agree. But scripts of this shape
+/// label their results — ``text(`===== ${k} =====\n${r.output}`)`` — and the
+/// labels come from the same literal table the commands do. So the separator
+/// each call printed can be *predicted* from the source and then looked up in
+/// the output, which is a far stronger check than counting: a wrong prediction
+/// does not match and the split is simply refused.
+///
+/// Truncation cannot reorder — it only deletes — so lines between two surviving
+/// separators belong to the earlier one and nothing else. When the separator
+/// *between* them was dropped, the span covers several calls with no way to
+/// tell where each begins; that span stays whole, attributed to the call it
+/// provably starts with, and the calls sharing it are named in `shares_with`
+/// rather than silently given someone else's output.
+///
+/// One residual, deliberately accepted: a matched line is only *probably* the
+/// separator the script printed. A command whose own stdout contains a line
+/// identical to another row's separator — printing this very transcript, say —
+/// would be cut there, and the tail of its output would be filed under that
+/// row. Uniqueness makes this impossible whenever every separator survived (a
+/// look-alike would be a second match and reject the candidate), so the risk
+/// only exists in the truncated case, and only when the look-alike stands in
+/// for a separator that is genuinely gone. Refusing truncated blobs would avoid
+/// it at the cost of the case this exists for — 89% of collapsed blobs are
+/// missing lines — so the split is kept and the labels are what it rests on.
+fn split_by_separators(
+    parsed: &CodeModeOutput,
+    calls: &[CodeModeCall],
+    separators: &[Separator],
+) -> Option<Vec<SeparatorSlot>> {
+    if calls.len() < 2 || separators.is_empty() {
         return None;
     }
-    body.iter()
-        .all(|line| unwrap_exec_chunk_envelope(line).is_some())
-        .then_some(body)
+    let (_, body) = truncated_blob(parsed)?;
+
+    let labels: Option<Vec<&str>> = calls.iter().map(|c| c.label.as_deref()).collect();
+    let by_index = |offset: usize| (0..calls.len()).map(|i| (i + offset).to_string()).collect();
+    // `---RESULT ${i+1}---` is as common as a label in this corpus, and costs
+    // nothing to try: the output either contains the line or it does not.
+    let candidates: Vec<Vec<String>> = labels
+        .map(|names| names.iter().map(|n| n.to_string()).collect())
+        .into_iter()
+        .chain([by_index(0), by_index(1)])
+        .collect();
+
+    let mut best: Option<Vec<Option<usize>>> = None;
+    for separator in separators {
+        for values in &candidates {
+            let Some(found) = locate_anchors(&body, separator, values) else {
+                continue;
+            };
+            let hits = found.iter().flatten().count();
+            if hits < MIN_ANCHORS {
+                continue;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|b| hits > b.iter().flatten().count())
+            {
+                best = Some(found);
+            }
+        }
+    }
+
+    Some(slots_from_anchors(&body, &best?))
+}
+
+/// Where each value's separator line sits in `body`, or `None` for the ones
+/// truncation removed. Refuses the whole candidate when a line repeats or the
+/// lines run backwards — either means the match is not the separator run.
+fn locate_anchors(
+    body: &[&str],
+    separator: &Separator,
+    values: &[String],
+) -> Option<Vec<Option<usize>>> {
+    let mut found = Vec::with_capacity(values.len());
+    let mut previous = None;
+
+    for value in values {
+        let anchor = separator.anchor(value);
+        let anchor = anchor.trim_end();
+        let mut hits = body
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.trim_end() == anchor)
+            .map(|(index, _)| index);
+        let hit = hits.next();
+        if hits.next().is_some() {
+            return None;
+        }
+        if let Some(at) = hit {
+            if previous.is_some_and(|before| at <= before) {
+                return None;
+            }
+            previous = Some(at);
+        }
+        found.push(hit);
+    }
+
+    Some(found)
+}
+
+fn slots_from_anchors(body: &[&str], found: &[Option<usize>]) -> Vec<SeparatorSlot> {
+    // A call whose separator survived owns the lines after it. The first call
+    // owns the head of the blob even without one: deletion never moves a line,
+    // so nothing can precede the first call's output.
+    let mut owners: Vec<(usize, Option<usize>)> = Vec::new();
+    if found.first().is_some_and(Option::is_none) {
+        owners.push((0, None));
+    }
+    owners.extend(
+        found
+            .iter()
+            .enumerate()
+            .filter_map(|(call, at)| at.map(|at| (call, Some(at)))),
+    );
+
+    let mut slots: Vec<SeparatorSlot> = (0..found.len())
+        .map(|_| SeparatorSlot {
+            text: None,
+            placed: false,
+            shares_with: Vec::new(),
+        })
+        .collect();
+
+    for (position, (call, anchor)) in owners.iter().enumerate() {
+        let start = anchor.map_or(0, |at| at + 1);
+        let (end, next_call) = match owners.get(position + 1) {
+            // The next owner's separator line is not part of this slot.
+            Some((next_call, Some(at))) => (*at, *next_call),
+            _ => (body.len(), found.len()),
+        };
+        let text = body.get(start..end).unwrap_or_default().join("\n");
+        let text = text.trim_end();
+        slots[*call] = SeparatorSlot {
+            text: (!text.is_empty()).then(|| text.to_string()),
+            placed: true,
+            shares_with: (call + 1..next_call).collect(),
+        };
+    }
+
+    slots
 }
 
 /// `text` trimmed with every run of digits collapsed to `#`, so `---RESULT 1---`
@@ -644,7 +818,7 @@ fn unwrap_code_mode_script(
                 sessions,
                 poll_origins,
             )),
-            meta: None,
+            meta: codex_script_meta(call.label.as_deref(), false, &[], false),
         }];
         register_shell_sessions(call, call_id, &joined, sessions);
         let results = vec![result_block(
@@ -679,7 +853,7 @@ fn unwrap_code_mode_script(
                     sessions,
                     poll_origins,
                 )),
-                meta: None,
+                meta: codex_script_meta(call.label.as_deref(), false, &[], false),
             });
             // Announcements are read from the chunks as written: unwrapping an
             // envelope drops the `session_id` that names the session.
@@ -690,6 +864,58 @@ fn unwrap_code_mode_script(
                 .collect::<Vec<_>>()
                 .join("\n");
             results.push(result_block(Some(id), non_empty(shown), note));
+        }
+        return (Some(uses), results);
+    }
+
+    // The chunks did not divide, but the script may have labelled its results
+    // on their way out. Only reachable for a collapsed blob — anything with real
+    // chunks was already handled above.
+    if let Some(slots) = split_by_separators(parsed, calls, &script.separators) {
+        let truncated = truncated_blob(parsed).is_some_and(|(declared, body)| declared > body.len());
+        let last = calls.len() - 1;
+        let mut uses = Vec::with_capacity(calls.len());
+        let mut results = Vec::with_capacity(calls.len());
+        for (index, (call, slot)) in calls.iter().zip(&slots).enumerate() {
+            let id = format!("{call_id}#{index}");
+            let note = if index == last {
+                parsed.note.as_deref()
+            } else {
+                None
+            };
+            let shared: Vec<String> = slot
+                .shares_with
+                .iter()
+                .filter_map(|other| calls.get(*other))
+                .map(call_display_name)
+                .collect();
+            uses.push(ContentBlock::ToolUse {
+                tool_use_id: Some(id.clone()),
+                tool_name: call.tool_name.clone(),
+                input_preview: Some(shell_session_input_preview(
+                    call,
+                    &id,
+                    sessions,
+                    poll_origins,
+                )),
+                meta: codex_script_meta(
+                    call.label.as_deref(),
+                    // A command that ran and printed nothing is not a command
+                    // whose output went missing; only the second is worth a
+                    // notice, and saying it of the first would be false.
+                    !slot.placed,
+                    &shared,
+                    truncated,
+                ),
+            });
+            if let Some(text) = &slot.text {
+                register_shell_sessions(call, &id, text, sessions);
+            }
+            let shown = slot
+                .text
+                .clone()
+                .and_then(|text| non_empty(exec_chunk_display(call, text)));
+            results.push(result_block(Some(id), shown, note));
         }
         return (Some(uses), results);
     }
@@ -706,6 +932,41 @@ fn unwrap_code_mode_script(
             parsed.note.as_deref(),
         )],
     )
+}
+
+/// What the renderer needs to know about a call recovered from a code-mode
+/// script, as facts rather than prose: the backend states them, the frontend
+/// words them in the reader's language.
+fn codex_script_meta(
+    label: Option<&str>,
+    output_missing: bool,
+    shares_with: &[String],
+    truncated: bool,
+) -> Option<serde_json::Value> {
+    let mut marks = serde_json::Map::new();
+    if let Some(label) = label {
+        marks.insert("label".to_string(), label.into());
+    }
+    if output_missing {
+        marks.insert("outputMissing".to_string(), true.into());
+    }
+    if !shares_with.is_empty() {
+        marks.insert("sharedWith".to_string(), shares_with.into());
+    }
+    if truncated {
+        marks.insert("truncated".to_string(), true.into());
+    }
+    (!marks.is_empty()).then(|| serde_json::json!({ "codeg.codexScript": marks }))
+}
+
+/// How to name a call when telling the reader whose output shares a card.
+fn call_display_name(call: &CodeModeCall) -> String {
+    call.label.clone().unwrap_or_else(|| {
+        truncate_str(
+            call.input_preview.lines().next().unwrap_or_default().trim(),
+            60,
+        )
+    })
 }
 
 /// A code-mode script whose output was `Script running with cell ID N`: the
@@ -6710,5 +6971,205 @@ mod tests {
         assert_eq!(input["session_command"], "cargo watch");
     }
 
+    // ── separator split ──────────────────────────────────────────────────
 
+    /// The script from the reported session: a literal table of labelled
+    /// commands fanned out through one `tools.exec_command({cmd, …})`.
+    fn labelled_fanout(labels: &[&str]) -> String {
+        let rows: Vec<String> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, label)| format!("  [\"{label}\", \"echo {i}\"],\n"))
+            .collect();
+        format!(
+            "const cmds = [\n{}];\nconst out = await Promise.all(cmds.map(async ([k,cmd]) => [k, await tools.exec_command({{cmd, workdir:\"/repo\", yield_time_ms:10000}})]));\nfor (const [k,r] of out) text(`===== ${{k}} =====\\n${{r.output}}`);\n",
+            rows.concat()
+        )
+    }
+
+    /// What codex renders when a labelled fan-out's `text()` stream is too
+    /// long: one blob, the separators still in it, behind a banner declaring
+    /// how many lines it started with.
+    fn labelled_blob(declared: usize, sections: &[(&str, &str)]) -> String {
+        let body: Vec<String> = sections
+            .iter()
+            .map(|(label, out)| format!("===== {label} =====\n{out}"))
+            .collect();
+        format!(
+            "Warning: truncated output (original token count: 23243)\nTotal output lines: {declared}\n\n{}",
+            body.join("\n")
+        )
+    }
+
+    fn code_mode_detail(script: &str, blob: String, id: &str) -> crate::models::ConversationDetail {
+        let lines = code_mode_rollout(
+            script,
+            serde_json::json!([
+                {"type": "input_text", "text": "Script completed\nWall time 0.3 seconds\nOutput:\n"},
+                {"type": "input_text", "text": blob},
+            ]),
+        );
+        let path = write_temp_rollout(id, &lines);
+        let detail = CodexParser::new()
+            .parse_conversation_detail(&path, id)
+            .expect("parse ok");
+        let _ = fs::remove_file(path);
+        detail
+    }
+
+    fn tool_metas(detail: &crate::models::ConversationDetail) -> Vec<serde_json::Value> {
+        detail
+            .turns
+            .iter()
+            .flat_map(|t| t.blocks.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse { meta, .. } => Some(
+                    meta.clone()
+                        .and_then(|m| m.get("codeg.codexScript").cloned())
+                        .unwrap_or(serde_json::Value::Null),
+                ),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_labelled_fanout_splits_a_collapsed_blob_per_command() {
+        let detail = code_mode_detail(
+            &labelled_fanout(&["query-entry", "formula-service", "factor-full"]),
+            labelled_blob(6, &[
+                ("query-entry", "one"),
+                ("formula-service", "two"),
+                ("factor-full", "three"),
+            ]),
+            "code-mode-labelled",
+        );
+
+        assert_eq!(
+            tool_uses(&detail),
+            vec![
+                ("call_1#0".into(), "exec_command".into(), Some("echo 0".into())),
+                ("call_1#1".into(), "exec_command".into(), Some("echo 1".into())),
+                ("call_1#2".into(), "exec_command".into(), Some("echo 2".into())),
+            ]
+        );
+        assert_eq!(
+            tool_results(&detail),
+            vec![
+                ("call_1#0".into(), Some("one".into()), false),
+                ("call_1#1".into(), Some("two".into()), false),
+                ("call_1#2".into(), Some("three".into()), false),
+            ]
+        );
+        let metas = tool_metas(&detail);
+        assert_eq!(metas[0]["label"], "query-entry");
+        assert_eq!(metas[2]["label"], "factor-full");
+        assert!(metas.iter().all(|m| m.get("outputMissing").is_none()));
+    }
+
+    /// The reported card: truncation ate two separators, so the span after
+    /// `formula-service` holds three commands' output with no boundary. The
+    /// commands it provably brackets still get their own output; the ones whose
+    /// separator is gone say so instead of being handed someone else's.
+    #[test]
+    fn a_truncated_separator_leaves_its_command_without_output() {
+        let detail = code_mode_detail(
+            &labelled_fanout(&["query-entry", "formula-service", "vo", "formula-splice", "factor-full"]),
+            labelled_blob(20, &[
+                ("query-entry", "first"),
+                ("formula-service", "second\nvo-output\nsplice-output"),
+                ("factor-full", "last"),
+            ]),
+            "code-mode-labelled-partial",
+        );
+
+        assert_eq!(
+            tool_results(&detail),
+            vec![
+                ("call_1#0".into(), Some("first".into()), false),
+                ("call_1#1".into(), Some("second\nvo-output\nsplice-output".into()), false),
+                ("call_1#2".into(), None, false),
+                ("call_1#3".into(), None, false),
+                ("call_1#4".into(), Some("last".into()), false),
+            ]
+        );
+
+        let metas = tool_metas(&detail);
+        assert_eq!(metas[1]["sharedWith"], serde_json::json!(["vo", "formula-splice"]));
+        assert_eq!(metas[2]["outputMissing"], true);
+        assert_eq!(metas[3]["outputMissing"], true);
+        assert!(metas[0].get("sharedWith").is_none());
+        assert!(metas[4].get("sharedWith").is_none());
+        assert!(metas.iter().all(|m| m["truncated"] == true));
+    }
+
+    /// A command that printed the separator itself makes the line ambiguous;
+    /// the whole candidate is refused rather than cutting on the wrong one.
+    #[test]
+    fn a_repeated_separator_line_keeps_the_script_card() {
+        let detail = code_mode_detail(
+            &labelled_fanout(&["alpha", "beta"]),
+            labelled_blob(8, &[
+                ("alpha", "one\n===== beta ====="),
+                ("beta", "two"),
+            ]),
+            "code-mode-labelled-dup",
+        );
+
+        let uses = tool_uses(&detail);
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].1, CODEX_SCRIPT_TOOL_NAME);
+    }
+
+    /// One separator divides nothing: it would hand the whole blob to the first
+    /// command and leave the rest blank.
+    #[test]
+    fn a_single_surviving_separator_keeps_the_script_card() {
+        let detail = code_mode_detail(
+            &labelled_fanout(&["alpha", "beta", "gamma"]),
+            labelled_blob(9, &[("beta", "two")]),
+            "code-mode-labelled-one",
+        );
+
+        let uses = tool_uses(&detail);
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].1, CODEX_SCRIPT_TOOL_NAME);
+    }
+
+    /// Separators in the wrong order are not this script's separator run.
+    #[test]
+    fn separators_out_of_order_keep_the_script_card() {
+        let detail = code_mode_detail(
+            &labelled_fanout(&["alpha", "beta", "gamma"]),
+            labelled_blob(9, &[("gamma", "three"), ("beta", "two"), ("alpha", "one")]),
+            "code-mode-labelled-unordered",
+        );
+
+        let uses = tool_uses(&detail);
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].1, CODEX_SCRIPT_TOOL_NAME);
+    }
+
+    /// Scripts that number their results instead of naming them split the same
+    /// way — the hole is the loop index.
+    #[test]
+    fn numbered_separators_split_a_collapsed_blob() {
+        let script = concat!(
+            "const cmds = [[\"echo one\", 20000], [\"echo two\", 20000]];\n",
+            "const rs = await Promise.all(cmds.map(([cmd,max]) => tools.exec_command({cmd, max_output_tokens:max})));\n",
+            "rs.forEach((r,i)=>text(`---RESULT ${i+1}---\\n${r.output}`));\n",
+        );
+        let blob = "Warning: truncated output (original token count: 900)\nTotal output lines: 7\n\n---RESULT 1---\none\n---RESULT 2---\ntwo".to_string();
+        let detail = code_mode_detail(script, blob, "code-mode-numbered");
+
+        assert_eq!(
+            tool_results(&detail),
+            vec![
+                ("call_1#0".into(), Some("one".into()), false),
+                ("call_1#1".into(), Some("two".into()), false),
+            ]
+        );
+        // No table label to show, so the chip has nothing to say.
+        assert!(tool_metas(&detail).iter().all(|m| m.get("label").is_none()));
+    }
 }
