@@ -1,10 +1,37 @@
-# AGENTS.md
+# agent.md - Agent Operating Rules
 
 Working guidance for Code Agent when working in this repository (Codeg).
 
 > **Scope note:** this file is repo-owned documentation — it encodes this repository's
 > conventions, not the user's personal instructions. Directives given by the user in
 > conversation always take precedence over this file.
+
+## Core System Profile
+
+- **ROLE:** Building a custom platform **on top of** Codeg.
+- **POLICY:** Never edit Codeg native engine files. Manage custom files/plugins only.
+
+## Immutable Architect Rules
+
+1. **Codeg = base platform/engine.** The custom platform is layered on top of it.
+2. **Never edit Codeg native engine files** - this covers the Rust engine (`src-tauri/src/**`), the core TypeScript engine, and vendored native components.
+3. **Custom work lives in `plugins/` and custom platform files only.** New features for the custom platform are expressed as plugins, adapters, and extension points - not as patches to the engine.
+4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged as open debt with `file:line` citations, never silently fixed.
+
+## Carried State (repo invariants)
+
+- **TARGET SCOPE:** `plugins/patches/` - the per-file patch files (20 patches, 2026-08-03). This is where custom-platform changes are managed.
+- **OBSOLETE - ignore entirely:** `plugins/vendor.patch`. Dead history. No tracking, no purge, no reference.
+- Untracked, leave alone: `.qartez/`, `.github/workflows/codeg-portable-win64.yml`
+- Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP leak at `chat_channel.rs:78-90`.
+
+## Extension Surface for the Custom Platform
+
+- AgentType registry + `acp_adapter_relation` (`acp/registry.rs:240`)
+- `ConnectionSpawner` trait (`acp/delegation/spawner.rs:86`)
+- DB-persisted custom agents (`db/service/custom_agent_service.rs:160-162`)
+- Sole event emission path: `emit_with_state_gated` (`web/event_bridge.rs:402-425`)
+- Five prompt surfaces route through ConnectionManager (architectural center): `commands/acp.rs:8495-8507`, `web/handlers/acp.rs:165-188`, `automation/engine.rs:551-562`, `work_task/engine.rs:782-793`, `chat_channel/session_commands.rs:1563-1593`
 
 ## Project
 
