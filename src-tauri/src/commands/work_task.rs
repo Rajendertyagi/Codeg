@@ -12,8 +12,8 @@ use crate::db::error::DbError;
 use crate::db::service::work_task_service;
 use crate::db::AppDatabase;
 use crate::models::{
-    WorkTaskChangedFile, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings, WorkTaskInfo,
-    WorkTaskTemplateDraft, WorkTaskTemplateInfo,
+    FollowUpIntent, WorkTaskChangedFile, WorkTaskDraft, WorkTaskEventInfo, WorkTaskFolderSettings,
+    WorkTaskInfo, WorkTaskTemplateDraft, WorkTaskTemplateInfo,
 };
 use crate::web::event_bridge::{
     emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT,
@@ -154,18 +154,21 @@ pub async fn work_task_start_all_core(folder_id: Option<i32>) -> Result<u32, DbE
         .map_err(DbError::Validation)
 }
 
-pub async fn work_task_retry_core(id: i32) -> Result<(), DbError> {
-    engine()?.retry(id).await.map_err(DbError::Validation)
+/// failed → queued, optionally with a note explaining what to do differently.
+pub async fn work_task_retry_core(id: i32, note: Option<String>) -> Result<(), DbError> {
+    engine()?.retry(id, note).await.map_err(DbError::Validation)
 }
 
 /// canceled → todo. Pure DB (no engine needed) — the user starts it again
-/// explicitly.
+/// explicitly. A cancel usually had a reason; the optional note carries it into
+/// the next run's prompt.
 pub async fn work_task_requeue_core(
     emitter: &EventEmitter,
     db: &AppDatabase,
     id: i32,
+    note: Option<String>,
 ) -> Result<(), DbError> {
-    if !work_task_service::requeue_canceled(&db.conn, id).await? {
+    if !work_task_service::requeue_canceled(&db.conn, id, note.as_deref()).await? {
         return Err(DbError::Validation("task is not canceled".to_string()));
     }
     emit_event(
@@ -179,13 +182,22 @@ pub async fn work_task_requeue_core(
     Ok(())
 }
 
-pub async fn work_task_return_core(id: i32, feedback: String) -> Result<(), DbError> {
+/// Follow up on a reviewed task. `intent` picks the wording the agent receives;
+/// absent means `revise`, the historical "returned with feedback" behaviour.
+pub async fn work_task_return_core(
+    id: i32,
+    feedback: String,
+    intent: Option<String>,
+) -> Result<(), DbError> {
+    let intent = FollowUpIntent::from_wire(intent.as_deref()).map_err(DbError::Validation)?;
     let feedback = feedback.trim().to_string();
-    if feedback.is_empty() {
+    // A self-check is a complete instruction on its own; everything else is
+    // only as good as what the user typed.
+    if feedback.is_empty() && !intent.allows_empty() {
         return Err(DbError::Validation("feedback is required".to_string()));
     }
     engine()?
-        .return_task(id, feedback)
+        .return_task(id, intent, feedback)
         .await
         .map_err(DbError::Validation)
 }
@@ -206,6 +218,16 @@ pub async fn work_task_merge_core(
 ) -> Result<(), DbError> {
     engine()?
         .merge_task(id, message, delete_worktree)
+        .await
+        .map_err(DbError::Validation)
+}
+
+/// Finish a reviewed task that has nothing to land (review → done, no merge),
+/// optionally removing its worktree. Refused when the worktree turns out to
+/// hold changes after all — that task belongs on the merge path.
+pub async fn work_task_complete_core(id: i32, delete_worktree: bool) -> Result<(), DbError> {
+    engine()?
+        .complete_task(id, delete_worktree)
         .await
         .map_err(DbError::Validation)
 }
@@ -457,8 +479,8 @@ pub async fn work_task_start_all(folder_id: Option<i32>) -> Result<u32, DbError>
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn work_task_retry(id: i32) -> Result<(), DbError> {
-    work_task_retry_core(id).await
+pub async fn work_task_retry(id: i32, note: Option<String>) -> Result<(), DbError> {
+    work_task_retry_core(id, note).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -467,14 +489,19 @@ pub async fn work_task_requeue(
     app: tauri::AppHandle,
     db: tauri::State<'_, AppDatabase>,
     id: i32,
+    note: Option<String>,
 ) -> Result<(), DbError> {
-    work_task_requeue_core(&EventEmitter::Tauri(app), &db, id).await
+    work_task_requeue_core(&EventEmitter::Tauri(app), &db, id, note).await
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn work_task_return(id: i32, feedback: String) -> Result<(), DbError> {
-    work_task_return_core(id, feedback).await
+pub async fn work_task_return(
+    id: i32,
+    feedback: String,
+    intent: Option<String>,
+) -> Result<(), DbError> {
+    work_task_return_core(id, feedback, intent).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -491,6 +518,12 @@ pub async fn work_task_merge(
     delete_worktree: bool,
 ) -> Result<(), DbError> {
     work_task_merge_core(id, message, delete_worktree).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn work_task_complete(id: i32, delete_worktree: bool) -> Result<(), DbError> {
+    work_task_complete_core(id, delete_worktree).await
 }
 
 #[cfg(feature = "tauri-runtime")]

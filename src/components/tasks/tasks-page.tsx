@@ -59,6 +59,7 @@ import {
   type BoardColumnId,
 } from "./board-columns"
 import { StatusChip, TaskCard } from "./task-card"
+import { TaskCompleteDialog } from "./task-complete-dialog"
 import { TaskDetailSheet } from "./task-detail-sheet"
 import { TaskEditorDialog } from "./task-editor-dialog"
 import { TaskMergeDialog } from "./task-merge-dialog"
@@ -217,6 +218,9 @@ export function TasksPage() {
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null)
   const [mergeTask, setMergeTask] = useState<WorkTask | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
+  // The merge dialog's counterpart for a task that changed nothing.
+  const [completeTask, setCompleteTask] = useState<WorkTask | null>(null)
+  const [completeOpen, setCompleteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Read-only live session viewer ("查看会话") — tracked by id so the dialog
   // header's status chip follows the live row (like the detail sheet).
@@ -304,6 +308,11 @@ export function TasksPage() {
   const openMerge = useCallback((task: WorkTask) => {
     setMergeTask(task)
     setMergeOpen(true)
+  }, [])
+
+  const openComplete = useCallback((task: WorkTask) => {
+    setCompleteTask(task)
+    setCompleteOpen(true)
   }, [])
 
   const openNewTask = useCallback(() => {
@@ -655,6 +664,7 @@ export function TasksPage() {
                   onRequeue={() => void act(() => workTaskRequeue(task.id))}
                   onViewSession={() => openSession(task)}
                   onMerge={() => openMerge(task)}
+                  onComplete={() => openComplete(task)}
                   onArchive={() =>
                     void act(() =>
                       workTaskArchive(task.id, task.archived_at == null)
@@ -823,6 +833,7 @@ export function TasksPage() {
         }
         onViewSession={openSession}
         onMerge={openMerge}
+        onComplete={openComplete}
         onEdit={(task) => {
           setEditorTask(task)
           setEditorOpen(true)
@@ -832,6 +843,11 @@ export function TasksPage() {
         open={mergeOpen}
         onOpenChange={setMergeOpen}
         task={mergeTask}
+      />
+      <TaskCompleteDialog
+        open={completeOpen}
+        onOpenChange={setCompleteOpen}
+        task={completeTask}
       />
       {/* Rendered after the sheet so it stacks above it when opened from
           within (both portal to body; later mount wins). */}

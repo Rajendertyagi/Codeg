@@ -1532,6 +1532,25 @@
   transition-property: none !important;
 }
 
+/* Same class, the OTHER way a kept-mounted subtree keeps painting: `visibility`
+   inherits, so a descendant that declares its own `visibility: visible` opts back
+   in — and Monaco's diff editor declares exactly that. DiffEditorWidget writes an
+   INLINE `visibility: visible` onto its two panes (`.monaco-diff-editor >
+   .editor.original` / `.editor.modified`), flipping them to `hidden` only while
+   the accessible diff viewer (F7) is up. A normal author declaration loses to an
+   inline one, so the panes ignored the wrapper's `invisible`: with a workspace
+   background image on — where the covering surface is transparent, not opaque —
+   an open git-diff file tab painted straight through the full-page route overlays
+   (task board / automations / token usage) and through the conversation overlay in
+   conversation-only mode. A plain file tab has no such inline style and hid
+   correctly, which is why only diffs ghosted. `!important` is the one thing that
+   outranks inline. Re-hiding BOTH panes is safe: the whole subtree is hidden
+   anyway, and the class is dropped in the same commit that restores visibility, so
+   the accessible diff viewer keeps full control whenever the subtree is shown. */
+.conversation-tab-hidden .monaco-diff-editor > .editor {
+  visibility: hidden !important;
+}
+
 .select-none {
   -webkit-user-select: none;
   -moz-user-select: none;

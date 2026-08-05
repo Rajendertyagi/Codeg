@@ -1043,6 +1043,10 @@ impl WatchState {
         crate::parsers::relocate_orphaned_tool_results(&mut turns);
         crate::parsers::structurize_read_tool_output(&mut turns);
         crate::parsers::resolve_patch_line_numbers(&mut turns, Some(cwd));
+        // Same last step as the detail parse, so an overlay turn carries the
+        // same elapsed time the reply will show once it settles. An episode
+        // that opens mid-reply simply has no boundary for its first turn.
+        crate::parsers::backfill_turn_durations(&mut turns, &[]);
         for (idx, mut turn) in turns.into_iter().enumerate() {
             turn.id = format!("bg-{}-{}", episode.start_offset, idx);
             let hash = hash_turn(&turn);

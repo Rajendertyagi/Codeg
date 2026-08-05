@@ -424,10 +424,14 @@ export const CONVERSATION_CHANGED_EVENT = "conversation://changed"
 /** Payload for the global `folder://changed` side-channel. A folder created or
  *  updated headlessly — e.g. the automation engine minting a per-run worktree —
  *  reaches every client's workspace list so a conversation produced inside it can
- *  be grouped/rendered in the sidebar. Mirrors the Rust `FolderChange` enum
- *  (serde `tag = "kind"`). Distinct from `folder://open-in-workspace`, whose
- *  listener also opens + focuses a tab. */
-export type FolderChange = { kind: "upsert"; folder: FolderDetail }
+ *  be grouped/rendered in the sidebar. `deleted` is its mirror image: a folder
+ *  row that is gone for good (a work task's worktree, once removed from disk) is
+ *  dropped from the list without waiting for a full refetch. Mirrors the Rust
+ *  `FolderChange` enum (serde `tag = "kind"`). Distinct from
+ *  `folder://open-in-workspace`, whose listener also opens + focuses a tab. */
+export type FolderChange =
+  | { kind: "upsert"; folder: FolderDetail }
+  | { kind: "deleted"; id: number }
 
 export const FOLDER_CHANGED_EVENT = "folder://changed"
 
