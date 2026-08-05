@@ -1,0 +1,14 @@
+[package]
+name = "newplugin-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Codeg Layer-2 plugin backend: automation launch-target decision logic"
+
+[lib]
+name = "newplugin_backend"
+path = "src/lib.rs"
+
+# Standalone workspace root: this crate is a path dependency of the codeg
+# crate (src-tauri) but is NOT a member of any workspace there, so it must
+# declare its own root to satisfy Cargo.
+[workspace]
