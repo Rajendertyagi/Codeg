@@ -63,7 +63,12 @@ server/Docker deployment.
 3. **Token economy**
    - Prefer indexed tooling over blind greps when safe (see Tooling).
    - Keep reports, comments, and commits tight — no filler.
-4. **No unnecessary installs** — prefer portable/built-in tooling.
+4. **No installations under any circumstances** — the platform is built entirely from
+   GitHub-hosted sources (pnpm/npm packages from the lockfile, crates from the Cargo
+   lock, GitHub Actions, GitHub-hosted MCP servers). Do NOT propose or run `npm install`,
+   `pip install`, `cargo install`, `brew install`, or any other package manager install.
+   If a dependency is missing, flag it as open debt with `file:line` citation — do not
+   silently add it. Vendored/built-in tooling only.
 
 ## Tooling (available via mcpproxy MCP)
 
