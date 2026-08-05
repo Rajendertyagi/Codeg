@@ -33,26 +33,74 @@ server/Docker deployment.
      under `audit/` (e.g. `audit/<phase>.md`) committed to `plugin-dev`.
    - Report format: objective / verified facts with `file:line` citations / anatomy /
      known gaps / next steps.
-3. **Verification gate** — nothing is "done" until it compiles and passes:
-   - Frontend: `pnpm eslint .`, `pnpm test`, `pnpm build`
-   - Rust (desktop, in `src-tauri/`): `cargo check`, `cargo test --features test-utils`,
-     `cargo clippy --all-targets --features test-utils -- -D warnings`
-   - Server: `cargo check --no-default-features --bin codeg-server`
-     and `cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings`
-   - MCP: `cargo check --no-default-features --bin codeg-mcp`
-4. **Token economy**
+3. **Token economy**
    - Prefer indexed tooling over blind greps when safe (see Tooling).
    - Keep reports, comments, and commits tight — no filler.
-5. **No unnecessary installs** — prefer portable/built-in tooling.
+4. **No unnecessary installs** — prefer portable/built-in tooling.
 
 ## Tooling (available via mcpproxy MCP)
 
-- **qartez** — codebase graph: `qartez_map`, `qartez_stats`, `qartez_refs`, `qartez_deps`,
-  `qartez_impact`, `qartez_outline`, `qartez_read`, `qartez_context`, `qartez_test_gaps`,
-  `qartez_diff_impact`, `qartez_grep`, `qartez_find`, ...
-- **codebase-memory (cbm)** — semantic knowledge graph. Project id for this repo:
-  `D-Temp-Codeg` (`index_status`, `search_graph`, `get_code_snippet`, `manage_adr`, ...)
+Server names below are the EXACT `server:tool` prefixes to call — do NOT invent
+abbreviations.
+
+- **qartez** — codebase graph. Tools: `qartez_map`, `qartez_stats`, `qartez_refs`,
+  `qartez_calls`, `qartez_deps`, `qartez_impact`, `qartez_context`, `qartez_test_gaps`,
+  `qartez_diff_impact`, `qartez_grep`, `qartez_find`, `qartez_read`, `qartez_outline`,
+  `qartez_hierarchy`, `qartez_security`, `qartez_wiki`, `qartez_hotspots`,
+  `qartez_smells`, `qartez_health`, `qartez_cochange`, `qartez_semantic`,
+  `qartez_blame`, `qartez_understand`, `qartez_path`, `qartez_unused`.
+- **codebase-memory** — semantic knowledge graph. Server name is `codebase-memory`
+  (NOT "cbm" — that shorthand appears only in older docs and is WRONG). Project id
+  for this repo: `D-Temp-Codeg`. Tools: `search_graph`, `search_code`, `get_code_snippet`,
+  `get_architecture`, `get_graph_schema`, `index_repository`, `ingest_traces`.
 - **ICM** — session memory, facts, transcripts.
+
+## MCP Tool Mandate (hard rules)
+
+Indexed MCP tools MUST be used before any direct file read. They are faster,
+graph-aware, and surface relationships that grep/Read cannot. Falling back to
+manual reads when an indexed tool is available is a protocol violation.
+
+### Required tools by task type
+
+| Task type | Required MCP tools (use BEFORE Read/grep) |
+|-----------|------------------------------------------|
+| Symbol/definition lookup | `qartez_find` or `qartez_grep` |
+| Caller/callee tracing | `qartez_calls` + `qartez_refs` |
+| Dependency graph | `qartez_deps` |
+| Impact / blast-radius analysis | `qartez_impact` |
+| Context gathering (files to read first) | `qartez_context` |
+| Semantic / concept search | `codebase-memory:search_graph` |
+| Architecture overview | `codebase-memory:get_architecture` |
+| Test coverage gaps | `qartez_test_gaps` |
+| Architecture wiki / cluster map | `qartez_wiki` |
+| Code health / smells | `qartez_health` + `qartez_smells` |
+
+### Pre-task discovery gate
+
+Before ANY implementation or audit task:
+1. Call `retrieve_tools` with a query matching the task.
+2. State which MCP tools you will use and why.
+3. Begin with those tools — do NOT default to Read/grep.
+
+### Phase-gated audits
+
+Architecture audits MUST follow these phases in order:
+- **Phase 1 — Discovery**: `qartez_map` + `codebase-memory:search_graph` to map the landscape.
+- **Phase 2 — Tracing**: `qartez_calls` + `qartez_refs` + `qartez_deps` to trace the full path.
+- **Phase 3 — Impact**: `qartez_impact` + `qartez_context` to measure blast radius.
+- **Phase 4 — Verification**: `qartez_test_gaps` to confirm coverage.
+
+You may NOT skip a phase. Each phase's output must cite the MCP tools used.
+
+### Completion verification
+
+Before claiming any audit or implementation is complete, answer:
+1. Which MCP tools did I use? (list them)
+2. Which MCP tools were available but I did NOT use? (list them)
+3. Why did I skip them?
+
+If available tools were skipped without documented reason, the task is NOT complete.
 
 ## Architecture
 
