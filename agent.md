@@ -115,6 +115,40 @@ Before ANY implementation or audit task:
 2. State which MCP tools you will use and why.
 3. Begin with those tools — do NOT default to Read/grep.
 
+### Schema verification (MANDATORY before every MCP call)
+
+The MCP tools do NOT share a common parameter schema. Before calling any tool you
+have not used in the current session, verify the exact parameter names via the
+`describe_tool` output or the schema shown in `retrieve_tools`. Known landmines:
+
+| Tool | Wrong param | Correct param |
+|------|-------------|---------------|
+| `qartez_refs` | `name` | `symbol` |
+| `qartez_calls` | `symbol` | `name` |
+| `qartez_find` | `query` | `name` |
+| `codebase-memory:search_graph` | `project_id` | `project` |
+
+Using the wrong parameter name returns "missing property" — DO NOT retry with a
+different guess. Call `describe_tool` first, then call with the correct schema.
+
+### Security scanner avoidance
+
+The qartez security scanner flags long digit sequences as `credit_card` (critical
+severity). To avoid false positives:
+- Do NOT pass raw UUIDs (e.g. `8d95177f-...`) as tool arguments.
+- Do NOT pass long numeric ids (e.g. `1234567890`) as bare arguments.
+- Wrap identifiers in objects or use short string keys instead.
+- If a call triggers a credit_card detection, sanitize the input and retry.
+
+### Graceful degradation when MCP fails
+
+If an MCP tool call fails (server timeout, unavailable tool, any error):
+1. Fall back to `Read`/`grep` immediately — do NOT stop the task.
+2. Report the MCP failure in the response.
+3. Continue with the audit using available tools.
+4. MCP server flakiness is NOT a reason to abandon indexed tooling — retry the
+   MCP tool later in the session; it may come back.
+
 ### Phase-gated audits
 
 Architecture audits MUST follow these phases in order:
