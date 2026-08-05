@@ -431,6 +431,16 @@ export type FolderChange = { kind: "upsert"; folder: FolderDetail }
 
 export const FOLDER_CHANGED_EVENT = "folder://changed"
 
+/** Payload for `folder://links-changed`: a workspace folder's set of linked
+ *  directories was created, renamed, repaired, or removed. Carries only the id
+ *  — listeners re-fetch, so a dropped event self-heals on the next change.
+ *  Mirrors the Rust `FolderLinksChanged`. */
+export interface FolderLinksChanged {
+  folder_id: number
+}
+
+export const FOLDER_LINKS_CHANGED_EVENT = "folder://links-changed"
+
 /** Global side-channel announcing a live-feedback enable/disable (payload is
  *  `FeedbackSettings`). The settings UI runs in a separate window, so the
  *  conversation feedback bar converges on this backend broadcast rather than a
@@ -1255,6 +1265,8 @@ export interface AutomationDraft {
 export type WorkTaskStatus =
   | "todo"
   | "queued"
+  /** Out of the queue, setting up: worktree, init command, agent spawn. */
+  | "preparing"
   | "running"
   | "awaiting_input"
   | "review"
@@ -1373,6 +1385,10 @@ export interface WorkTaskFolderSettings {
   /** Shell line run inside a freshly created worktree before the agent
    *  starts (deps install, env seeding). */
   init_command?: string | null
+  /** Extra instructions appended after the built-in prompt of a launch stage.
+   *  Keys are the engine's stage ids (`work` | `retry` | `return` | `merge`)
+   *  plus the reserved `all`, which applies to every stage. */
+  stage_prompts?: Record<string, string> | null
 }
 
 /** Changed file of a task worktree vs its recorded base. */
@@ -1380,6 +1396,154 @@ export interface WorkTaskChangedFile {
   file: string
   additions: number
   deletions: number
+}
+
+// --- Token usage dashboard (mirror of src-tauri/src/models/token_usage.rs) ---
+
+export type TokenUsageBucket = "day" | "week" | "month"
+
+export interface TokenUsageFilter {
+  /** Inclusive lower bound, ISO-8601. Omit for "since the first recorded turn". */
+  start?: string | null
+  /** Exclusive upper bound, ISO-8601. Omit for "up to now". */
+  end?: string | null
+  /** Selected folders; each is expanded server-side to its worktree children. */
+  folderIds?: number[] | null
+  /** `conversation.agent_type` wire names. */
+  agentTypes?: string[] | null
+  models?: string[] | null
+  bucket: TokenUsageBucket
+  /** `-new Date().getTimezoneOffset()` — all buckets are local-time buckets. */
+  tzOffsetMinutes: number
+  /** Also compute the equally-long window before `start`, for delta chips. */
+  comparePrevious?: boolean
+}
+
+export interface TokenUsageTotals {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  turn_count: number
+  conversation_count: number
+  /** Summed generation time of the counted turns, not time spent in the app. */
+  duration_ms: number
+  active_days: number
+}
+
+export interface TokenUsagePoint {
+  /** `YYYY-MM-DD` (day/week) or `YYYY-MM` (month), in the viewer's local time. */
+  bucket_key: string
+  start: string
+  end: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  turn_count: number
+  conversation_count: number
+}
+
+export interface TokenUsageBreakdownItem {
+  /** Folder id as a string, agent wire name, or model name. */
+  key: string
+  label: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  turn_count: number
+  conversation_count: number
+}
+
+export interface TokenUsageHeatCell {
+  /** 0 = Monday … 6 = Sunday, local time. */
+  weekday: number
+  /** 0–23, local time. */
+  hour: number
+  total_tokens: number
+  turn_count: number
+}
+
+export interface TokenUsageConversationItem {
+  conversation_id: number
+  title: string | null
+  agent_type: string
+  folder_label: string | null
+  total_tokens: number
+  turn_count: number
+  last_activity_at: string
+}
+
+export interface TokenUsageStreak {
+  longest_days: number
+  current_days: number
+  current_ends_on: string | null
+}
+
+export interface TokenUsageReport {
+  range_start: string | null
+  range_end: string | null
+  bucket: TokenUsageBucket
+  totals: TokenUsageTotals
+  previous_totals: TokenUsageTotals | null
+  series: TokenUsagePoint[]
+  by_folder: TokenUsageBreakdownItem[]
+  by_agent: TokenUsageBreakdownItem[]
+  by_model: TokenUsageBreakdownItem[]
+  heatmap: TokenUsageHeatCell[]
+  top_conversations: TokenUsageConversationItem[]
+  streak: TokenUsageStreak
+  first_activity_at: string | null
+  last_activity_at: string | null
+  /** The scan hit its row cap — the numbers cover only the most recent slice. */
+  truncated: boolean
+}
+
+export interface TokenUsageFolderFacet {
+  folder_id: number
+  label: string
+  path: string
+  parent_id: number | null
+}
+
+export interface TokenUsageFacets {
+  folders: TokenUsageFolderFacet[]
+  agents: string[]
+  models: string[]
+  data_start: string | null
+  data_end: string | null
+}
+
+export interface TokenUsageSyncStatus {
+  total_conversations: number
+  synced_conversations: number
+  stale_conversations: number
+  fact_rows: number
+  last_synced_at: string | null
+  running: boolean
+}
+
+export interface TokenUsageSyncResult {
+  scanned: number
+  synced: number
+  skipped: number
+  failed: number
+  turns_written: number
+  tokens_written: number
+  pruned_conversations: number
+}
+
+/** Payload of the `token-usage-sync://progress` event. */
+export interface TokenUsageSyncProgress {
+  done: number
+  total: number
+  current_title: string | null
+  /** Present only on the final tick. */
+  result: TokenUsageSyncResult | null
 }
 
 export interface PlanEntryInfo {
@@ -2790,6 +2954,64 @@ export interface WorkspaceFileEntry {
   /** Path relative to the workspace root, always forward-slashed. */
   path: string
   kind: "file" | "dir"
+}
+
+/**
+ * A directory the user symlinked into a workspace folder, turning one root into
+ * a multi-folder workspace. `name` is the subdirectory the link occupies inside
+ * the root; `targetPath` is the real directory it points at.
+ */
+export interface FolderLinkDetail {
+  id: number
+  folderId: number
+  name: string
+  targetPath: string
+  status: FolderLinkStatus
+}
+
+/**
+ * Live state of a link, recomputed from disk on every list.
+ * - `ok` — the symlink is there and resolves to `targetPath`
+ * - `missing` — nothing at `<root>/<name>` any more
+ * - `conflicted` — a real directory (or a link elsewhere) took the name
+ * - `broken` — the link is there but its target no longer resolves
+ */
+export type FolderLinkStatus = "ok" | "missing" | "conflicted" | "broken"
+
+/** Why a picked directory cannot be linked. */
+export type FolderLinkRejection =
+  | "not_found"
+  | "not_a_directory"
+  | "same_as_root"
+  | "ancestor_of_root"
+  | "inside_root"
+  | "already_linked"
+  | "name_unavailable"
+
+/**
+ * Dry-run result for one picked directory: the name it would get and why it
+ * would be skipped. Computed server-side so the dialog reflects what is
+ * actually on disk rather than guessing.
+ */
+export interface FolderLinkPlan {
+  targetPath: string
+  /** Name derived from the directory, before disambiguation. */
+  baseName: string
+  /** Name that would be created; empty when `rejection` is set. */
+  name: string
+  /** True when `name` had to differ from `baseName`. */
+  renamed: boolean
+  /** The collision was with a real entry already in the root, not another link. */
+  collidesWithExistingEntry: boolean
+  rejection: FolderLinkRejection | null
+  /** Name of the existing link, when `rejection` is `already_linked`. */
+  existingLinkName: string | null
+}
+
+/** One directory to link, with an optional user-chosen name. */
+export interface FolderLinkRequestItem {
+  path: string
+  name?: string
 }
 
 export interface DirectoryEntry {

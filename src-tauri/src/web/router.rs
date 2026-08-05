@@ -205,6 +205,30 @@ pub fn build_router(
             post(handlers::folders::update_folder_default_agent),
         )
         .route(
+            "/list_folder_links",
+            post(handlers::folder_links::list_folder_links),
+        )
+        .route(
+            "/preview_folder_links",
+            post(handlers::folder_links::preview_folder_links),
+        )
+        .route(
+            "/create_folder_links",
+            post(handlers::folder_links::create_folder_links),
+        )
+        .route(
+            "/rename_folder_link",
+            post(handlers::folder_links::rename_folder_link),
+        )
+        .route(
+            "/repair_folder_link",
+            post(handlers::folder_links::repair_folder_link),
+        )
+        .route(
+            "/remove_folder_link",
+            post(handlers::folder_links::remove_folder_link),
+        )
+        .route(
             "/add_folder_to_history",
             post(handlers::folders::add_folder_to_history),
         )
@@ -354,6 +378,10 @@ pub fn build_router(
         .route("/git_pull", post(handlers::git::git_pull))
         .route("/git_push", post(handlers::git::git_push))
         .route("/git_fetch", post(handlers::git::git_fetch))
+        .route(
+            "/git_update_branch",
+            post(handlers::git::git_update_branch),
+        )
         .route("/git_commit", post(handlers::git::git_commit))
         .route("/git_fetch_remote", post(handlers::git::git_fetch_remote))
         .route("/git_delete_branch", post(handlers::git::git_delete_branch))
@@ -1220,6 +1248,23 @@ pub fn build_router(
         .route(
             "/run_custom_workflow_now",
             post(web_workflows::custom_workflow_run_now),
+        )
+        // ─── Token usage dashboard ───
+        .route(
+            "/token_usage_report",
+            post(handlers::token_usage::token_usage_report),
+        )
+        .route(
+            "/token_usage_facets",
+            post(handlers::token_usage::token_usage_facets),
+        )
+        .route(
+            "/token_usage_status",
+            post(handlers::token_usage::token_usage_status),
+        )
+        .route(
+            "/token_usage_sync",
+            post(handlers::token_usage::token_usage_sync),
         )
         // ─── Work tasks ───
         .route("/work_task_list", post(handlers::work_task::work_task_list))

@@ -498,106 +498,112 @@ export function TasksPage() {
           which owns the divider — the toolbar itself is borderless).
           pt-4 / px-4, not py-2: the pills clear the title bar by the same 1rem
           they clear the window's left edge, and pb-2 plus the board's own pt-2
-          makes the gap underneath 1rem too — the row sits on one inset. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 pt-4">
-        <Select
-          value={folderFilter == null ? ALL_FOLDERS : String(folderFilter)}
-          onValueChange={(v) =>
-            setFolderFilter(v === ALL_FOLDERS ? null : Number(v))
-          }
-        >
-          {/* Leads with a folder glyph like the Automations filter pill: "全部
-              文件夹" alone doesn't say WHICH axis the pill filters. */}
-          <SelectTrigger
-            size="sm"
-            className="h-8 w-auto min-w-0 max-w-[14rem] gap-1.5 rounded-full border-transparent bg-muted/70 px-3 text-[0.8125rem] font-medium shadow-none ws-msg-chip hover:bg-muted"
-          >
-            <Folder
-              className="size-3.5 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_FOLDERS}>{t("allFolders")}</SelectItem>
-            {projectFolders.map((f) => (
-              <SelectItem key={f.id} value={String(f.id)}>
-                {f.alias ?? f.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          makes the gap underneath 1rem too — the row sits on one inset.
 
-        {/* Same pill treatment as the folder select so the left cluster reads
-            as one family of controls (the settings entry lives in the chrome
-            strip next to the page title). */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
+          Withheld until the first task exists: on an empty board every control
+          here filters or starts nothing, and the only action that does
+          anything — "new task" — is already the empty state's own button. */}
+      {hasAnyTask && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 pt-4">
+          <Select
+            value={folderFilter == null ? ALL_FOLDERS : String(folderFilter)}
+            onValueChange={(v) =>
+              setFolderFilter(v === ALL_FOLDERS ? null : Number(v))
+            }
+          >
+            {/* Leads with a folder glyph like the Automations filter pill: "全部
+                文件夹" alone doesn't say WHICH axis the pill filters. */}
+            <SelectTrigger
               size="sm"
-              variant="ghost"
-              className="h-8 gap-1.5 rounded-full bg-muted/70 px-3 text-[0.8125rem] font-medium ws-msg-chip hover:bg-muted"
+              className="h-8 w-auto min-w-0 max-w-[14rem] gap-1.5 rounded-full border-transparent bg-muted/70 px-3 text-[0.8125rem] font-medium shadow-none ws-msg-chip hover:bg-muted"
             >
-              <Funnel
+              <Folder
                 className="size-3.5 text-muted-foreground"
                 aria-hidden="true"
               />
-              {t("filter")}
-              {activeFilters > 0 ? (
-                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-primary tabular-nums">
-                  {activeFilters}
-                </span>
-              ) : null}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className="w-52 gap-0.5 rounded-xl p-1.5"
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_FOLDERS}>{t("allFolders")}</SelectItem>
+              {projectFolders.map((f) => (
+                <SelectItem key={f.id} value={String(f.id)}>
+                  {f.alias ?? f.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Same pill treatment as the folder select so the left cluster reads
+              as one family of controls (the settings entry lives in the chrome
+              strip next to the page title). */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-1.5 rounded-full bg-muted/70 px-3 text-[0.8125rem] font-medium ws-msg-chip hover:bg-muted"
+              >
+                <Funnel
+                  className="size-3.5 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                {t("filter")}
+                {activeFilters > 0 ? (
+                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-primary tabular-nums">
+                    {activeFilters}
+                  </span>
+                ) : null}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="w-52 gap-0.5 rounded-xl p-1.5"
+            >
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent/50">
+                <Checkbox
+                  checked={boardFilter.showCanceled}
+                  onCheckedChange={(v) =>
+                    setBoardFilter((f) => ({ ...f, showCanceled: v === true }))
+                  }
+                />
+                {t("showCanceled")}
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent/50">
+                <Checkbox
+                  checked={boardFilter.showArchived}
+                  onCheckedChange={(v) =>
+                    setBoardFilter((f) => ({ ...f, showArchived: v === true }))
+                  }
+                />
+                {t("showArchived")}
+              </label>
+            </PopoverContent>
+          </Popover>
+
+          <div className="flex-1" />
+
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1.5 rounded-full px-3 text-[0.8125rem]"
+            onClick={startAll}
           >
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent/50">
-              <Checkbox
-                checked={boardFilter.showCanceled}
-                onCheckedChange={(v) =>
-                  setBoardFilter((f) => ({ ...f, showCanceled: v === true }))
-                }
-              />
-              {t("showCanceled")}
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent/50">
-              <Checkbox
-                checked={boardFilter.showArchived}
-                onCheckedChange={(v) =>
-                  setBoardFilter((f) => ({ ...f, showArchived: v === true }))
-                }
-              />
-              {t("showArchived")}
-            </label>
-          </PopoverContent>
-        </Popover>
-
-        <div className="flex-1" />
-
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 rounded-full px-3 text-[0.8125rem]"
-          onClick={startAll}
-        >
-          <Play className="size-3.5" aria-hidden="true" />
-          {t("startAll")}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 gap-1 rounded-full px-3.5 text-[0.8125rem]"
-          onClick={openNewTask}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          {t("new")}
-        </Button>
-      </div>
+            <Play className="size-3.5" aria-hidden="true" />
+            {t("startAll")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 gap-1 rounded-full px-3.5 text-[0.8125rem]"
+            onClick={openNewTask}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            {t("new")}
+          </Button>
+        </div>
+      )}
 
       {/* Board */}
       {!hasAnyTask ? (

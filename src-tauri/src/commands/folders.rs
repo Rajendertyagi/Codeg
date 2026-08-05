@@ -415,9 +415,80 @@ async fn count_changed_files_between(
     )))
 }
 
-async fn estimate_push_commit_count(path: &str) -> usize {
+/// Reject a caller-supplied push target that isn't a plain branch name.
+///
+/// The value reaches `git` as its own argv element (no shell), so quoting isn't
+/// the concern — it's that `git push <remote> <value>` reads the value as a
+/// REFSPEC, and this path is reachable from the push window's `?branch=` query
+/// and from the server-mode HTTP API. Left unchecked, `:main` deletes the remote
+/// branch, `+main:main` force-pushes over it, and `--mirror` parses as a flag.
+/// So: no leading `-`/`+`, no `:`, no whitespace or control characters. What
+/// survives can only be a single ref name — `ensure_local_branch_exists` then
+/// confirms it actually is one.
+fn ensure_pushable_branch_name(branch: &str) -> Result<(), AppCommandError> {
+    let rejected = branch.is_empty()
+        || branch.starts_with('-')
+        || branch.starts_with('+')
+        || branch.contains(':')
+        || branch.chars().any(|c| c.is_whitespace() || c.is_control());
+    if rejected {
+        return Err(AppCommandError::invalid_input("Invalid branch name")
+            .with_detail(format!("branch={branch}")));
+    }
+    Ok(())
+}
+
+/// Confirm `branch` names an existing local branch, so a push can only ever
+/// publish a ref that already exists here. Belt to
+/// `ensure_pushable_branch_name`'s braces: that one rules out refspec syntax,
+/// this one rules out everything else a caller could invent.
+///
+/// `show-ref --verify` deliberately, NOT `rev-parse --verify`: the latter takes
+/// a revision EXPRESSION, so `main^` and `main@{1}` would both resolve and slip
+/// through. `show-ref --verify` only accepts an exact ref path.
+async fn ensure_local_branch_exists(
+    path: &str,
+    branch: &str,
+) -> Result<(), AppCommandError> {
+    let output = crate::process::tokio_command("git")
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
+        .current_dir(path)
+        .output()
+        .await
+        .map_err(AppCommandError::io)?;
+    if !output.status.success() {
+        return Err(AppCommandError::not_found("Branch not found")
+            .with_detail(format!("branch={branch}")));
+    }
+    Ok(())
+}
+
+/// How many commits a push would publish. `branch` names the ref to measure;
+/// `None` means the checked-out one (`HEAD`), which is what every caller but the
+/// per-branch push uses.
+async fn estimate_push_commit_count(path: &str, branch: Option<&str>) -> usize {
+    // Full ref for an explicit branch — see `git_push_core` for why short names
+    // can't be trusted as revs.
+    let rev = match branch {
+        Some(name) => format!("refs/heads/{name}"),
+        None => "HEAD".to_string(),
+    };
+    // ...but the `@{push}` SUFFIX is the one place that must stay short: git
+    // resolves it through `branch.<name>.*` config and rejects a qualified ref
+    // outright ("fatal: no such branch: 'refs/heads/x'"), which would silently
+    // drop every explicit-branch call into the fallback below. Only the range's
+    // left side needs it; the right side keeps the unambiguous full ref.
+    let push_range = match branch {
+        Some(name) => format!("{name}@{{push}}..refs/heads/{name}"),
+        None => "@{push}..HEAD".to_string(),
+    };
     let upstream_ahead = crate::process::tokio_command("git")
-        .args(["rev-list", "--count", "@{push}..HEAD"])
+        .args(["rev-list", "--count", &push_range])
         .current_dir(path)
         .output()
         .await;
@@ -429,21 +500,28 @@ async fn estimate_push_commit_count(path: &str) -> usize {
         }
     }
 
-    let branch_output = crate::process::tokio_command("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(path)
-        .output()
-        .await;
-    let Ok(branch_output) = branch_output else {
-        return 0;
+    // Fallback for a branch with no `@{push}`: count what it holds that no ref
+    // of its remote has. The SHORT name is what keys `branch.<name>.remote`;
+    // the rev-list below still walks the full ref.
+    let branch = match branch {
+        Some(name) => name.to_string(),
+        None => {
+            let branch_output = crate::process::tokio_command("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(path)
+                .output()
+                .await;
+            let Ok(branch_output) = branch_output else {
+                return 0;
+            };
+            if !branch_output.status.success() {
+                return 0;
+            }
+            String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string()
+        }
     };
-    if !branch_output.status.success() {
-        return 0;
-    }
-
-    let branch = String::from_utf8_lossy(&branch_output.stdout)
-        .trim()
-        .to_string();
     if branch.is_empty() || branch == "HEAD" {
         return 0;
     }
@@ -463,7 +541,7 @@ async fn estimate_push_commit_count(path: &str) -> usize {
 
     let remote_arg = format!("--remotes={}", remote);
     let output = crate::process::tokio_command("git")
-        .args(["rev-list", "--count", "HEAD", "--not", &remote_arg])
+        .args(["rev-list", "--count", &rev, "--not", &remote_arg])
         .current_dir(path)
         .output()
         .await;
@@ -1303,22 +1381,231 @@ pub async fn git_fetch(
     git_fetch_core(&path, credentials.as_ref(), &db, &data_dir).await
 }
 
-#[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn git_push_info(path: String) -> Result<GitPushInfo, AppCommandError> {
-    ensure_git_repo(&path)?;
-
-    // Get current branch name
-    let branch_output = crate::process::tokio_command("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&path)
+/// Read a single git config value, or `None` when unset/empty.
+async fn git_config_value(path: &str, key: &str) -> Option<String> {
+    let output = crate::process::tokio_command("git")
+        .args(["config", "--get", key])
+        .current_dir(path)
         .output()
         .await
-        .map_err(AppCommandError::io)?;
-    let branch = String::from_utf8_lossy(&branch_output.stdout)
-        .trim()
-        .to_string();
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
 
-    // Get tracking remote for current branch
+/// Resolve a ref to its commit hash, or `None` when the ref doesn't exist.
+async fn rev_parse_ref(path: &str, reference: &str) -> Option<String> {
+    let output = crate::process::tokio_command("git")
+        .args(["rev-parse", "--verify", "--quiet", reference])
+        .current_dir(path)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if hash.is_empty() {
+        None
+    } else {
+        Some(hash)
+    }
+}
+
+/// How many files a ref moved across, mirroring `git_pull_core`'s accounting.
+async fn count_ref_advance(
+    path: &str,
+    before: Option<&str>,
+    after: Option<&str>,
+) -> Result<usize, AppCommandError> {
+    match (before, after) {
+        (Some(before), Some(after)) if before != after => {
+            count_changed_files_between(path, before, after).await
+        }
+        (None, Some(after)) => count_files_in_commit(path, after).await,
+        _ => Ok(0),
+    }
+}
+
+/// Update a branch **without checking it out** — the "update code" action on a
+/// branch row in the branch selector.
+///
+/// - The checked-out branch delegates to [`git_pull_core`], so it behaves
+///   exactly like the dropdown's "pull" operation (merge + conflict reporting).
+/// - Any other local branch resolves its upstream from `branch.<b>.remote` /
+///   `branch.<b>.merge` and fast-forwards the local ref with
+///   `git fetch <remote> <upstream>:refs/heads/<branch>`. The working tree is
+///   never touched. We deliberately omit the `+` force prefix, so git itself
+///   rejects a non-fast-forward — and it also rejects a branch that is checked
+///   out in another worktree. Both surface as a plain command error rather than
+///   silently rewriting history under a worktree the user has open.
+/// - A remote branch row (`origin/foo`) fetches that remote ref only, advancing
+///   the remote-tracking ref without creating or moving any local branch.
+pub(crate) async fn git_update_branch_core(
+    path: &str,
+    branch: &str,
+    is_remote: bool,
+    credentials: Option<&GitCredentials>,
+    db: &AppDatabase,
+    data_dir: &std::path::Path,
+) -> Result<GitPullResult, AppCommandError> {
+    ensure_git_repo(path)?;
+
+    if is_remote {
+        // "origin/feature/x" → remote "origin", branch "feature/x".
+        let (remote, remote_branch) = branch
+            .split_once('/')
+            .filter(|(remote, rest)| !remote.is_empty() && !rest.is_empty())
+            .ok_or_else(|| {
+                AppCommandError::invalid_input(format!("Malformed remote branch ref: {branch}"))
+            })?;
+
+        let tracking_ref = format!("refs/remotes/{branch}");
+        let before = rev_parse_ref(path, &tracking_ref).await;
+
+        // Spell the refspec out rather than relying on `git fetch <remote>
+        // <branch>` opportunistically updating the tracking ref. `+` is correct
+        // here: a remote-tracking ref is a mirror of the remote and is meant to
+        // follow a force-push, exactly like the default fetch refspec does.
+        let refspec = format!("+refs/heads/{remote_branch}:{tracking_ref}");
+        let mut cmd = crate::process::tokio_command("git");
+        cmd.args(["fetch", remote, &refspec]).current_dir(path);
+        prepare_remote_git_cmd_with_remote(&mut cmd, path, Some(remote), credentials, db, data_dir)
+            .await;
+
+        let output = cmd.output().await.map_err(AppCommandError::io)?;
+        if !output.status.success() {
+            return Err(classify_remote_git_error("fetch", &output.stderr));
+        }
+
+        let after = rev_parse_ref(path, &tracking_ref).await;
+        return Ok(GitPullResult {
+            updated_files: count_ref_advance(path, before.as_deref(), after.as_deref()).await?,
+            conflict: None,
+        });
+    }
+
+    // The checked-out branch has a working tree to reconcile — only a real pull
+    // can do that safely.
+    if resolve_git_head(path).await?.branch.as_deref() == Some(branch) {
+        return git_pull_core(path, credentials, db, data_dir).await;
+    }
+
+    let Some(remote) = git_config_value(path, &format!("branch.{branch}.remote")).await else {
+        return Err(AppCommandError::invalid_input(format!(
+            "Branch '{branch}' has no upstream remote configured"
+        )));
+    };
+    // `branch.<b>.merge` is the upstream's FULL ref (`refs/heads/x`). Both sides
+    // of the refspec stay fully qualified so git can't reinterpret the
+    // destination as a remote-tracking ref.
+    let Some(upstream_ref) = git_config_value(path, &format!("branch.{branch}.merge")).await else {
+        return Err(AppCommandError::invalid_input(format!(
+            "Branch '{branch}' has no upstream branch configured"
+        )));
+    };
+
+    let local_ref = format!("refs/heads/{branch}");
+    let before = rev_parse_ref(path, &local_ref).await;
+
+    let mut refspecs = vec![format!("{upstream_ref}:{local_ref}")];
+    // Keep the remote-tracking ref in step with the branch we just advanced, so
+    // "ahead/behind" readouts don't claim the branch is unpushed. Skipped for
+    // the `.` pseudo-remote (a branch tracking another LOCAL branch), which has
+    // no `refs/remotes/.` namespace.
+    if remote != "." {
+        if let Some(upstream_branch) = upstream_ref.strip_prefix("refs/heads/") {
+            refspecs.push(format!(
+                "+{upstream_ref}:refs/remotes/{remote}/{upstream_branch}"
+            ));
+        }
+    }
+
+    let mut cmd = crate::process::tokio_command("git");
+    cmd.arg("fetch")
+        .arg(&remote)
+        .args(&refspecs)
+        .current_dir(path);
+    prepare_remote_git_cmd_with_remote(&mut cmd, path, Some(&remote), credentials, db, data_dir)
+        .await;
+
+    let output = cmd.output().await.map_err(AppCommandError::io)?;
+    if !output.status.success() {
+        return Err(classify_remote_git_error("fetch", &output.stderr));
+    }
+
+    let after = rev_parse_ref(path, &local_ref).await;
+    Ok(GitPullResult {
+        updated_files: count_ref_advance(path, before.as_deref(), after.as_deref()).await?,
+        conflict: None,
+    })
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn git_update_branch(
+    path: String,
+    branch: String,
+    is_remote: bool,
+    credentials: Option<GitCredentials>,
+    db: tauri::State<'_, AppDatabase>,
+    app_handle: tauri::AppHandle,
+) -> Result<GitPullResult, AppCommandError> {
+    let data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppCommandError::external_command("Failed to resolve app data dir", e.to_string())
+    })?;
+    // Resolve through the effective data dir so a custom
+    // `CODEG_DATA_DIR` reaches the git credential helper invoked by
+    // this subprocess.
+    let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
+    git_update_branch_core(
+        &path,
+        &branch,
+        is_remote,
+        credentials.as_ref(),
+        &db,
+        &data_dir,
+    )
+    .await
+}
+
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn git_push_info(
+    path: String,
+    branch: Option<String>,
+) -> Result<GitPushInfo, AppCommandError> {
+    ensure_git_repo(&path)?;
+
+    // The branch this push targets: an explicit one (the push window opened for
+    // a specific branch from the branch selector) or, as before, the checked-out
+    // one.
+    let branch = match branch.filter(|value| !value.trim().is_empty()) {
+        Some(explicit) => {
+            let explicit = explicit.trim().to_string();
+            ensure_pushable_branch_name(&explicit)?;
+            explicit
+        }
+        None => {
+            let branch_output = crate::process::tokio_command("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&path)
+                .output()
+                .await
+                .map_err(AppCommandError::io)?;
+            String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string()
+        }
+    };
+
+    // Get tracking remote for the target branch
     let remote_key = format!("branch.{}.remote", branch);
     let remote_output = crate::process::tokio_command("git")
         .args(["config", "--get", &remote_key])
@@ -1341,31 +1628,76 @@ pub async fn git_push_info(path: String) -> Result<GitPushInfo, AppCommandError>
     })
 }
 
+/// Push a branch to a remote, setting upstream when it doesn't already track the
+/// target remote.
+///
+/// `branch` names the ref to push; `None` keeps the historical behaviour of
+/// pushing whatever is checked out. An explicit branch does NOT have to be
+/// checked out — `git push <remote> <branch>` publishes it either way, which is
+/// what the branch selector's per-branch push relies on.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn git_push_core(
     data_dir: &std::path::Path,
     emitter: &EventEmitter,
     folder_id: Option<i32>,
     path: &str,
     remote: Option<&str>,
+    branch: Option<&str>,
     credentials: Option<&GitCredentials>,
     db: &AppDatabase,
 ) -> Result<GitPushResult, AppCommandError> {
-    let pushed_commits = estimate_push_commit_count(path).await;
+    let branch = branch.map(str::trim).filter(|value| !value.is_empty());
+    // Validate BEFORE anything runs: `branch` is interpolated into the rev
+    // arguments below as well as into the push refspec.
+    if let Some(branch) = branch {
+        ensure_pushable_branch_name(branch)?;
+        ensure_local_branch_exists(path, branch).await?;
+    }
+    let pushed_commits = estimate_push_commit_count(path, branch).await;
 
     let target_remote = remote.filter(|s| !s.is_empty()).unwrap_or("origin");
 
-    let branch_output = crate::process::tokio_command("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(path)
-        .output()
-        .await
-        .map_err(AppCommandError::io)?;
-    let branch = String::from_utf8_lossy(&branch_output.stdout)
-        .trim()
-        .to_string();
+    // The PUSH REFSPEC is fully qualified for an explicit branch: a short name
+    // goes through git's revision resolution, where `@` means HEAD and a
+    // same-named tag makes the name ambiguous, so `refs/heads/x:refs/heads/x` is
+    // the only form that reliably publishes the branch
+    // `ensure_local_branch_exists` just verified.
+    //
+    // The `@{u}` probe must NOT be qualified the same way — git resolves that
+    // suffix through `branch.<name>.*` config and rejects `refs/heads/x@{u}`
+    // ("fatal: no such branch"), which would make every explicit-branch push
+    // look upstream-less and re-run `--set-upstream` each time. Short name there,
+    // full ref for the refspec. (Residual: a branch literally named `@` reads
+    // HEAD's upstream here, which can only cost an unnecessary `-u` — the push
+    // itself still goes to the qualified ref.)
+    //
+    // The no-branch path keeps its original short-name / `@{u}` form verbatim.
+    let (push_ref, upstream_ref) = match branch {
+        Some(explicit) => (
+            format!("refs/heads/{explicit}:refs/heads/{explicit}"),
+            format!("{explicit}@{{u}}"),
+        ),
+        None => {
+            let branch_output = crate::process::tokio_command("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(path)
+                .output()
+                .await
+                .map_err(AppCommandError::io)?;
+            let head = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
+            (head, "@{u}".to_string())
+        }
+    };
 
     let upstream_check = crate::process::tokio_command("git")
-        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &upstream_ref,
+        ])
         .current_dir(path)
         .output()
         .await
@@ -1388,7 +1720,7 @@ pub(crate) async fn git_push_core(
 
     let output = if needs_set_upstream {
         let mut cmd = crate::process::tokio_command("git");
-        cmd.args(["push", "--set-upstream", target_remote, &branch])
+        cmd.args(["push", "--set-upstream", target_remote, &push_ref])
             .current_dir(path);
         prepare_remote_git_cmd_with_remote(
             &mut cmd,
@@ -1402,7 +1734,8 @@ pub(crate) async fn git_push_core(
         cmd.output().await.map_err(AppCommandError::io)?
     } else {
         let mut cmd = crate::process::tokio_command("git");
-        cmd.args(["push", target_remote, &branch]).current_dir(path);
+        cmd.args(["push", target_remote, &push_ref])
+            .current_dir(path);
         prepare_remote_git_cmd_with_remote(
             &mut cmd,
             path,
@@ -1441,11 +1774,13 @@ pub(crate) async fn git_push_core(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+#[allow(clippy::too_many_arguments)]
 pub async fn git_push(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     path: String,
     remote: Option<String>,
+    branch: Option<String>,
     credentials: Option<GitCredentials>,
     folder_id: Option<i32>,
     db: tauri::State<'_, AppDatabase>,
@@ -1470,6 +1805,7 @@ pub async fn git_push(
         folder_id,
         &path,
         remote.as_deref(),
+        branch.as_deref(),
         credentials.as_ref(),
         &db,
     )
@@ -2945,10 +3281,22 @@ fn compute_etag(content: &[u8], metadata: &std::fs::Metadata) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Whether `canonical_target` may be touched by a workspace operation rooted at
+/// `canonical_root`: either it is inside the root, or it is inside a directory
+/// the user explicitly linked into that root (see [`crate::folder_links`]).
+///
+/// Everything else stays rejected — in particular a symlink that merely happens
+/// to sit in the tree, which is what keeps a cloned repo's `secrets -> ~/.ssh`
+/// out of reach of the HTML preview's sub-resource inlining.
+pub(crate) fn is_within_workspace(canonical_root: &Path, canonical_target: &Path) -> bool {
+    canonical_target.starts_with(canonical_root)
+        || crate::folder_links::is_allowed(canonical_root, canonical_target)
+}
+
 fn ensure_path_in_workspace(root: &Path, target: &Path) -> Result<(), AppCommandError> {
     let canonical_root = std::fs::canonicalize(root).map_err(AppCommandError::io)?;
     let canonical_target = std::fs::canonicalize(target).map_err(AppCommandError::io)?;
-    if !canonical_target.starts_with(&canonical_root) {
+    if !is_within_workspace(&canonical_root, &canonical_target) {
         return Err(AppCommandError::invalid_input(
             "Path is outside workspace root",
         ));
@@ -3264,6 +3612,58 @@ pub async fn list_directory_with_files(
     Ok(items)
 }
 
+/// Directories the user linked into `root`, as `(link name, canonical target)`
+/// pairs, restricted to entries that are actually a symlink on disk right now.
+///
+/// Only *authorized* links are returned (see [`crate::folder_links`]): a
+/// symlink that merely happens to sit in the tree — the `secrets -> ~/.ssh` a
+/// cloned repo might ship — is not one of them and stays unfollowed.
+fn authorized_links_in(root: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(canonical_root) = std::fs::canonicalize(root) else {
+        return Vec::new();
+    };
+    let targets = crate::folder_links::canonical_targets_for(&canonical_root);
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+
+    let mut links = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_symlink() {
+            continue;
+        }
+        let Ok(resolved) = std::fs::canonicalize(entry.path()) else {
+            continue;
+        };
+        if !resolved.is_dir() || !targets.contains(&resolved) {
+            continue;
+        }
+        links.push((entry.file_name().to_string_lossy().to_string(), resolved));
+    }
+    links.sort_by_key(|a| a.0.to_lowercase());
+    links
+}
+
+/// Rewrite every `path` in `nodes` (recursively) to `<prefix>/<path>`. Used when
+/// a subtree built against a different root is grafted into this one.
+fn prefix_tree_paths(nodes: &mut [FileTreeNode], prefix: &str) {
+    for node in nodes {
+        match node {
+            FileTreeNode::File { path, .. } => *path = format!("{prefix}/{path}"),
+            FileTreeNode::Dir { path, children, .. } => {
+                *path = format!("{prefix}/{path}");
+                prefix_tree_paths(children, prefix);
+            }
+        }
+    }
+}
+
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_file_tree(
     path: String,
@@ -3271,18 +3671,48 @@ pub async fn get_file_tree(
 ) -> Result<Vec<FileTreeNode>, AppCommandError> {
     let root = PathBuf::from(&path);
     let depth = max_depth.unwrap_or(usize::MAX);
+    let mut visited = HashSet::new();
+    build_file_tree(&root, depth, &mut visited)
+}
+
+/// Build the tree under `root`, grafting in the subtree of every directory the
+/// user linked into it.
+///
+/// `visited` holds the canonical roots already expanded on this path, so a
+/// workspace that links a folder which links back can't recurse forever; a link
+/// that would revisit one is left as an ordinary (unexpanded) entry.
+fn build_file_tree(
+    root: &Path,
+    depth: usize,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<Vec<FileTreeNode>, AppCommandError> {
+    if let Ok(canonical_root) = std::fs::canonicalize(root) {
+        visited.insert(canonical_root);
+    }
+
+    // Linked directories are handled separately below: `WalkDir` reports a
+    // symlink's type as "symlink", not "dir", so left in the main walk they
+    // would surface as leaf *files* with no way to expand them.
+    let linked: Vec<(String, PathBuf)> = authorized_links_in(root)
+        .into_iter()
+        .filter(|(_, target)| !visited.contains(target))
+        .collect();
+    let linked_names: HashSet<String> = linked.iter().map(|(name, _)| name.clone()).collect();
 
     // Collect all entries, skipping ignored directories
     let mut dir_children: HashMap<PathBuf, Vec<FileTreeNode>> = HashMap::new();
     let mut dir_order: Vec<PathBuf> = Vec::new();
     let mut dir_paths_by_rel: HashMap<String, PathBuf> = HashMap::new();
 
-    for entry in WalkDir::new(&root)
+    for entry in WalkDir::new(root)
         .max_depth(depth)
         .sort_by_file_name()
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
+            if e.depth() == 1 && linked_names.contains(name.as_ref()) {
+                return false;
+            }
             if e.file_type().is_dir() {
                 !FILE_TREE_IGNORED_DIRS.contains(&name.as_ref())
             } else {
@@ -3290,22 +3720,23 @@ pub async fn get_file_tree(
             }
         })
     {
-        let entry = entry.map_err(|e| {
-            AppCommandError::io_error("Failed to walk file tree").with_detail(e.to_string())
-        })?;
+        // Skip unreadable entries (permission errors, races, a symlink loop
+        // somewhere in the tree) instead of failing the whole tree: one bad
+        // directory should not blank out the file panel.
+        let Ok(entry) = entry else { continue };
         let entry_path = entry.path().to_path_buf();
 
         // Skip the root itself
         if entry_path == root {
-            dir_children.entry(root.clone()).or_default();
-            dir_order.push(root.clone());
+            dir_children.entry(root.to_path_buf()).or_default();
+            dir_order.push(root.to_path_buf());
             continue;
         }
 
-        let parent = entry_path.parent().unwrap_or(&root).to_path_buf();
+        let parent = entry_path.parent().unwrap_or(root).to_path_buf();
         let name = entry.file_name().to_string_lossy().to_string();
         let rel_path = entry_path
-            .strip_prefix(&root)
+            .strip_prefix(root)
             .unwrap_or(&entry_path)
             .to_string_lossy()
             .replace('\\', "/");
@@ -3397,7 +3828,56 @@ pub async fn get_file_tree(
         dir_children.insert(dir_path.clone(), sorted);
     }
 
-    Ok(dir_children.remove(&root).unwrap_or_default())
+    let mut nodes = dir_children.remove(root).unwrap_or_default();
+
+    if linked.is_empty() {
+        return Ok(nodes);
+    }
+
+    // Graft each linked directory in as a real `Dir`, with its own subtree
+    // built through the link. `max_depth == 1` (the panel's lazy load) yields
+    // an empty child list, which the frontend already treats as "not loaded
+    // yet" and fills in when the row is expanded.
+    let child_depth = depth.saturating_sub(1);
+    let mut linked_nodes: Vec<FileTreeNode> = Vec::with_capacity(linked.len());
+    for (name, _) in linked {
+        let link_path = root.join(&name);
+        // The recursive call is rooted at the link, so its paths come back
+        // relative to the *linked* directory. Re-anchor them to the workspace
+        // root, or the panel would resolve `inside.txt` against the root
+        // instead of `api/inside.txt`.
+        let prefix = name.replace('\\', "/");
+        let children = if child_depth == 0 {
+            Vec::new()
+        } else {
+            let mut sub = build_file_tree(&link_path, child_depth, visited).unwrap_or_default();
+            prefix_tree_paths(&mut sub, &prefix);
+            sub
+        };
+        linked_nodes.push(FileTreeNode::Dir {
+            name,
+            path: prefix,
+            children,
+        });
+    }
+
+    // Re-establish the "directories first, then files, each alphabetical"
+    // ordering the walk produced before the graft.
+    let split = nodes
+        .iter()
+        .position(|n| matches!(n, FileTreeNode::File { .. }))
+        .unwrap_or(nodes.len());
+    let files = nodes.split_off(split);
+    nodes.extend(linked_nodes);
+    nodes.sort_by(|a, b| {
+        let key = |n: &FileTreeNode| match n {
+            FileTreeNode::Dir { name, .. } | FileTreeNode::File { name, .. } => name.to_lowercase(),
+        };
+        key(a).cmp(&key(b))
+    });
+    nodes.extend(files);
+
+    Ok(nodes)
 }
 
 /// Flat, gitignore-aware listing of every file and directory under `path`, for
@@ -3411,6 +3891,11 @@ pub async fn list_workspace_files(
     path: String,
 ) -> Result<Vec<WorkspaceFileEntry>, AppCommandError> {
     let root = PathBuf::from(&path);
+    // Linked directories are walked separately below, rooted at the link so
+    // their own `.gitignore` applies. Excluded from the main pass because the
+    // walker reports a symlink as a leaf file.
+    let linked = authorized_links_in(&root);
+    let linked_names: HashSet<String> = linked.iter().map(|(name, _)| name.clone()).collect();
 
     // Conservative gitignore parity with the previous client-side pass: respect
     // in-tree `.gitignore`/`.ignore`/`.git/info/exclude`, but not the global
@@ -3427,8 +3912,11 @@ pub async fn list_workspace_files(
         .git_global(false)
         .require_git(false)
         .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(|e| {
+        .filter_entry(move |e| {
             let name = e.file_name().to_string_lossy();
+            if e.depth() == 1 && linked_names.contains(name.as_ref()) {
+                return false;
+            }
             if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 !FILE_TREE_IGNORED_DIRS.contains(&name.as_ref())
             } else {
@@ -3468,7 +3956,66 @@ pub async fn list_workspace_files(
         });
     }
 
+    for (link_name, target) in linked {
+        entries.push(WorkspaceFileEntry {
+            name: link_name.clone(),
+            path: link_name.clone(),
+            kind: WorkspaceEntryKind::Dir,
+        });
+        // Rooted at the resolved target so the linked project's own ignore
+        // files apply, then re-prefixed with the link name so every path stays
+        // relative to the workspace root and resolves back through the link.
+        entries.extend(list_files_under(&target, &link_name));
+    }
+
     Ok(entries)
+}
+
+/// Flat listing of `root`, with every path prefixed by `prefix/`. Shares the
+/// ignore configuration of [`list_workspace_files`]; nested symlinks are not
+/// followed, so this cannot recurse.
+fn list_files_under(root: &Path, prefix: &str) -> Vec<WorkspaceFileEntry> {
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .parents(false)
+        .ignore(true)
+        .git_ignore(true)
+        .git_exclude(true)
+        .git_global(false)
+        .require_git(false)
+        .sort_by_file_name(|a, b| a.cmp(b))
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                !FILE_TREE_IGNORED_DIRS.contains(&name.as_ref())
+            } else {
+                name != ".DS_Store"
+            }
+        })
+        .build();
+
+    let mut entries = Vec::new();
+    for result in walker {
+        let Ok(entry) = result else { continue };
+        let entry_path = entry.path();
+        if entry_path == root {
+            continue;
+        }
+        let Ok(rel) = entry_path.strip_prefix(root) else {
+            continue;
+        };
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        entries.push(WorkspaceFileEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            path: format!("{prefix}/{}", rel.to_string_lossy().replace('\\', "/")),
+            kind: if is_dir {
+                WorkspaceEntryKind::Dir
+            } else {
+                WorkspaceEntryKind::File
+            },
+        });
+    }
+    entries
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -3582,7 +4129,7 @@ pub async fn read_workspace_file_base64(
             std::fs::canonicalize(&root).map_err(AppCommandError::io)?;
         let canonical_target =
             std::fs::canonicalize(&target).map_err(AppCommandError::io)?;
-        if !canonical_target.starts_with(&canonical_root) {
+        if !is_within_workspace(&canonical_root, &canonical_target) {
             return Err(AppCommandError::invalid_input(
                 "Path is outside workspace root",
             ));
@@ -5879,5 +6426,125 @@ mod workspace_confinement_tests {
             .expect("moved link exists");
         assert!(meta.file_type().is_symlink(), "entry stays a symlink");
         assert!(!root.path().join("link.txt").exists(), "old link gone");
+    }
+    #[tokio::test]
+    async fn file_tree_walks_into_an_authorized_link_only() {
+        let root = tempfile::tempdir().expect("root");
+        let linked = tempfile::tempdir().expect("linked");
+        let stray = tempfile::tempdir().expect("stray");
+        std::fs::write(root.path().join("own.txt"), b"x").expect("write");
+        std::fs::write(linked.path().join("inside.txt"), b"x").expect("write");
+        std::fs::create_dir(linked.path().join("src")).expect("mkdir");
+        std::fs::write(linked.path().join("src/deep.ts"), b"x").expect("write");
+        std::fs::write(stray.path().join("secret.txt"), b"x").expect("write");
+        symlink(linked.path(), root.path().join("api")).expect("symlink");
+        symlink(stray.path(), root.path().join("evil")).expect("symlink");
+
+        // Only `api` is registered, mimicking a user-created link; `evil` is the
+        // kind of symlink a cloned repo could ship.
+        let canonical_target = std::fs::canonicalize(linked.path()).expect("canon");
+        crate::folder_links::register(root.path(), &canonical_target);
+
+        let nodes = get_file_tree(root.path().to_string_lossy().into_owned(), None)
+            .await
+            .expect("tree");
+
+        let api = nodes
+            .iter()
+            .find(|n| matches!(n, FileTreeNode::Dir { name, .. } if name == "api"))
+            .expect("authorized link renders as a directory");
+        match api {
+            FileTreeNode::Dir { children, path, .. } => {
+                assert_eq!(path, "api");
+                assert!(
+                    children.iter().any(
+                        |c| matches!(c, FileTreeNode::File { path, .. } if path == "api/inside.txt")
+                    ),
+                    "the linked directory's contents are grafted in: {children:?}"
+                );
+                // Nested paths must be re-anchored too, or the panel would
+                // resolve them against the workspace root instead of the link.
+                let src = children
+                    .iter()
+                    .find(|c| matches!(c, FileTreeNode::Dir { name, .. } if name == "src"))
+                    .expect("nested directory is present");
+                match src {
+                    FileTreeNode::Dir { path, children, .. } => {
+                        assert_eq!(path, "api/src");
+                        assert!(
+                            children.iter().any(|c| matches!(
+                                c,
+                                FileTreeNode::File { path, .. } if path == "api/src/deep.ts"
+                            )),
+                            "deep paths are prefixed once: {children:?}"
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        // The unregistered symlink stays a leaf: it is not followed.
+        assert!(
+            nodes
+                .iter()
+                .any(|n| matches!(n, FileTreeNode::File { name, .. } if name == "evil")),
+            "an unauthorized symlink must not be walked into: {nodes:?}"
+        );
+
+        crate::folder_links::unregister(root.path(), &canonical_target);
+    }
+
+    #[tokio::test]
+    async fn workspace_search_lists_files_inside_an_authorized_link() {
+        let root = tempfile::tempdir().expect("root");
+        let linked = tempfile::tempdir().expect("linked");
+        std::fs::create_dir(linked.path().join("src")).expect("mkdir");
+        std::fs::write(linked.path().join("src/deep.ts"), b"x").expect("write");
+        symlink(linked.path(), root.path().join("api")).expect("symlink");
+        let canonical_target = std::fs::canonicalize(linked.path()).expect("canon");
+        crate::folder_links::register(root.path(), &canonical_target);
+
+        let entries = list_workspace_files(root.path().to_string_lossy().into_owned())
+            .await
+            .expect("list");
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"api"), "link itself is listed: {paths:?}");
+        assert!(
+            paths.contains(&"api/src/deep.ts"),
+            "linked content is reachable by fuzzy search: {paths:?}"
+        );
+
+        crate::folder_links::unregister(root.path(), &canonical_target);
+    }
+
+    #[test]
+    fn workspace_guard_allows_a_registered_link_but_not_a_stray_symlink() {
+        let root = tempfile::tempdir().expect("root");
+        let linked = tempfile::tempdir().expect("linked");
+        let stray = tempfile::tempdir().expect("stray");
+        std::fs::write(linked.path().join("ok.txt"), b"x").expect("write");
+        std::fs::write(stray.path().join("secret.txt"), b"x").expect("write");
+        symlink(linked.path(), root.path().join("api")).expect("symlink");
+        symlink(stray.path(), root.path().join("evil")).expect("symlink");
+
+        let canonical_target = std::fs::canonicalize(linked.path()).expect("canon");
+        crate::folder_links::register(root.path(), &canonical_target);
+
+        assert!(
+            ensure_path_in_workspace(root.path(), &root.path().join("api/ok.txt")).is_ok(),
+            "a file inside a user-authorized link is in the workspace"
+        );
+        assert!(
+            ensure_path_in_workspace(root.path(), &root.path().join("evil/secret.txt")).is_err(),
+            "an unregistered symlink still cannot escape the root"
+        );
+
+        crate::folder_links::unregister(root.path(), &canonical_target);
+        assert!(
+            ensure_path_in_workspace(root.path(), &root.path().join("api/ok.txt")).is_err(),
+            "revoking the link revokes access"
+        );
     }
 }

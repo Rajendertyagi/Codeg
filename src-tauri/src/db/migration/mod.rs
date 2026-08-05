@@ -33,6 +33,8 @@ mod m20260728_000002_custom_agent_source;
 mod m20260801_000001_work_task;
 mod m20260801_000002_work_task_p2;
 mod m20260801_000003_work_task_template;
+mod m20260803_000001_folder_link;
+mod m20260803_000001_token_usage;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -72,6 +74,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260801_000001_work_task::Migration),
             Box::new(m20260801_000002_work_task_p2::Migration),
             Box::new(m20260801_000003_work_task_template::Migration),
+            Box::new(m20260803_000001_folder_link::Migration),
+            Box::new(m20260803_000001_token_usage::Migration),
         ]
     }
 }

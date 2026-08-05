@@ -24,6 +24,7 @@ pub mod backgrounds;
 pub mod chat_channel;
 pub mod commands;
 pub mod db;
+pub mod folder_links;
 pub mod git_credential;
 pub mod git_repo;
 pub mod intern;
@@ -69,7 +70,7 @@ mod tauri_app {
         chat_channel as chat_channel_commands, conversations,
         custom_skills as custom_skills_commands, delegation as delegation_commands,
         experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
-        office_tools as office_tools_commands,
+        folder_links, office_tools as office_tools_commands,
         folders, logging as logging_commands, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
         question as question_commands, quick_messages as quick_messages_commands,
@@ -77,6 +78,7 @@ mod tauri_app {
         remote_workspace as remote_workspace_commands, science as science_commands,
         session_info as session_info_commands,
         system_settings, terminal as terminal_commands,
+        token_usage as token_usage_commands,
         version_control, windows, work_task as work_task_commands,
         workspace_state as workspace_state_commands,
     };
@@ -975,6 +977,12 @@ mod tauri_app {
                 folders::update_folder_color,
                 folders::update_folder_alias,
                 folders::update_folder_default_agent,
+                folder_links::list_folder_links,
+                folder_links::preview_folder_links,
+                folder_links::create_folder_links,
+                folder_links::rename_folder_link,
+                folder_links::repair_folder_link,
+                folder_links::remove_folder_link,
                 folders::add_folder_to_history,
                 folders::remove_folder_from_history,
                 folders::create_folder_directory,
@@ -986,6 +994,7 @@ mod tauri_app {
                 folders::git_start_pull_merge,
                 folders::git_has_merge_head,
                 folders::git_fetch,
+                folders::git_update_branch,
                 folders::git_push_info,
                 folders::git_push,
                 folders::git_new_branch,
@@ -1277,6 +1286,10 @@ mod tauri_app {
                 custom_plugins::list_custom_workflows,
                 custom_plugins::set_custom_workflow_enabled,
                 custom_plugins::run_custom_workflow_now,
+                token_usage_commands::token_usage_report,
+                token_usage_commands::token_usage_facets,
+                token_usage_commands::token_usage_status,
+                token_usage_commands::token_usage_sync,
                 work_task_commands::work_task_list,
                 work_task_commands::work_task_get,
                 work_task_commands::work_task_events,
