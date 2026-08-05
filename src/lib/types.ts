@@ -1201,6 +1201,11 @@ export interface AutomationConfig {
    *  behavior. Mirrors `existing_conversation_id` in the Rust `AutomationConfig`
    *  (stored inside the opaque config blob, so old rows default to null). */
   existing_conversation_id?: number | null
+  /** When set (launch_session), the run's working root is this plain absolute
+   *  folder path on disk (no git) instead of a workspace folder. Mutually
+   *  exclusive with `root_folder_id` on the automation row; the editor saves
+   *  exactly one. Mirrors `local_folder_path` in the Rust `AutomationConfig`. */
+  local_folder_path?: string | null
 }
 
 export interface Automation {

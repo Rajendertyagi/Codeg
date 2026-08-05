@@ -104,4 +104,11 @@ pub struct AutomationConfig {
     /// `None` (the legacy default) keeps the always-fresh behavior.
     #[serde(default)]
     pub existing_conversation_id: Option<i32>,
+    /// When set, the run's working root is this plain absolute folder path on
+    /// disk (no git involvement) instead of a codeg workspace folder (whose id
+    /// lives in `AutomationDraft.root_folder_id`). Mutually exclusive with the
+    /// workspace: the editor saves exactly one. `None` (the legacy default)
+    /// keeps workspace-targeted behavior.
+    #[serde(default)]
+    pub local_folder_path: Option<String>,
 }
