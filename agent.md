@@ -20,21 +20,33 @@ Working guidance for Code Agent when working in this repository (Codeg).
 
 ## Carried State (repo invariants)
 
-- **PATCH-ARCHIVE MODEL** (2026-08-06): engine + frontend tree = 100% pure `origin/main`
+- **PATCH-ARCHIVE MODEL** (2026-08-07): engine + frontend tree = 100% pure `origin/main`
   (0.23.x) — zero custom seams in Codeg-owned files. Every custom feature lives ONLY as an
-  apply-on-demand patch under `newplugin/patches/` (46 files: 17 legacy auto-approve +
-  9 task-accept + 20 launch-target) and is OFF by default. Apply with
-  `git apply newplugin/patches/<file>.patch` from the repo root on a clean `origin/main`
-  checkout; all 46 pass `git apply --check` and compose cleanly in sequence (verified
-  2026-08-06).
+  apply-on-demand patch under `newplugin/patches/` (59 files: 17 auto-approve +
+  9 task-accept + 20 launch-target + 13 custom-workflows-tab) and is OFF by default in a
+  plain checkout. Apply with `git apply newplugin/patches/<file>.patch` from the repo root
+  on a clean `origin/main` checkout; all 59 pass `git apply --check` and compose cleanly in
+  dependency order (verified 2026-08-07).
 - **Archived features:** auto-approval (`web/handlers/auto_approve.rs` + `custom_hooks`
   hydration in `lib.rs`), task-accept (`workTaskAccept` command + route + review UI),
   launch-target (`local_folder_path` + `existing_conversation_id` resume for work-task and
-  automation runs, incl. non-git Local Folder execution). Engine stays read-only even for
-  defects; new features are expressed as `newplugin/` hooks or new patches, never edits.
-- **Custom workflow feature is fully removed** (2026-08-06): sidebar tab, placeholder
-  component, and route died with the upstream overwrite; no trace remains in tree or archive.
-- Untracked, leave alone: `.qartez/`, `.github/workflows/codeg-portable-win64.yml`
+  automation runs, incl. non-git Local Folder execution), Custom Workflows sidebar tab
+  (Feature 5, 13 `.customtab.patch` files + `newplugin/frontend/custom-workflows-page.tsx`).
+  Engine stays read-only even for defects; new features are expressed as `newplugin/` hooks
+  or new patches, never edits.
+- **Feature 5 = placeholder only (user decision):** the "Custom Workflows" tab renders a
+  committed placeholder page. The scheduler engine (`newplugin/hooks/custom_cron.rs` +
+  `web_workflows.rs`) is DORMANT — it compiles into patched builds but is NOT wired to the
+  tab; do NOT wire it without explicit user approval. The tab page hardcodes all copy (no
+  i18n keys) because `src/i18n/global.d.ts` strictly types messages from en.json and the
+  tab's `t("customWorkflows")` key only exists inside the patches.
+- **CI applies patches:** `.github/workflows/codeg-portable-win64-custom.yml` runs on
+  `plugin-dev` pushes + manual dispatch; its "Apply custom feature patches" step applies
+  all 59 patches in 4 dependency-ordered groups (auto-approve → task-accept →
+  launch-target → custom-tab, alphabetical within group) via `git apply` before building
+  the portable win64 app. Build errors surface only in GitHub Actions logs.
+- Untracked, leave alone: `.qartez/`. (`codeg-portable-win64.yml` was removed; the custom
+  workflow is `codeg-portable-win64-custom.yml` and is tracked.)
 - Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP leak at `chat_channel.rs:78-90`.
 
 ## Extension Surface for the Custom Platform
