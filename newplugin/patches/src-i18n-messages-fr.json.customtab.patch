@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
+index ccac2750..b57d17f4 100644
+--- a/src/i18n/messages/fr.json
++++ b/src/i18n/messages/fr.json
+@@ -1510,6 +1510,7 @@
+       "newChatAction": "Nouvelle discussion",
+       "automations": "Automatisations",
+       "tasks": "Tableau des tâches",
++      "customWorkflows": "Workflows personnalisés",
+       "loadingSubsessions": "Chargement des sous-conversations…"
+     },
+     "conversation": {

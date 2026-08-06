@@ -22,11 +22,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Patch-archive model (2026-08-06): the tree is 100% pure origin/main;
-      # custom features are OFF by default and archived as apply-on-demand
-      # patches under newplugin/patches/. This build compiles the pure tree.
-      # To build WITH a feature, first apply its patches, e.g.
-      #   git apply newplugin/patches/<file>.patch
+      # Patch-archive model (2026-08-07): the tree is 100% pure origin/main;
+      # custom features are archived as apply-on-demand patches under
+      # newplugin/patches/ and applied here in dependency order:
+      #   1) 17 auto-approve patches        (`.patch`)
+      #   2) 9  task-accept patches         (`.accept.patch`)
+      #   3) 20 launch-target patches       (`.launch.patch`)
+      #   4) 13 custom-workflows tab patches (`.customtab.patch`)
+      # Within each group patches are applied alphabetically. This build
+      # therefore ships WITH all custom features.
+      - name: Apply custom feature patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patchDir = "newplugin/patches"
+          $groups = @(
+            @{ Name = "auto-approve"; Pattern = '\.(accept|launch|customtab)\.patch$'; Exclude = $true },
+            @{ Name = "task-accept";  Pattern = '\.accept\.patch$' },
+            @{ Name = "launch-target"; Pattern = '\.launch\.patch$' },
+            @{ Name = "custom-tab";   Pattern = '\.customtab\.patch$' }
+          )
+          foreach ($group in $groups) {
+            $files = Get-ChildItem -Path $patchDir -File -Filter "*.patch" |
+              Where-Object {
+                if ($group.Exclude) {
+                  $_.Name -notmatch $group.Pattern
+                } else {
+                  $_.Name -match $group.Pattern
+                }
+              } |
+              Sort-Object Name
+            if ($files.Count -eq 0) {
+              throw "No patches matched group $($group.Name)"
+            }
+            Write-Output "=== Applying $($group.Name) ($($files.Count) patches) ==="
+            foreach ($file in $files) {
+              Write-Output "Applying $($file.Name)"
+              git apply "$($file.FullName)"
+            }
+          }
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

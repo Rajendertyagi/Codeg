@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
+index 710a6cd0..517c6c61 100644
+--- a/src/i18n/messages/ko.json
++++ b/src/i18n/messages/ko.json
+@@ -1510,6 +1510,7 @@
+       "newChatAction": "새 채팅",
+       "automations": "자동화",
+       "tasks": "작업 보드",
++      "customWorkflows": "사용자 지정 워크플로",
+       "loadingSubsessions": "하위 대화 로드 중…"
+     },
+     "conversation": {

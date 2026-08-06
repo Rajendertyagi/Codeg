@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
+index c800d1be..914a0aab 100644
+--- a/src/i18n/messages/ja.json
++++ b/src/i18n/messages/ja.json
+@@ -1510,6 +1510,7 @@
+       "newChatAction": "新しいチャット",
+       "automations": "オートメーション",
+       "tasks": "タスクボード",
++      "customWorkflows": "カスタムワークフロー",
+       "loadingSubsessions": "サブ会話を読み込み中…"
+     },
+     "conversation": {

@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index 153eb74d..90c04b4c 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -1510,6 +1510,7 @@
+       "newChatAction": "新增聊天",
+       "automations": "自動化",
+       "tasks": "任務看板",
++      "customWorkflows": "自訂工作流程",
+       "loadingSubsessions": "正在載入子會話…"
+     },
+     "conversation": {

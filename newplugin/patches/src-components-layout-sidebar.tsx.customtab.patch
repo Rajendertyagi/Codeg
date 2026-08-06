@@ -1,0 +1,25 @@
+diff --git a/src/components/layout/sidebar.tsx b/src/components/layout/sidebar.tsx
+index 760c1837..feb2caec 100644
+--- a/src/components/layout/sidebar.tsx
++++ b/src/components/layout/sidebar.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+ import {
++  CalendarCog,
+   Crosshair,
+   Funnel,
+   ListChevronsDownUp,
+@@ -436,6 +437,12 @@ export function Sidebar() {
+             ) : null
+           }
+         />
++        <SidebarNavButton
++          icon={CalendarCog}
++          label={t("customWorkflows")}
++          active={routeId === "customWorkflows"}
++          onClick={() => setRoute("customWorkflows")}
++        />
+       </div>
+ 
+       {/* On mobile, clicking a conversation card auto-closes the Sheet */}

@@ -1,0 +1,12 @@
+diff --git a/src/contexts/workbench-route-context.tsx b/src/contexts/workbench-route-context.tsx
+index 47fb15ab..94529e68 100644
+--- a/src/contexts/workbench-route-context.tsx
++++ b/src/contexts/workbench-route-context.tsx
+@@ -23,6 +23,7 @@ export type WorkbenchRouteId =
+   | "automations"
+   | "tasks"
+   | "tokenUsage"
++  | "customWorkflows"
+ 
+ interface WorkbenchRouteContextValue {
+   routeId: WorkbenchRouteId
