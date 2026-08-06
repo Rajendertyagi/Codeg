@@ -15,7 +15,7 @@ The CI workflow `.github/workflows/codeg-portable-win64-custom.yml` applies all
 patches in dependency order **before building** the portable Windows app:
 
 1. 17 auto-approve patches (`.patch`)
-2. 9 task-accept patches (`.accept.patch`)
+2. 16 task-accept patches (`.accept.patch`)
 3. 20 launch-target patches (`.launch.patch`)
 4. 13 custom-workflows tab patches (`.customtab.patch`)
 
@@ -108,7 +108,7 @@ worktree keep the merge pipeline — the accept button is not offered).
 | `newplugin/patches/src-components-tasks-task-card.tsx.accept.patch` | Accept button on card |
 | `newplugin/patches/src-components-tasks-task-detail-sheet.tsx.accept.patch` | Accept action in detail sheet |
 | `newplugin/patches/src-components-tasks-tasks-page.tsx.accept.patch` | Page wiring + canAccept logic |
-| `newplugin/patches/src-i18n-messages-en.json.accept.patch` (+ zh-CN, zh-TW) | UI strings |
+| `newplugin/patches/src-i18n-messages-{en,zh-CN,zh-TW,ja,ko,es,de,fr,pt,ar}.json.accept.patch` | UI strings (10 locales) |
 
 ---
 
@@ -259,10 +259,10 @@ dispatch.
 | # | Feature | Status | Patches | Key custom files |
 |---|---------|--------|---------|------------------|
 | 1 | Auto-approve (global toggle) | Wired | 17 | `hooks/custom_auto_approve.rs` |
-| 2 | Task-accept (review → done, no merge) | Wired | 9 | `hooks/task_accept.rs` |
+| 2 | Task-accept (review → done, no merge) | Wired | 16 | `hooks/task_accept.rs` |
 | 3 | Launch-target (resume / non-git folder) | Wired | 20 | `backend/src/launch_target.rs` |
 | 4 | Scheduled automation → existing chat | Wired | (within launch group) | `frontend/automation-conversation-picker.tsx` |
 | 5 | Custom Workflows tab | Placeholder only | 13 | `frontend/custom-workflows-page.tsx` |
 
-**Total: 59 patches** (17 + 9 + 20 + 13) + committed custom files in
+**Total: 66 patches** (17 + 16 + 20 + 13) + committed custom files in
 `newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/`.

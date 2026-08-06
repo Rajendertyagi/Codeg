@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
+index 710a6cd0..39c4331d 100644
+--- a/src/i18n/messages/ko.json
++++ b/src/i18n/messages/ko.json
+@@ -4218,6 +4218,7 @@
+     "actionDelete": "삭제",
+     "actionRetryCleanup": "정리 다시 시도",
+     "actionMerge": "병합",
++    "actionAccept": "승인",
+     "actionComplete": "완료",
+     "actionAbandon": "포기",
+     "cancelTitle": "작업을 취소할까요?",

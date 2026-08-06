@@ -1,0 +1,12 @@
+diff --git a/src/i18n/messages/pt.json b/src/i18n/messages/pt.json
+index f62ef52b..090ed4eb 100644
+--- a/src/i18n/messages/pt.json
++++ b/src/i18n/messages/pt.json
+@@ -4218,6 +4218,7 @@
+     "actionDelete": "Excluir",
+     "actionRetryCleanup": "Repetir limpeza",
+     "actionMerge": "Merge",
++    "actionAccept": "Aceitar",
+     "actionComplete": "Concluir",
+     "actionAbandon": "Abandonar",
+     "cancelTitle": "Cancelar tarefa?",
