@@ -34,5 +34,10 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "src-tauri"]
+  "exclude": [
+    "node_modules",
+    "src-tauri",
+    "newplugin/frontend/automation-editor.tsx",
+    "newplugin/frontend/custom-page.tsx"
+  ]
 }
