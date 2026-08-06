@@ -4,8 +4,8 @@ use axum::{Extension, Json};
 
 use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::app_state::AppState;
-use crate::custom_plugins::custom_auto_approve;
-use crate::custom_plugins::{AutoApproveGetResult, AutoApproveToggleResult};
+use crate::custom_hooks::custom_auto_approve;
+use crate::custom_hooks::{AutoApproveGetResult, AutoApproveToggleResult};
 
 /// Read the GLOBAL auto-accept state (persisted in `app_metadata`). No
 /// conversation/sender scoping: the toggle is app-wide and applies to every

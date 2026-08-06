@@ -2732,7 +2732,7 @@ export async function automationCancelRun(runId: number): Promise<void> {
   return getTransport().call("automation_cancel_run", { runId })
 }
 
-// Global auto-accept (custom plugin)
+// Global auto-accept (custom hooks)
 
 /** Read whether global auto-accept (the shield) is on. */
 export async function getGlobalAutoApprove(): Promise<{ enabled: boolean }> {
@@ -2744,7 +2744,7 @@ export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
   return getTransport().call("toggle_auto_approve_global")
 }
 
-// Custom Workflows (custom plugin)
+// Custom Workflows (custom hooks)
 
 /** Outcome of the most recent fire, as persisted by the Rust scheduler. */
 export type WorkflowStatus = "idle" | "running" | "success" | "failed"

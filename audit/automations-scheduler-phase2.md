@@ -112,7 +112,7 @@ Plus non-snapshot runtime inputs: `agent_type` (column), the **current** setting
 - `TriggerKind` (Schedule/Manual) — a new trigger kind slots into `list_due`/`claim_due` predicates + `next_run_for`.
 - `IsolationMode` (WorktreePerRun/SharedInRoot) — new isolation strategies extend `resolve_cwd` (`engine.rs:581-696`).
 - Cron math is centralized in `compute_next_run` — new schedule syntax only touches `normalize_cron`/`remap_dow_field`.
-- The engine is the documented lifecycle-subscriber hook point for the plugin system (`plugins/backend/`).
+- The engine is the documented lifecycle-subscriber hook point for the custom hooks system (`newplugin/hooks/`).
 - `connection_id → run` index (`engine.rs:78`) is the correlation seam for completion.
 
 **Risks**

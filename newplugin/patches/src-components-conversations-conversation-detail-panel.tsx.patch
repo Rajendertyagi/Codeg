@@ -1,0 +1,12 @@
+diff --git a/src/components/conversations/conversation-detail-panel.tsx b/src/components/conversations/conversation-detail-panel.tsx
+index 9968f474..97dfec73 100644
+--- a/src/components/conversations/conversation-detail-panel.tsx
++++ b/src/components/conversations/conversation-detail-panel.tsx
+@@ -1643,6 +1643,7 @@ const ConversationTabView = memo(function ConversationTabView({
+       error={conn.error}
+       claudeApiRetry={conn.claudeApiRetry}
+       pendingPermission={conn.pendingPermission}
++      pendingPermissions={conn.pendingPermissions}
+       pendingQuestion={conn.pendingQuestion}
+       pendingAskQuestion={conn.pendingAskQuestion}
+       pendingPlanApproval={conn.pendingPlanApproval}

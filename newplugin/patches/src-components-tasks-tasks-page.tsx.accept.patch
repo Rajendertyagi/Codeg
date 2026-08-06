@@ -1,0 +1,14 @@
+diff --git a/src/components/tasks/tasks-page.tsx b/src/components/tasks/tasks-page.tsx
+index 789bb83fab831ebc7aae1bcc1640135a47025bab..0000000000000000000000000000000000000000
+--- a/src/components/tasks/tasks-page.tsx
++++ b/src/components/tasks/tasks-page.tsx
+@@ -18,4 +18,5 @@
+ import {
+   workTaskArchive,
++  workTaskAccept,
+   workTaskCancel,
+   workTaskCreate,
+@@ -657,2 +658,3 @@
+                   onMerge={() => openMerge(task)}
++                  onAccept={() => void act(() => workTaskAccept(task.id))}
+                   onArchive={() =>

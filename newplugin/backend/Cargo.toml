@@ -2,7 +2,7 @@
 name = "newplugin-backend"
 version = "0.1.0"
 edition = "2021"
-description = "Codeg Layer-2 plugin backend: automation launch-target decision logic"
+description = "Codeg Layer-2 backend: automation launch-target decision logic"
 
 [lib]
 name = "newplugin_backend"

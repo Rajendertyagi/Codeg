@@ -108,7 +108,7 @@ Layered, backend-authoritative:
 - **New built-in agent** = new parser implementing the parser contract + registry entry (see `src-tauri/src/parsers/*`); **custom agents** need no parser — they get the ACP-native transcript path (`src-tauri/src/acp_transcript.rs`).
 - `AcpEvent` enum (`src-tauri/src/acp/types.rs:63`) is the wire contract — new events flow: `apply_event` → `emit_with_state` → reducer; opaque `meta: Option<serde_json::Value>` on `ToolUse` (`src-tauri/src/models/message.rs:118`) is the agent-defined extensibility channel (used by delegation).
 - **Delegation:** `delegate_to_agent` MCP tool → `DelegationBroker` (`src-tauri/src/acp/delegation/broker.rs:1148`) → `create_with_delegation` child rows.
-- **Lifecycle subscriber** pattern — this is where the plugin system hooks (auto-approve, cron, web workflows live under `plugins/backend/`).
+- **Lifecycle subscriber** pattern — this is where the custom hooks system lives (auto-approve, cron, web workflows under `newplugin/hooks/`).
 - **`ConversationKind`** has a reserved `loop` variant for the loop engine (`src-tauri/src/db/entities/conversation.rs:33`).
 - Frontend route registry `WORKBENCH_ROUTES` (`src/components/workbench/workbench-content.tsx:22`) — sidebar-visible full-page additions.
 - Snapshot/attach protocol — any client can cold-attach mid-turn.

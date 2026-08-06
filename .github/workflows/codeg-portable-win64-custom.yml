@@ -1,4 +1,4 @@
-name: Build Codeg Portable Windows x64 (plugin)
+name: Build Codeg Portable Windows x64 (custom hooks)
 
 on:
   push:
@@ -23,8 +23,8 @@ jobs:
         uses: actions/checkout@v7
 
       # The vendor patch content is migrated into the tree (F1-F6), so no
-      # `git apply plugins/vendor.patch` step here - applying it would conflict
-      # with the already-migrated files.
+      # `git apply` step here - the per-file patches under `newplugin/patches/`
+      # document the already-applied seams; CI builds the tree as-is.
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

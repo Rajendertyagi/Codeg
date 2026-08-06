@@ -1,0 +1,23 @@
+diff --git a/src/components/tasks/task-card.tsx b/src/components/tasks/task-card.tsx
+index 8afa180997b27d4a105d4621a83b2da29de8fe3c..0000000000000000000000000000000000000000
+--- a/src/components/tasks/task-card.tsx
++++ b/src/components/tasks/task-card.tsx
+@@ -125,4 +125,6 @@
+   onViewSession: () => void
+   onMerge: () => void
++  /** Accepts a worktree-less reviewed task directly to done (no merge). */
++  onAccept: () => void
+   /** Toggles by `task.archived_at` (archive ⇄ unarchive). */
+   onArchive: () => void
+@@ -244,4 +246,10 @@
+       case "review":
+-        primary = { icon: GitMerge, label: t("actionMerge"), onClick: onMerge }
++        // Worktree tasks land through git merge; worktree-less tasks
++        // (crash cleanup / never had one) accept directly to done.
++        if (task.worktree_folder_id != null) {
++          primary = { icon: GitMerge, label: t("actionMerge"), onClick: onMerge }
++        } else {
++          primary = { icon: Check, label: t("actionAccept"), onClick: onAccept }
++        }
+         break
+       case "merging":

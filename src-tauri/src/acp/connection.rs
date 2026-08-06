@@ -4617,7 +4617,7 @@ async fn handle_permission_request(
     // consults no conversation/folder/sender context. When the toggle is off ΓÇö
     // or the request offers no allow option ΓÇö fall through to the existing
     // flow unchanged (never manufacture an approval the agent didn't offer).
-    let approved = crate::custom_plugins::custom_auto_approve::is_auto_approved()
+    let approved = crate::custom_hooks::custom_auto_approve::is_auto_approved()
         .await
         .unwrap_or(false);
     tracing::warn!(

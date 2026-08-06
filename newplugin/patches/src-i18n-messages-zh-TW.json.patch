@@ -1,0 +1,24 @@
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index f025cc1e..ea16eb61 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -2422,6 +2422,8 @@
+         "noModels": "找不到模型",
+         "cancel": "取消",
+         "send": "傳送",
++        "autoApproveOn": "自動接受已開啟：工具權限請求將自動批准",
++        "autoApproveOff": "自動接受已關閉：工具權限請求需要你批准",
+         "forkAndSend": "分叉發送",
+         "queueMessage": "加入佇列",
+         "steerIntoTurn": "插入目前回合",
+@@ -2603,6 +2605,9 @@
+         "plan": "計畫",
+         "allowedActions": "允許的操作",
+         "targetMode": "目標模式：{mode}",
++        "allowOnce": "允許一次",
++        "allowAlways": "始終允許",
++        "deny": "拒絕",
+         "optionGrants": "各選項將授予的權限",
+         "changeScopeSession": "本次工作階段",
+        "changeScopeProcess": "本次執行",
+     "searchPlaceholder": "依名稱、ID 或描述搜尋自訂技能",

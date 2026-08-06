@@ -1,4 +1,4 @@
-//! Custom Workflows scheduler (custom plugin).
+//! Custom Workflows scheduler (custom hooks).
 //!
 //! Stores user-defined scheduled prompts in `custom_workflows.json` inside the
 //! app data dir (next to the SQLite DB), and runs a background loop that fires

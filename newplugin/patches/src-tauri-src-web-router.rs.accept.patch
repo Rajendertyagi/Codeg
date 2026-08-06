@@ -1,0 +1,18 @@
+diff --git a/src-tauri/src/web/router.rs b/src-tauri/src/web/router.rs
+index a24c97fde007a416e733c4361b21bb5651e6fd7c..0000000000000000000000000000000000000000
+--- a/src-tauri/src/web/router.rs
++++ b/src-tauri/src/web/router.rs
+@@ -1320,8 +1320,13 @@
+         .route(
+             "/work_task_merge",
+             post(handlers::work_task::work_task_merge),
+         )
++        // --- Non-git accept (custom hooks) ---
++        .route(
++            "/work_task_accept",
++            post(crate::custom_hooks::web_workflows::work_task_accept),
++        )
+         .route(
+             "/work_task_archive",
+             post(handlers::work_task::work_task_archive),
+         )

@@ -1,0 +1,16 @@
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index d98f4ad0e27db21b59e4efd844b777f9780d7a80..0000000000000000000000000000000000000000
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -2865,4 +2865,11 @@
+ export async function workTaskCancel(id: number): Promise<void> {
+   return getTransport().call("work_task_cancel", { id })
+ }
++
++/** Accept a reviewed task with no worktree (review -> done, no git merge).
++ *  Refused by the backend when the task still owns a worktree. Outcome rides
++ *  `task://changed` events. */
++export async function workTaskAccept(id: number): Promise<void> {
++  return getTransport().call("work_task_accept", { id })
++}
+ 

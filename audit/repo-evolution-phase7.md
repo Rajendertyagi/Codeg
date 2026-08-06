@@ -7,7 +7,7 @@
 
 **Headline question — "Where should long-term software be built so it survives years of upstream Codeg evolution with minimal maintenance?"**
 
-Answer from evidence: **on the four native extension surfaces (custom_registry, codeg-mcp contract, ConnectionSpawner, app_metadata) plus out-of-tree plugin files — never inside `src-tauri/src/acp/connection.rs`, `manager.rs`, `web/router.rs`, `lib.rs`, `src/lib/api.ts`, or the i18n files.** Details and rankings in §3, §5, §10–§12, §15.
+Answer from evidence: **on the four native extension surfaces (custom_registry, codeg-mcp contract, ConnectionSpawner, app_metadata) plus out-of-tree hook files — never inside `src-tauri/src/acp/connection.rs`, `manager.rs`, `web/router.rs`, `lib.rs`, `src/lib/api.ts`, or the i18n files.** Details and rankings in §3, §5, §10–§12, §15.
 
 ---
 
@@ -30,7 +30,7 @@ Answer from evidence: **on the four native extension surfaces (custom_registry, 
 | 2026-07-03 | Frontend runtime stores (`conversation-runtime-store`) | `42e40a67` |
 | 2026-07 | Custom-agent registry (`custom_registry.rs`, 4 commits, all July) | 0.21/0.22 window |
 | 2026-08-01 | Work-task board engine (`work_task`, 4 commits) | `39d82ae7` |
-| 2026-08-02 | Our `plugins/` layer (F1–F6) | `89e4ba44`/`aec0b9ff` |
+| 2026-08-02 | Our `newplugin/` layer (F1–F6) | `89e4ba44`/`aec0b9ff` |
 
 **Major architectural shifts (in order):**
 1. **Desktop-only chat tool → dual-mode** (03-25/03-29): Axum server + `EventEmitter` enum split events per mode; `_core` command functions shared by Tauri wrappers and Axum handlers. This is the single most durable architectural decision in the repo — still the shape of every command today (`commands/*.rs` + `web/handlers/*`).
@@ -46,7 +46,7 @@ Answer from evidence: **on the four native extension surfaces (custom_registry, 
 
 Measured over full history with `git log --name-only` (file-touch counts; each line = one commit touching that path):
 
-**Directories** (top-level): `src/` 8,278 · `src-tauri/` 3,984 · `docs/` 500 · `plugins/` 12.
+**Directories** (top-level): `src/` 8,278 · `src-tauri/` 3,984 · `docs/` 500 · `newplugin/` 41.
 
 **Backend (`src-tauri/src/`):**
 
@@ -79,7 +79,7 @@ APIs that survived across releases, with why they look stable:
 
 | API | Born | Changes since | Evidence of durability |
 |---|---|---|---|
-| `app_metadata` KV service | 03-06 `54d1097b` | last touched July (25 commits) | Present in initial commit; used by plugin auto-approve (`plugins/backend/custom_auto_approve.rs:15`). A generic KV store survives because it has no policy baked in. |
+| `app_metadata` KV service | 03-06 `54d1097b` | last touched July (25 commits) | Present in initial commit; used by the auto-approve hook (`newplugin/hooks/custom_auto_approve.rs:15`). A generic KV store survives because it has no policy baked in. |
 | `EventEmitter` enum + `emit_with_state_gated` | 03-29 `080a16f2` | 25 commits, 1 in Aug | Created for the server split; still the sole event lane (`web/event_bridge.rs`). Shape stable despite ACP growth. |
 | `_core` dual-mode command pattern | 03-25 | pervasive | Every command is `_core` fn + `#[tauri::command]` wrapper + Axum handler. The pattern is enforced by convention and has never been challenged. |
 | Transport abstraction (`getTransport().call`) | 03-25 `ac09d3db` | **0 changes since June** | Last touched 06 (3 commits); remote-desktop transport added 05-13. Frozen — the most stable frontend seam. |
@@ -102,9 +102,9 @@ Files with the highest touch counts and the reason custom code should avoid them
 | `src-tauri/src/acp/registry.rs` | 104 | Agent table/`AgentType::try_from` churns with every agent vendor release and custom-agent additions | Agent identity mapping | **Yellow.** Consume `is_registered`/`AcpAdapterRelation` (`:200-260`); never edit. |
 | `src-tauri/src/acp/manager.rs` | 63 | Prompt admission, linking, lifecycle; 22 touches in June alone | The control plane (Phase 5) | **Red — never touch.** |
 | `src-tauri/src/commands/acp.rs` | 115 | Command surface grows with every feature | Public API surface | **Yellow.** Use `_core` fns; don't add to it. |
-| `src-tauri/src/lib.rs` | 165 | `invoke_handler` + module list + startup grow every release | Registration point (our seam: mount `:15`, spawn `:714-738`, commands `:1273-1279`) | **Yellow.** Our 6 plugin commands re-register here; re-apply after each pull. |
+| `src-tauri/src/lib.rs` | 165 | `invoke_handler` + module list + startup grow every release | Registration point (our seam: mount `:15`, spawn `:714-738`, commands `:1273-1279`) | **Yellow.** Our 6 hook commands re-register here; re-apply after each pull. |
 | `src-tauri/src/web/router.rs` | 125 | Route registration grows with every web feature | Route registry (our seam `:1152-1157`, `:1197-1222`) | **Yellow/Red.** Same re-application burden. |
-| `src/lib/api.ts` | 153 | Transport-agnostic RPC layer; mirrors every backend command | Frontend API surface (our plugin RPCs at `:2602-2653`) | **Yellow.** Additive only; expect merge conflicts each pull. |
+| `src/lib/api.ts` | 153 | Transport-agnostic RPC layer; mirrors every backend command | Frontend API surface (our hook RPCs at `:2602-2653`) | **Yellow.** Additive only; expect merge conflicts each pull. |
 | `src/lib/types.ts` | 157 | Wire types mirror Rust models | Shared types | **Yellow.** Additive only. |
 | `src/i18n/messages/*.json` (×10) | ~354-367 each | Every feature + every string change | Localization | **Red — never patch.** Add namespaces only via upstream flow. |
 | `src/components/conversations/conversation-detail-panel.tsx` | 142 | Continuous UI evolution | Workspace surface | **Red — never touch.** |
@@ -174,7 +174,7 @@ Recurring themes, evidenced from commits:
 2. **Dual-mode everything** — every backend feature is built once as `_core` and exposed to both Tauri and Axum (invariant since 03-25). Frontend mirrors this with the transport abstraction.
 3. **Isolation as a feature** — worktree-per-run isolation (`automation/engine.rs:590-623`, work tasks), process-tree kill backstops, per-run DB advisory lock (`engine.rs:171-212`). The platform increasingly executes *untrusted* long-running work.
 4. **Event-driven UI, not RPC-polled UI** — `AcpEvent` wire contract (Phase 1, `acp/types.rs:63`), real-time sync, `send_prompt_linked_with_message_id` dedup, global event listener (0.22.1 fix).
-5. **Plugin investment is upstream-owned now** — 0.21/0.22 absorbed the plugin features we re-implemented (custom agents, permission options, skills) into the core natively; our `plugins/` layer (08-02) rides on top, and upstream continues shipping extension points (permission-option explanations 0.23.0, `AcpAdapterRelation`).
+5. **Plugin investment is upstream-owned now** — 0.21/0.22 absorbed the plugin features we re-implemented (custom agents, permission options, skills) into the core natively; our `newplugin/` layer (08-02) rides on top, and upstream continues shipping extension points (permission-option explanations 0.23.0, `AcpAdapterRelation`).
 6. **Perf hardening** — only during 0.15–0.20 (parser cache, bundle splits, memoized timeline), then paused as features took over (0.20→0.23: 1 `perf` commit).
 
 ## 8. Technical Debt
@@ -206,7 +206,7 @@ Subject-area classification of the last ~335 commits (v0.20.0..v0.23.1), by `(ar
 
 ## 10. Plugin Survivability
 
-If someone maintained a plugin for 2–3 years (using our plugin layer as the reference):
+If someone maintained a custom layer for 2–3 years (using our custom layer as the reference):
 
 **Integration points likely to survive:**
 - `app_metadata` KV reads/writes (day-one API, no policy, stable).
@@ -215,7 +215,7 @@ If someone maintained a plugin for 2–3 years (using our plugin layer as the re
 - `ConnectionSpawner`/delegation contract (frozen since May).
 - i18n *namespaces* (additive; the files churn but the mechanism is permanent).
 - `WORKBENCH_ROUTES` full-page registration (3 commits in 6 weeks).
-- Out-of-tree `plugins/backend/**` + `plugins/frontend/**` files themselves — git-tracked on our branch, they merge cleanly by being plugin-dev-only paths (Phase 6 §3).
+- Out-of-tree `newplugin/hooks/**` + `newplugin/frontend/**` files themselves — git-tracked on our branch, they merge cleanly by being newplugin-only paths (Phase 6 §3).
 
 **Integration points requiring repeated rebasing (evidence-based):**
 - Command registration in `lib.rs` (165 touches/5mo ≈ every 5th commit).
@@ -229,7 +229,7 @@ Quantified: our 5 engine seams sit in files that average **25–33 touches/month
 
 ## 11. Engine Modification Risk
 
-Classification for our own plugin work (and any custom code):
+Classification for our own custom-layer work (and any custom code):
 
 **GREEN — safe long-term (no engine edits, additive use only):**
 - `app_metadata` KV (use for feature state).
@@ -237,7 +237,7 @@ Classification for our own plugin work (and any custom code):
 - `custom_registry` (register custom agents; no edits).
 - `ConnectionSpawner` (implement the trait; no edits).
 - `EventEmitter` (read events; add a new variant only as a documented additive seam — Phase 6 next-step #4).
-- Out-of-tree `plugins/backend/**`, `plugins/frontend/**`.
+- Out-of-tree `newplugin/hooks/**`, `newplugin/frontend/**`.
 
 **YELLOW — needs occasional review (engine seams we currently touch):**
 - `lib.rs` mount + command re-registration (`:15`, `:714-738`, `:1273-1279`).
@@ -291,7 +291,7 @@ For a large personal AI platform built on Codeg for the next five years:
 
 **Safe to depend on (build here):**
 1. `app_metadata` KV + `custom_registry` custom agents + `ConnectionSpawner` delegation + transport `getTransport().call` — the four native surfaces. Upstream invests in them (§9) and leaves them stable (§3).
-2. Out-of-tree plugin files (`plugins/backend/**`, `plugins/frontend/**`) — merge-clean by construction (Phase 6).
+2. Out-of-tree hook files (`newplugin/hooks/**`, `newplugin/frontend/**`) — merge-clean by construction (Phase 6).
 3. The `_core` dual-mode + single-event model — invariant for 5 months, foundational.
 4. Additive seams with precedent: new workbench routes, new i18n namespaces, new `lib/api.ts`-style RPC wrappers *in our own files*.
 
@@ -309,11 +309,11 @@ For a large personal AI platform built on Codeg for the next five years:
 
 ## Repository Knowledge Captured
 
-- **Evolution timeline:** 03-06 birth → 03-25/29 dual-mode split → 03-30 channels → 05-22 delegation+companion → 06-05 sync linking → 06-21 automations → 07 custom agents → 08-01 work tasks → 08-02 our plugins. 129 releases, ~1 per 1.2 days, 96% single-maintainer.
+- **Evolution timeline:** 03-06 birth → 03-25/29 dual-mode split → 03-30 channels → 05-22 delegation+companion → 06-05 sync linking → 06-21 automations → 07 custom agents → 08-01 work tasks → 08-02 our custom layer. 129 releases, ~1 per 1.2 days, 96% single-maintainer.
 - **Stable seams:** transport (`src/lib/transport/`, frozen since June), `ConnectionSpawner` (`delegation/spawner.rs:72-101`, frozen since May), `app_metadata` (day-one), `EventEmitter` (03-29), `_core` dual-mode pattern (03-25), `WORKBENCH_ROUTES` (06-21).
 - **High-churn areas:** `src-tauri/src/acp/` (729 touches; `connection.rs` 129, `registry.rs` 104, `manager.rs` 63), `lib.rs` (165), `router.rs` (125), `api.ts` (153), `types.ts` (157), i18n ×10 (~355 each), `commands/acp.rs` (115).
 - **Long-term extension points:** custom_registry (agents), codeg-mcp `--features` contract, ConnectionSpawner (delegation), app_metadata (KV), workbench route union, i18n namespaces.
-- **Risk classification:** GREEN = 4 native surfaces + out-of-tree plugins; YELLOW = the 5 engine seams (lib.rs, router.rs, handlers, connection.rs gate, frontend route union + pendingPermissions); RED = connection.rs/manager.rs internals, session state, parsers, i18n files, UI components.
+- **Risk classification:** GREEN = 4 native surfaces + out-of-tree hooks; YELLOW = the 5 engine seams (lib.rs, router.rs, handlers, connection.rs gate, frontend route union + pendingPermissions); RED = connection.rs/manager.rs internals, session state, parsers, i18n files, UI components.
 - **Upstream direction:** agent-operating/workflow-automation platform (agents → automations → tasks); ACP protocol work is #1 investment; UI chrome churns deliberately; perf investment paused since 0.20.
 - **Key prior-phase debts (open):** delete-channel ACP leak (`chat_channel.rs:78-90`), dead `git.rs` helpers + `pending_merge` column (Phase 3), in-memory `SessionBridge` (Phase 4), uncapped `SessionState` snapshot (Phase 5).
 

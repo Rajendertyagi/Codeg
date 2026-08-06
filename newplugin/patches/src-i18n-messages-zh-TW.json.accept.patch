@@ -1,0 +1,8 @@
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index d197a2e5155e3965d9d910ac5cf83dd37e775ac4..0000000000000000000000000000000000000000
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -4240,2 +4240,3 @@
+     "actionMerge": "合併",
++    "actionAccept": "接受",
+     "actionReturn": "退回",

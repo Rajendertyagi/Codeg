@@ -73,11 +73,11 @@ import { AutomationEditor, type WorkflowDraft } from "./automation-editor"
 import { cn } from "@/lib/utils"
 
 /**
- * Custom Workflows (custom plugin). Backed by the `custom_cron` scheduler:
+ * Custom Workflows (custom hooks). Backed by the `custom_cron` scheduler:
  * workflows are persisted to `custom_workflows.json` and fired on their cron
  * schedule by the Rust engine. Unlike the native Automations feature, each
  * workflow always targets one fixed chat thread (the conversation picked in
- * the editor) — that is the core capability this plugin adds.
+ * the editor) — that is the core capability this module adds.
  *
  * The UI deliberately clones the native Automations master–detail layout, and
  * the detail pane hosts a verbatim copy of the native Automations editor

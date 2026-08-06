@@ -582,7 +582,7 @@ export function MessageInput({
   // subset); office is a fixed static set. `tQa` supplies office labels/prompts.
   const locale = useLocale()
   const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
-  // Auto-accept shield (custom plugin): when on, the backend answers tool
+  // Auto-accept shield (custom hooks): when on, the backend answers tool
   // permission requests automatically instead of parking a card. The toggle is
   // GLOBAL (app-wide, persisted in `app_metadata`), so every composer shows the
   // same shared state ΓÇö no conversation context is consulted.

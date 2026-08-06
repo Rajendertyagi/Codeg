@@ -9,10 +9,10 @@
 
 pub mod acp;
 pub mod acp_transcript;
-// Custom Codeg plugins live outside the upstream crate tree (`plugins/backend/`)
-// so they survive upstream merges; see `plugins/backend/mod.rs`.
-#[path = "../../plugins/backend/mod.rs"]
-pub mod custom_plugins;
+// Custom Codeg hooks live outside the upstream crate tree (`newplugin/hooks/`)
+// so they survive upstream merges; see `newplugin/hooks/mod.rs`.
+#[path = "../../newplugin/hooks/mod.rs"]
+pub mod custom_hooks;
 pub use acp::{
     idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
 };
@@ -84,7 +84,7 @@ mod tauri_app {
     };
     use crate::terminal::manager::TerminalManager;
     use crate::{db, git_credential, network, paths, process, web};
-    use crate::custom_plugins;
+    use crate::custom_hooks;
     use tauri::Manager;
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
@@ -710,19 +710,7 @@ mod tauri_app {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
 
-                // Custom workflows scheduler (custom plugin): fires user-defined
-                // scheduled prompts into their target conversations. JSON lives
-                // next to the SQLite DB in the effective data dir.
-                custom_plugins::custom_cron::set_data_dir(&effective_data_dir);
-                let cron_engine = custom_plugins::custom_cron::CustomCronEngine::new(
-                    crate::db::AppDatabase {
-                        conn: app.state::<crate::db::AppDatabase>().conn.clone(),
-                    },
-                    app.state::<ConnectionManager>().clone_ref(),
-                );
-                tauri::async_runtime::spawn(cron_engine.run());
-
-                // Global auto-accept flag (custom plugin): hydrate the in-process
+                // Global auto-accept flag (custom hooks): hydrate the in-process
                 // cache from `app_metadata` before any permission request can
                 // reach the gate (fail-closed OFF until loaded; the web handlers
                 // and toggles re-load lazily, so this is only a warm-up).
@@ -731,7 +719,7 @@ mod tauri_app {
                 };
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) =
-                        custom_plugins::custom_auto_approve::init_global_auto_approve(
+                        custom_hooks::custom_auto_approve::init_global_auto_approve(
                             &auto_approve_db,
                         )
                         .await
@@ -1279,13 +1267,8 @@ mod tauri_app {
                 automation_commands::automation_compute_next_run,
                 automation_commands::automation_run_now,
                 automation_commands::automation_cancel_run,
-                custom_plugins::toggle_auto_approve_global,
-                custom_plugins::get_auto_approve_global,
-                custom_plugins::save_custom_workflow,
-                custom_plugins::delete_custom_workflow,
-                custom_plugins::list_custom_workflows,
-                custom_plugins::set_custom_workflow_enabled,
-                custom_plugins::run_custom_workflow_now,
+                custom_hooks::toggle_auto_approve_global,
+                custom_hooks::get_auto_approve_global,
                 token_usage_commands::token_usage_report,
                 token_usage_commands::token_usage_facets,
                 token_usage_commands::token_usage_status,

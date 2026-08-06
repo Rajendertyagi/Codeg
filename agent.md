@@ -9,19 +9,19 @@ Working guidance for Code Agent when working in this repository (Codeg).
 ## Core System Profile
 
 - **ROLE:** Building a custom platform **on top of** Codeg.
-- **POLICY:** Never edit Codeg native engine files. Manage custom files/plugins only.
+- **POLICY:** Never edit Codeg native engine files. Manage custom files/hooks only.
 
 ## Immutable Architect Rules
 
 1. **Codeg = base platform/engine.** The custom platform is layered on top of it.
 2. **Never edit Codeg native engine files** - this covers the Rust engine (`src-tauri/src/**`), the core TypeScript engine, and vendored native components.
-3. **Custom work lives in `plugins/` and custom platform files only.** New features for the custom platform are expressed as plugins, adapters, and extension points - not as patches to the engine.
+3. **Custom work lives in `newplugin/` and custom platform files only.** New features for the custom platform are expressed as custom hooks, adapters, and extension points - not as patches to the engine.
 4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged as open debt with `file:line` citations, never silently fixed.
 
 ## Carried State (repo invariants)
 
-- **TARGET SCOPE:** `plugins/patches/` - the per-file patch files (20 patches, 2026-08-03). This is where custom-platform changes are managed.
-- **OBSOLETE - ignore entirely:** `plugins/vendor.patch`. Dead history. No tracking, no purge, no reference.
+- **TARGET SCOPE:** `newplugin/patches/` - the per-file patch files (26 files: 17 legacy + 9 accept, 2026-08-06). Custom-workflow patch content was purged from the archive when the feature was unwired; it now documents auto-approve + task-accept only.
+- **Custom workflow feature is unwired** (2026-08-06): only the left-sidebar tab remains (renders a "not in use" placeholder in `src/components/workbench/workbench-content.tsx`). Engine seams removed (`lib.rs` cron spawn + workflow commands, `router.rs` workflow routes); auto-approval + task-accept stay live; `newplugin/` code untouched (dead-but-present).
 - Untracked, leave alone: `.qartez/`, `.github/workflows/codeg-portable-win64.yml`
 - Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP leak at `chat_channel.rs:78-90`.
 

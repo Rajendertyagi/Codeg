@@ -1,4 +1,4 @@
-//! Codeg Layer-2 plugin backend (`newplugin`).
+//! Codeg Layer-2 backend (`newplugin`).
 //!
 //! Layer-1 core (`src-tauri`) performs I/O and execution; this crate owns the
 //! *decisions* for new functionality, as plain, dependency-free logic that core

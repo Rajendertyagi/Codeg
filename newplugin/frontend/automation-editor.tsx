@@ -53,7 +53,7 @@ interface AutomationEditorProps {
   workflow: WorkflowLike | null
   onSubmit: (draft: WorkflowDraft) => Promise<void>
   onCancel: () => void
-  /** Kept for structural parity with the native editor (the custom plugin has
+  /** Kept for structural parity with the native editor (the custom hooks layer has
    *  no template gallery). */
   onBackToTemplates?: () => void
 }
@@ -89,7 +89,7 @@ export function AutomationEditor({
   const t = useTranslations("Automations")
   // The @-mention panel chrome reuses the chat composer's existing keys.
   const tComposer = useTranslations("Folder.chat.messageInput")
-  // The conversation-target labels live in the plugin's own catalog; the rest
+  // The conversation-target labels live in the custom layer's own catalog; the rest
   // of the form's chrome reuses the native Automations catalog (shared copy).
   const tCustom = useTranslations("CustomWorkflows")
   const conversations = useAppWorkspaceStore((s) => s.conversations)
@@ -147,7 +147,7 @@ export function AutomationEditor({
   )
   // Live data sources for the @ panel (files/agents/sessions/commits). All
   // transport-only — no live ACP session needed; just the folder path. The
-  // custom plugin has no folder dimension, so the mention search runs global.
+  // custom layer has no folder dimension, so the mention search runs global.
   const referenceSearch = useReferenceSearch({
     defaultPath: null,
     enabled: true,

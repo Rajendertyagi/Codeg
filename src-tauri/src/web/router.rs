@@ -16,7 +16,6 @@ use tower_http::services::{ServeDir, ServeFile};
 use super::shutdown::ShutdownSignal;
 use super::{auth, handlers, ws};
 use crate::app_state::AppState;
-use crate::custom_plugins::web_workflows;
 use tracing::Instrument;
 
 pub fn build_router(
@@ -1175,7 +1174,7 @@ pub fn build_router(
             "/quick_messages_reorder",
             post(handlers::quick_messages::quick_messages_reorder),
         )
-        // ─── Global auto-accept (custom plugin) ───
+        // ─── Global auto-accept (custom hooks) ───
         .route(
             "/get_auto_approve_global",
             post(handlers::auto_approve::auto_approve_global_get),
@@ -1225,29 +1224,6 @@ pub fn build_router(
         .route(
             "/automation_cancel_run",
             post(handlers::automation::automation_cancel_run),
-        )
-        // ─── Custom workflows (custom plugin) ───
-        // Handlers live in `plugins/backend/web_workflows.rs`; the core tree
-        // only wires the routes (see `plugins/backend/mod.rs`).
-        .route(
-            "/save_custom_workflow",
-            post(web_workflows::custom_workflow_save),
-        )
-        .route(
-            "/delete_custom_workflow",
-            post(web_workflows::custom_workflow_delete),
-        )
-        .route(
-            "/list_custom_workflows",
-            post(web_workflows::custom_workflow_list),
-        )
-        .route(
-            "/set_custom_workflow_enabled",
-            post(web_workflows::custom_workflow_set_enabled),
-        )
-        .route(
-            "/run_custom_workflow_now",
-            post(web_workflows::custom_workflow_run_now),
         )
         // ─── Token usage dashboard ───
         .route(

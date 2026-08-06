@@ -1,0 +1,8 @@
+diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
+index 26f0e6df922a6a919dd58726a9bb26e2a23f725f..0000000000000000000000000000000000000000
+--- a/src/i18n/messages/en.json
++++ b/src/i18n/messages/en.json
+@@ -4240,2 +4240,3 @@
+     "actionMerge": "Merge",
++    "actionAccept": "Accept",
+     "actionReturn": "Return",

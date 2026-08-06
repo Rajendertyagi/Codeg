@@ -1,0 +1,34 @@
+diff --git a/src/components/tasks/task-detail-sheet.tsx b/src/components/tasks/task-detail-sheet.tsx
+index 28cda10e6866c772568e48676a95f48780431b8e..0000000000000000000000000000000000000000
+--- a/src/components/tasks/task-detail-sheet.tsx
++++ b/src/components/tasks/task-detail-sheet.tsx
+@@ -21,2 +21,3 @@
+   CircleX,
++  Check,
+   Coins,
+@@ -37,4 +38,5 @@
+ import {
+   workTaskArchive,
++  workTaskAccept,
+   workTaskCancel,
+   getFolderConversation,
+@@ -294,9 +296,13 @@
+   if (isReview) {
+-    zoneActions.push({
+-      icon: GitMerge,
+-      label: t("actionMerge"),
+-      filled: true,
+-      onClick: () => onMerge(task),
+-    })
++    // No worktree → accept directly to done (no git merge); with a worktree
++    // the merge dialog stays the path.
++    const canAccept = task.worktree_folder_id == null
++    zoneActions.push({
++      icon: canAccept ? Check : GitMerge,
++      label: t(canAccept ? "actionAccept" : "actionMerge"),
++      filled: true,
++      onClick: () =>
++        canAccept ? run(() => workTaskAccept(task.id)) : onMerge(task),
++    })
+     zoneActions.push({
+       icon: Undo2,
