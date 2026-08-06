@@ -90,6 +90,16 @@ pub struct RestartParams {
     pub note: Option<String>,
 }
 
+/// A cancel that may carry the user's reason for stopping the task. Like
+/// `RestartParams`, the note defaults so `{ "id": 1 }` still deserializes.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelParams {
+    pub id: i32,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeParams {
@@ -274,9 +284,9 @@ pub async fn work_task_return(
 }
 
 pub async fn work_task_cancel(
-    Json(params): Json<IdParams>,
+    Json(params): Json<CancelParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    core::work_task_cancel_core(params.id)
+    core::work_task_cancel_core(params.id, params.reason)
         .await
         .map_err(AppCommandError::from)?;
     Ok(Json(()))

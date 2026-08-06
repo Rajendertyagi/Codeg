@@ -2903,8 +2903,16 @@ export async function workTaskReturn(
   })
 }
 
-export async function workTaskCancel(id: number): Promise<void> {
-  return getTransport().call("work_task_cancel", { id })
+/**
+ * Stop a task. `reason` (optional) is the user's own note about why — it lands
+ * on the `canceled` entry of the progress timeline and is never replayed into
+ * a later run's prompt (a requeue carries its own note for that).
+ */
+export async function workTaskCancel(
+  id: number,
+  reason?: string | null
+): Promise<void> {
+  return getTransport().call("work_task_cancel", { id, reason: reason ?? null })
 }
 
 /** Dispatch the agent-driven merge (`message: null` = the agent writes the

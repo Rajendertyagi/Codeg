@@ -503,6 +503,39 @@ pub async fn mark_stale_for_reparse(
     Ok(())
 }
 
+/// Accept a transcript that is gone for good: keep the recorded facts, advance
+/// the stamp so no future pass revisits the conversation.
+///
+/// The counterpart to [`mark_stale_for_reparse`]. A source that reads as empty
+/// is indistinguishable from one that will never read again, and this table
+/// carries no attempt counter — a first miss and a thousandth look identical.
+/// So "keep retrying" is not caution, it is an unbounded loop: every pass
+/// re-walks the agent's whole transcript tree, fails the same way, and says so
+/// again. Settling ends it.
+///
+/// Only `source_updated_at` moves. `turn_count`, `total_tokens` and `synced_at`
+/// are left exactly as the last successful parse wrote them, because nothing
+/// was re-derived — the numbers on screen are still that parse's numbers and
+/// should not claim to be newer. The conversation comes back into scope only if
+/// something moves its `updated_at` (a re-import, fresh activity) or a full
+/// rebuild sweeps it up.
+pub async fn settle_lost_source(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    source_updated_at: DateTime<Utc>,
+) -> Result<(), DbError> {
+    use sea_orm::sea_query::Expr;
+    token_usage_sync::Entity::update_many()
+        .col_expr(
+            token_usage_sync::Column::SourceUpdatedAt,
+            Expr::value(source_updated_at),
+        )
+        .filter(token_usage_sync::Column::ConversationId.eq(conversation_id))
+        .exec(conn)
+        .await?;
+    Ok(())
+}
+
 // There is deliberately no `clear_all` here. A "rebuild everything" is a
 // re-parse of every conversation (see `should_reparse` in
 // `commands::token_usage`), not a wipe: swapping each conversation's rows

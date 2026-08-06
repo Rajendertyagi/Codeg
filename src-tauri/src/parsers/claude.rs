@@ -238,6 +238,54 @@ pub(crate) fn is_meta_message(value: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+/// The bookkeeping records Claude Code appends when a turn is interrupted:
+/// a `user` record whose entire content is `[Request interrupted by user]`
+/// (or `… for tool use` when the interrupt caught a running tool call).
+///
+/// They are addressed to the MODEL — they explain why a tool call has no
+/// result — so they are dropped rather than rendered: as chat bubbles they put
+/// words in the user's mouth, and a user record is also a turn boundary, so
+/// they open an empty trailing turn. (A dedicated in-transcript marker was
+/// tried and removed: wherever it landed — inside the interrupted turn, or as
+/// its own row — it read as noise, and the turn's own cancelled status already
+/// carries the fact.)
+///
+/// Byte-exact, never trimmed and never a substring test: a real message that
+/// quotes the phrase (a bug report, a transcript pasted for review) must still
+/// render verbatim. This drops user-authored content, so it errs toward
+/// under-matching — a future CLI that pads the marker would show the raw text
+/// again, which is visible and fixable, where over-matching silently deletes
+/// what someone actually said.
+pub(crate) fn is_interrupt_marker(value: &serde_json::Value) -> bool {
+    const MARKERS: [&str; 2] = [
+        "[Request interrupted by user]",
+        "[Request interrupted by user for tool use]",
+    ];
+    if value.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return false;
+    }
+    let Some(content) = value.pointer("/message/content") else {
+        return false;
+    };
+    let text = match content {
+        serde_json::Value::String(s) => s.as_str(),
+        serde_json::Value::Array(blocks) => {
+            let [block] = blocks.as_slice() else {
+                return false;
+            };
+            if block.get("type").and_then(|t| t.as_str()) != Some("text") {
+                return false;
+            }
+            match block.get("text").and_then(|t| t.as_str()) {
+                Some(t) => t,
+                None => return false,
+            }
+        }
+        _ => return false,
+    };
+    MARKERS.contains(&text)
+}
+
 /// Capture Claude Code's two dedicated title records into their slots.
 ///
 /// * `{"type":"custom-title","customTitle":…}` — the name the USER set, via
@@ -487,7 +535,9 @@ impl ClaudeParser {
             }
 
             // Skip system meta messages (e.g. local-command-caveat injections)
-            if is_meta_message(&value) {
+            // and the interrupt bookkeeping records, which are addressed to the
+            // model rather than spoken by the user.
+            if is_meta_message(&value) || is_interrupt_marker(&value) {
                 continue;
             }
 
@@ -858,8 +908,9 @@ impl ClaudeRecordAccumulator {
             }
         }
 
-        // Skip system meta messages
-        if is_meta_message(&value) {
+        // Skip system meta messages and interrupt bookkeeping (see the
+        // matching filter on the batch path).
+        if is_meta_message(&value) || is_interrupt_marker(&value) {
             return;
         }
 
@@ -2115,6 +2166,116 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    /// Cancelling a turn makes Claude Code append a `user` record reading
+    /// `[Request interrupted by user]`. It is addressed to the MODEL — it
+    /// explains why a tool call has no result — so it is dropped: as a chat
+    /// bubble it puts words in the user's mouth, and a user record is a turn
+    /// boundary, so it also opens an empty trailing turn. Both parse paths
+    /// (batch detail + the watcher's accumulator) must drop it, and neither
+    /// may drop a real message that merely quotes the phrase.
+    #[test]
+    fn interrupt_bookkeeping_records_never_render_as_user_messages() {
+        let marker = json!({
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}
+        });
+        assert!(is_interrupt_marker(&marker));
+
+        let tool_variant = json!({
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "[Request interrupted by user for tool use]"}
+            ]}
+        });
+        assert!(is_interrupt_marker(&tool_variant));
+
+        // String-shaped content matches too.
+        assert!(is_interrupt_marker(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": "[Request interrupted by user]"}
+        })));
+
+        // A real message that QUOTES the marker still renders: the phrase is
+        // embedded, not the record's whole content.
+        assert!(!is_interrupt_marker(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "why does [Request interrupted by user] show up as a bubble?"}
+            ]}
+        })));
+
+        // Padding makes it someone's own message again, in either content
+        // shape — this deletes user content, so it under-matches.
+        assert!(!is_interrupt_marker(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": " [Request interrupted by user] "}
+        })));
+        assert!(!is_interrupt_marker(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "[Request interrupted by user]\n\nwhy?"}
+            ]}
+        })));
+
+        // Assistant text and multi-block user records are never markers.
+        assert!(!is_interrupt_marker(&json!({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "[Request interrupted by user]"}
+            ]}
+        })));
+        assert!(!is_interrupt_marker(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "[Request interrupted by user]"},
+                {"type": "text", "text": "carry on"}
+            ]}
+        })));
+
+        // End to end: a cancelled turn leaves the reply as the last thing on
+        // screen — no trailing bubble, and no extra turn.
+        let dir = tempfile::tempdir().unwrap();
+        let proj = dir.path().join("-Users-test-proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let path = proj.join("sess-interrupt.jsonl");
+        let lines = [
+            r#"{"type":"user","timestamp":"2026-07-07T03:40:00.000Z","uuid":"u1","cwd":"/Users/test/proj","message":{"role":"user","content":[{"type":"text","text":"run the build"}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-07-07T03:40:05.000Z","uuid":"a1","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"Working on it."}]}}"#,
+            r#"{"type":"user","timestamp":"2026-07-07T03:40:09.000Z","uuid":"u2","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#,
+        ];
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
+        let parser = ClaudeParser::with_base_dir(dir.path().to_path_buf());
+        let detail = parser.get_conversation("sess-interrupt").unwrap();
+        assert_eq!(
+            detail.turns.len(),
+            2,
+            "the prompt and the assistant turn — the marker opens no third turn"
+        );
+        let rendered = serde_json::to_string(&detail.turns).unwrap();
+        assert!(
+            !rendered.contains("Request interrupted"),
+            "the interrupt marker must not reach the rendered turns"
+        );
+        // Positive half: everything ELSE survives. Without this an over-broad
+        // filter that dropped the whole conversation would pass too.
+        assert!(rendered.contains("run the build"), "the prompt must remain");
+        assert!(rendered.contains("Working on it."), "the reply must remain");
+
+        let mut acc = ClaudeRecordAccumulator::new(path.clone());
+        for line in lines {
+            acc.feed_line(line);
+        }
+        assert!(
+            !acc.messages
+                .iter()
+                .any(|m| serde_json::to_string(&m.content)
+                    .unwrap_or_default()
+                    .contains("Request interrupted")),
+            "the watcher's accumulator must drop it too"
+        );
+    }
 
     #[test]
     fn accumulator_pipeline_matches_full_detail_parse() {

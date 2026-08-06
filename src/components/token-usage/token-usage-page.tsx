@@ -884,12 +884,10 @@ export function TokenUsagePage() {
               )}
             </div>
 
+            {/* Stale counts are sync bookkeeping, not persistent user-facing
+                status. Progress and actionable failures are surfaced while the
+                sync runs. */}
             <div className="ms-auto flex items-center gap-1.5">
-              {status && status.stale_conversations > 0 && !syncing && (
-                <span className="text-xs text-muted-foreground">
-                  {t("staleHint", { count: status.stale_conversations })}
-                </span>
-              )}
               {/* Every data action lives in one overflow menu; while a sync
                     runs the trigger itself spins, so the state stays visible
                     with the buttons folded away. Styled as a filled pill like

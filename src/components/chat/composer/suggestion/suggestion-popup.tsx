@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 import { ReferenceIcon } from "../badges/reference-badge"
 import type { ReferenceAttrs, ReferenceKind } from "../types"
 import type { MentionRenderState } from "./mention-suggestion"
-import { placeMentionPopup } from "./popup-position"
+import { placeAnchoredPopup } from "./popup-position"
 import type {
   ReferenceSearch,
   SuggestionGroup,
@@ -229,7 +229,7 @@ export const SuggestionPopup = forwardRef<
       const rect = panel.getBoundingClientRect()
       const caret = state.getClientRect?.() ?? null
       setPos(
-        placeMentionPopup(
+        placeAnchoredPopup(
           caret
             ? { left: caret.left, top: caret.top, bottom: caret.bottom }
             : null,

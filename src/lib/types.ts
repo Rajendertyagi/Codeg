@@ -1530,7 +1530,11 @@ export interface TokenUsageSyncResult {
   scanned: number
   synced: number
   skipped: number
+  /** Real faults — retried next pass. The only counter that warrants a toast. */
   failed: number
+  /** Transcripts that are gone for good: facts kept, stamp settled, never
+   *  retried. Deliberately silent — the reader cannot act on it. */
+  lost: number
   turns_written: number
   tokens_written: number
   pruned_conversations: number

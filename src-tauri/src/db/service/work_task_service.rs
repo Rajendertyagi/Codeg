@@ -1484,7 +1484,19 @@ pub async fn set_archived(
 
 /// Any non-terminal state EXCEPT merging → canceled. Returns whether the CAS
 /// won (the engine tears the connection down only when it did).
-pub async fn cancel(conn: &DatabaseConnection, id: i32) -> Result<bool, DbError> {
+///
+/// `reason` is what the user typed when stopping the task; it rides the
+/// `status_changed` payload, where the drawer's timeline already renders it
+/// under the phase header. It is a record for the reader, NOT an instruction:
+/// `outstanding_instruction` takes instructions only from `user_action` events
+/// (it reads `status_changed` purely as the review barrier), so a reason can
+/// never be replayed into a later generation's prompt — a requeue carries its
+/// own note for that.
+pub async fn cancel(
+    conn: &DatabaseConnection,
+    id: i32,
+    reason: Option<&str>,
+) -> Result<bool, DbError> {
     let now = Utc::now();
     let txn = conn.begin().await?;
     let res = work_task::Entity::update_many()
@@ -1515,7 +1527,11 @@ pub async fn cancel(conn: &DatabaseConnection, id: i32) -> Result<bool, DbError>
         txn.rollback().await?;
         return Ok(false);
     }
-    status_changed_event(&txn, id, "user", None, WorkTaskStatus::Canceled, None).await?;
+    let extra = reason
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(|r| serde_json::json!({ "reason": r }));
+    status_changed_event(&txn, id, "user", None, WorkTaskStatus::Canceled, extra).await?;
     txn.commit().await?;
     Ok(true)
 }
@@ -1887,7 +1903,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(begin_setup(&db.conn, canceled.id, seq).await.unwrap());
-        assert!(cancel(&db.conn, canceled.id).await.unwrap());
+        assert!(cancel(&db.conn, canceled.id, None).await.unwrap());
         assert_eq!(
             get(&db.conn, canceled.id).await.unwrap().status,
             WorkTaskStatus::Canceled
@@ -2039,7 +2055,7 @@ mod tests {
 
         // User cancels; a late TurnComplete for the old generation must be a
         // zero-side-effect no-op (the cancel-late-TurnComplete race).
-        assert!(cancel(&db.conn, t.id).await.unwrap());
+        assert!(cancel(&db.conn, t.id, None).await.unwrap());
         assert!(!settle_review(&db.conn, t.id, seq, None, None).await.unwrap());
         assert!(!flip_awaiting(&db.conn, t.id, seq, true).await.unwrap());
         assert!(!fail(
@@ -2064,6 +2080,45 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(seq2, seq + 1);
+    }
+
+    /// The reason the user gave when stopping a task rides the `canceled`
+    /// status event, which is what the drawer's timeline renders under the
+    /// phase header. Blank input must leave the payload alone — an empty
+    /// `reason` key would render as a stray empty line.
+    #[tokio::test]
+    async fn a_cancel_reason_rides_the_status_event() {
+        async fn cancel_reason(conn: &DatabaseConnection, id: i32) -> Option<String> {
+            list_events(conn, id, 100)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|e| {
+                    e.kind == "status_changed"
+                        && e.payload.as_ref().and_then(|p| p.get("to")).and_then(|v| v.as_str())
+                            == Some("canceled")
+                })
+                .and_then(|e| e.payload)
+                .and_then(|p| p.get("reason").and_then(|v| v.as_str()).map(str::to_string))
+        }
+
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/wt-cancel-reason").await;
+
+        let told = create(&db.conn, draft(folder_id, "told")).await.unwrap();
+        assert!(cancel(&db.conn, told.id, Some("  wrong approach  ")).await.unwrap());
+        assert_eq!(
+            cancel_reason(&db.conn, told.id).await.as_deref(),
+            Some("wrong approach")
+        );
+
+        let blank = create(&db.conn, draft(folder_id, "blank")).await.unwrap();
+        assert!(cancel(&db.conn, blank.id, Some("   ")).await.unwrap());
+        assert_eq!(cancel_reason(&db.conn, blank.id).await, None);
+
+        let silent = create(&db.conn, draft(folder_id, "silent")).await.unwrap();
+        assert!(cancel(&db.conn, silent.id, None).await.unwrap());
+        assert_eq!(cancel_reason(&db.conn, silent.id).await, None);
     }
 
     #[tokio::test]
@@ -2097,7 +2152,7 @@ mod tests {
         // Double begin loses (already merging) — merge idempotency.
         assert!(begin_merge(&db.conn, t.id, &state).await.unwrap().is_none());
         // Cancel is refused while merging.
-        assert!(!cancel(&db.conn, t.id).await.unwrap());
+        assert!(!cancel(&db.conn, t.id, None).await.unwrap());
 
         assert!(merge_landed(&db.conn, t.id, "def456").await.unwrap());
         // A second landing (event vs recovery race) is a no-op.
@@ -2472,7 +2527,7 @@ mod tests {
         assert!(get(&db.conn, t.id).await.unwrap().archived_at.is_none());
 
         // …and so does requeueing an archived canceled task.
-        assert!(cancel(&db.conn, t.id).await.unwrap());
+        assert!(cancel(&db.conn, t.id, None).await.unwrap());
         assert!(set_archived(&db.conn, t.id, true).await.unwrap());
         assert!(requeue_canceled(&db.conn, t.id, None).await.unwrap());
         let row = get(&db.conn, t.id).await.unwrap();

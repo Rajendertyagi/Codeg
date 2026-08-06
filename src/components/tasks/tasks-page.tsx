@@ -17,11 +17,8 @@ import { useTasksView } from "@/contexts/tasks-view-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
   workTaskArchive,
-  workTaskCancel,
   workTaskCreate,
   workTaskReorder,
-  workTaskRequeue,
-  workTaskRetry,
   workTaskStart,
   workTaskStartAll,
   workTaskUpdate,
@@ -58,11 +55,13 @@ import {
   groupTasksByColumn,
   type BoardColumnId,
 } from "./board-columns"
+import { TaskCancelDialog } from "./task-cancel-dialog"
 import { StatusChip, TaskCard } from "./task-card"
 import { TaskCompleteDialog } from "./task-complete-dialog"
 import { TaskDetailSheet } from "./task-detail-sheet"
 import { TaskEditorDialog } from "./task-editor-dialog"
 import { TaskMergeDialog } from "./task-merge-dialog"
+import { TaskRestartDialog, type TaskRestartKind } from "./task-restart-dialog"
 import { TaskSettingsDialog } from "./task-settings-dialog"
 import { TaskTranscriptDialog } from "./task-transcript-dialog"
 import type { WorkTask, WorkTaskDraft } from "@/lib/types"
@@ -221,6 +220,14 @@ export function TasksPage() {
   // The merge dialog's counterpart for a task that changed nothing.
   const [completeTask, setCompleteTask] = useState<WorkTask | null>(null)
   const [completeOpen, setCompleteOpen] = useState(false)
+  // Stopping a task asks why (optional) — from the card and from the drawer.
+  const [cancelTask, setCancelTask] = useState<WorkTask | null>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  // Restarting from a card asks for an optional note; the drawer unfolds its
+  // own box in place instead.
+  const [restartTask, setRestartTask] = useState<WorkTask | null>(null)
+  const [restartKind, setRestartKind] = useState<TaskRestartKind>("retry")
+  const [restartOpen, setRestartOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Read-only live session viewer ("查看会话") — tracked by id so the dialog
   // header's status chip follows the live row (like the detail sheet).
@@ -313,6 +320,17 @@ export function TasksPage() {
   const openComplete = useCallback((task: WorkTask) => {
     setCompleteTask(task)
     setCompleteOpen(true)
+  }, [])
+
+  const openCancel = useCallback((task: WorkTask) => {
+    setCancelTask(task)
+    setCancelOpen(true)
+  }, [])
+
+  const openRestart = useCallback((task: WorkTask, kind: TaskRestartKind) => {
+    setRestartTask(task)
+    setRestartKind(kind)
+    setRestartOpen(true)
   }, [])
 
   const openNewTask = useCallback(() => {
@@ -659,9 +677,9 @@ export function TasksPage() {
                     setDetailTaskId(task.id)
                   }}
                   onStart={() => void act(() => workTaskStart(task.id))}
-                  onCancel={() => void act(() => workTaskCancel(task.id))}
-                  onRetry={() => void act(() => workTaskRetry(task.id))}
-                  onRequeue={() => void act(() => workTaskRequeue(task.id))}
+                  onCancel={() => openCancel(task)}
+                  onRetry={() => openRestart(task, "retry")}
+                  onRequeue={() => openRestart(task, "requeue")}
                   onViewSession={() => openSession(task)}
                   onMerge={() => openMerge(task)}
                   onComplete={() => openComplete(task)}
@@ -834,6 +852,7 @@ export function TasksPage() {
         onViewSession={openSession}
         onMerge={openMerge}
         onComplete={openComplete}
+        onCancel={openCancel}
         onEdit={(task) => {
           setEditorTask(task)
           setEditorOpen(true)
@@ -848,6 +867,20 @@ export function TasksPage() {
         open={completeOpen}
         onOpenChange={setCompleteOpen}
         task={completeTask}
+      />
+      {/* Rendered after the sheet, like the transcript viewer: both portal to
+          body and the later mount stacks above, so a cancel / restart asked
+          for from inside the drawer lands on top of it. */}
+      <TaskCancelDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        task={cancelTask}
+      />
+      <TaskRestartDialog
+        open={restartOpen}
+        onOpenChange={setRestartOpen}
+        task={restartTask}
+        kind={restartKind}
       />
       {/* Rendered after the sheet so it stacks above it when opened from
           within (both portal to body; later mount wins). */}

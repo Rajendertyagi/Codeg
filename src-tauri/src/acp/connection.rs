@@ -2002,8 +2002,10 @@ fn build_grok_set_model_params(
 /// into the RUNNING turn. Untyped like `session/resume` — an extension method
 /// the schema has no typed request for. Always opts into the 0.64.0
 /// `promptRequired` idle contract; codeg only enables native steering for
-/// adapters proven to honor it (see [`synthesize_native_steering`]), but the
-/// caller still handles every outcome in case the proof was wrong.
+/// adapters proven to honor it AND to keep the owning prompt in flight across
+/// the steered work (claude-agent-acp 0.65.0 / #958 — see
+/// [`synthesize_native_steering`] and `registry::steering_prompt_required_min_version`),
+/// but the caller still handles every outcome in case the proof was wrong.
 async fn send_steer_request(
     cx: &ConnectionTo<Agent>,
     session_id: &SessionId,
@@ -6569,7 +6571,33 @@ async fn run_conversation_loop<'a>(
                                     // commands, not session updates. A dead
                                     // receiver is fine — the reply is then
                                     // moot (teardown), nothing to unwind.
-                                    let _ = reply.send(send_steer_request(&cx, &sid, &text).await);
+                                    let outcome = send_steer_request(&cx, &sid, &text).await;
+                                    // A steered message still lands in the
+                                    // agent's OWN transcript as a user record,
+                                    // which `group_into_turns` reads as the
+                                    // start of a turn. Fingerprint it so the
+                                    // background watcher classifies that turn
+                                    // as wire-rendered foreground: the owning
+                                    // prompt stays in flight across the steered
+                                    // work (claude-agent-acp #958), so all of
+                                    // it already streams into the live turn —
+                                    // surfacing it as overlay activity too
+                                    // renders it twice and reorders the
+                                    // transcript as the upserts land.
+                                    //
+                                    // `Injected` ONLY: `PromptRequired` leaves
+                                    // the content unconsumed (the caller
+                                    // resends it as a real prompt, which
+                                    // fingerprints itself, and a stale entry
+                                    // would swallow a same-text out-of-turn
+                                    // refire for the whole ledger TTL), and a
+                                    // `StartedNewTurn` genuinely runs detached
+                                    // — the overlay is the only place its work
+                                    // can surface at all.
+                                    if matches!(outcome, Ok(SteerOutcome::Injected)) {
+                                        prompt_ledger.record_text(&text);
+                                    }
+                                    let _ = reply.send(outcome);
                                 }
                                 Some(ConnectionCommand::Cancel) => {
                                     // Send CancelNotification to agent to stop the current turn
@@ -8815,35 +8843,41 @@ mod tests {
     }
 
     #[test]
-    fn synthesize_native_steering_stays_off_while_the_registry_disables_it() {
+    fn synthesize_native_steering_requires_all_three_gates() {
         use sacp::schema::Implementation;
         let advertised = meta_map(serde_json::json!({"steering": {"supported": true}}));
-        let proven = Implementation::new("claude-agent-acp", "0.64.0");
+        let proven = Implementation::new("claude-agent-acp", "0.65.0");
+        let stale = Implementation::new("claude-agent-acp", "0.64.1");
 
-        // claude-agent-acp #934: `injected` settles the owning prompt when
-        // the injection lands mid-generation, so the registry policy gate is
-        // None for EVERY agent — a perfect advertisement plus a proven
-        // version must still synthesize to the pull channel. The other two
-        // gates keep their direct coverage above (`init_advertises_steering_*`
-        // / `version_at_least_*`); when upstream ships the fix and the
-        // registry re-enables claude, restore the three-gate positive matrix
-        // here (advertisement × policy × version, including the stale-install
-        // fail-closed arm).
-        assert!(!synthesize_native_steering(
+        // All three gates → native.
+        assert!(synthesize_native_steering(
             AgentType::ClaudeCode,
             Some(&advertised),
             Some(&proven)
         ));
+        // Registry policy gate: codex advertises steering but has no
+        // promptRequired minimum — never native, whatever it reports.
         assert!(!synthesize_native_steering(
             AgentType::Codex,
             Some(&advertised),
             Some(&proven)
+        ));
+        // Runtime proof gate: 0.64.1 advertises steering identically but still
+        // settles the owning prompt on a mid-generation `injected` (#934, fixed
+        // in 0.65.0 by #958). Launch prefers a PATH-resolved install over the
+        // pinned package, so this arm is what keeps such a user on the pull
+        // channel — as does a missing `agent_info`.
+        assert!(!synthesize_native_steering(
+            AgentType::ClaudeCode,
+            Some(&advertised),
+            Some(&stale)
         ));
         assert!(!synthesize_native_steering(
             AgentType::ClaudeCode,
             Some(&advertised),
             None
         ));
+        // Advertisement gate.
         assert!(!synthesize_native_steering(
             AgentType::ClaudeCode,
             None,

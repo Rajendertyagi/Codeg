@@ -108,6 +108,7 @@ function mount(row: WorkTask) {
         onViewSession={() => {}}
         onMerge={() => {}}
         onComplete={() => {}}
+        onCancel={() => {}}
         onEdit={() => {}}
       />
     </NextIntlClientProvider>
@@ -172,21 +173,55 @@ describe("task drawer follow-up", () => {
   it("attaches the live note to a restart", async () => {
     const user = userEvent.setup()
     mount(task({ status: "failed", last_error: "boom" }))
-    await user.click(screen.getByRole("button", { name: /add a note/i }))
+    // The restart button only unfolds the box; the send inside it restarts.
+    await user.click(screen.getByRole("button", { name: /^retry$/i }))
     await screen.findByTestId("follow-up-composer")
+    expect(workTaskRetry).not.toHaveBeenCalled()
 
     editorText = "run pnpm install first"
-    await user.click(screen.getByRole("button", { name: /^retry$/i }))
+    await user.click(screen.getByRole("button", { name: /^send$/i }))
     await waitFor(() => expect(workTaskRetry).toHaveBeenCalledTimes(1))
     expect(workTaskRetry).toHaveBeenCalledWith(7, "run pnpm install first")
   })
 
-  it("leaves the note null while the box is closed", async () => {
+  it.each([
+    ["failed", "Retry", () => workTaskRetry],
+    ["canceled", "Requeue", () => workTaskRequeue],
+  ] as const)(
+    "restarts a %s task once when the send key fires twice",
+    async (status, button, api) => {
+      const user = userEvent.setup()
+      let release: (() => void) | undefined
+      api().mockImplementationOnce(
+        () => new Promise<void>((resolve) => (release = () => resolve()))
+      )
+      mount(task({ status }))
+      await user.click(screen.getByRole("button", { name: button }))
+      await screen.findByTestId("follow-up-composer")
+
+      // The box sends now, so the restart is reachable from the editor's own
+      // keydown ref — `busy` alone cannot stop the second press.
+      editorText = "one restart only"
+      await act(async () => {
+        composerProps?.onSubmit?.()
+        composerProps?.onSubmit?.()
+      })
+      expect(api()).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        release?.()
+      })
+      expect(api()).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("restarts with a null note when the box is left empty", async () => {
     const user = userEvent.setup()
     mount(task({ status: "canceled" }))
-    // Never opened: a stale handle from a previous open must not leak a note.
-    editorText = "not typed here"
     await user.click(screen.getByRole("button", { name: /re-?queue/i }))
+    await screen.findByTestId("follow-up-composer")
+
+    // An untouched box is the plain one-click restart it replaced.
+    await user.click(screen.getByRole("button", { name: /^send$/i }))
     await waitFor(() => expect(workTaskRequeue).toHaveBeenCalledTimes(1))
     expect(workTaskRequeue).toHaveBeenCalledWith(7, null)
   })

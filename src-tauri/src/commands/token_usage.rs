@@ -988,19 +988,40 @@ pub async fn token_usage_sync_core(
                 // `get_folder_conversation_core` reports a transcript it can no
                 // longer find as a *successful* parse with zero turns (see its
                 // `ConversationNotFound` arm). Writing that through would delete
-                // real recorded usage and stamp the conversation current, so a
-                // temporarily unreachable source — an unmounted volume, a moved
-                // agent data dir, a file being rewritten — would silently erase
-                // history and never retry. Leave both the rows and the stamp
-                // untouched instead; the next pass tries again.
-                tracing::warn!(
+                // real recorded usage, so the fact rows are left alone.
+                //
+                // The stamp, though, is settled rather than held open. There is
+                // no third state to wait for: a transcript the agent's CLI
+                // deleted is not coming back, and nothing here can tell a first
+                // miss from a thousandth. Holding the conversation stale means
+                // re-walking the agent's whole transcript tree on every pass,
+                // failing identically each time, and reporting it — a loop with
+                // no exit that re-derives nothing. So keep the numbers, close
+                // the case, and say it at `debug` because a settled source is a
+                // resting state, not an incident. A re-import or a full rebuild
+                // is what puts the conversation back in scope.
+                tracing::debug!(
                     conversation_id = candidate.id,
-                    previous_turns = candidate.synced_turn_count.unwrap_or(0),
-                    "token usage sync: transcript yielded no turns but usage was \
-                     recorded before — keeping the previous facts"
+                    kept_turns = candidate.synced_turn_count.unwrap_or(0),
+                    "token usage sync: transcript is gone — keeping the recorded \
+                     facts and settling the stamp"
                 );
-                result.failed += 1;
-                keep_eligible_for_rebuild(conn, schema_changed, candidate.id).await;
+                match usage_service::settle_lost_source(conn, candidate.id, candidate.updated_at)
+                    .await
+                {
+                    Ok(()) => result.lost += 1,
+                    Err(e) => {
+                        // A write that fails is a real fault, not a lost
+                        // source: report it and let the next pass retry.
+                        tracing::warn!(
+                            conversation_id = candidate.id,
+                            error = %e,
+                            "token usage sync: failed to settle a lost transcript"
+                        );
+                        result.failed += 1;
+                        keep_eligible_for_rebuild(conn, schema_changed, candidate.id).await;
+                    }
+                }
             }
             Ok((detail, _)) => {
                 let facts = facts_from_detail(&detail, candidate.updated_at);
@@ -1068,20 +1089,23 @@ pub async fn token_usage_sync_core(
 
 /// Keep a conversation that failed a schema rebuild eligible for the next pass.
 ///
-/// The three failure arms above all leave the sync stamp untouched, which is
-/// what lets an unreadable transcript keep its recorded facts. For a
-/// conversation that was already stale that is enough — it stays stale and the
-/// next pass retries it. But a schema rebuild also re-parses conversations that
-/// are perfectly *current*, and one of those that fails would still look
-/// current afterwards: the marker advances, the pass never runs again, and it
-/// keeps serving numbers from the accounting this change exists to replace.
+/// The two real-fault arms above (a write that failed, a transcript that would
+/// not parse) leave the sync stamp untouched so the conversation keeps its
+/// recorded facts and gets another try. For a conversation that was already
+/// stale that is enough — it stays stale and the next pass retries it. But a
+/// schema rebuild also re-parses conversations that are perfectly *current*,
+/// and one of those that fails would still look current afterwards: the marker
+/// advances, the pass never runs again, and it keeps serving numbers from the
+/// accounting this change exists to replace.
 ///
 /// Stamping it for re-parse is what closes that door. The marker preserves both
 /// the facts and `turn_count`, so the "an empty parse must not erase recorded
-/// usage" guard stays armed. A transcript that is gone for good will now be
-/// retried by every future pass and keep counting as stale — the same thing
-/// already true of a stale conversation whose source vanished, and the honest
-/// state for rows we know are wrong but cannot re-derive.
+/// usage" guard stays armed.
+///
+/// A transcript that is simply *gone* does not come here — it settles instead
+/// (see [`usage_service::settle_lost_source`]). Retrying only pays off for a
+/// fault that might clear; re-deriving a deleted file will not start working on
+/// the ninth attempt, so that case keeps the numbers it has and stops asking.
 async fn keep_eligible_for_rebuild(
     conn: &sea_orm::DatabaseConnection,
     schema_changed: bool,
@@ -1750,7 +1774,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_conversation_that_fails_the_schema_rebuild_is_retried_not_stranded() {
+    async fn a_transcript_that_is_gone_keeps_its_facts_and_stops_being_retried() {
         use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
 
         let _serial = SYNC_TESTS_SERIAL.lock().await;
@@ -1786,13 +1810,16 @@ mod tests {
         assert!(!usage_service::list_sync_candidates(&db.conn).await.expect("c")[0].is_stale());
 
         // The schema change selects it, the parse comes back with nothing, and
-        // the unreadable-source guard keeps the old rows rather than erasing
-        // them — so this conversation is still on the OLD accounting.
+        // the lost-source guard keeps the old rows rather than erasing them.
         let first =
             token_usage_sync_core(&db.conn, &EventEmitter::Noop, TokenUsageSyncMode::Incremental)
                 .await
                 .expect("first sync");
-        assert_eq!(first.failed, 1, "the unreadable transcript must not be written through");
+        assert_eq!(first.lost, 1, "the empty parse must not be written through");
+        assert_eq!(
+            first.failed, 0,
+            "a source that is simply gone is not a fault the user can act on"
+        );
         assert_eq!(
             usage_service::fetch_facts(&db.conn, &FactQuery::default(), 100)
                 .await
@@ -1802,16 +1829,123 @@ mod tests {
             "its recorded usage survives"
         );
 
-        // The regression this guards: the marker advances for everyone, so a
-        // failed conversation that still *looks* current would be skipped by
-        // every future pass and keep serving the numbers this change replaces.
+        // The regression this guards: holding the stamp open re-walked the
+        // agent's whole transcript tree on every pass, failed identically, and
+        // reported it — forever, because nothing here counts attempts. The
+        // stamp settles instead, so the case closes after one look.
         let second =
             token_usage_sync_core(&db.conn, &EventEmitter::Noop, TokenUsageSyncMode::Incremental)
                 .await
                 .expect("second sync");
+        assert_eq!(second.skipped, 1, "a settled conversation is not revisited");
+        assert_eq!(second.lost, 0);
+        assert_eq!(second.failed, 0);
+
+        // Settled is not sealed: a re-import (or any edit that moves
+        // `updated_at`) puts it back in scope for exactly one more look, which
+        // settles again. That is the escape hatch — without it, a conversation
+        // whose transcript really did come back could never be re-read.
+        usage_service::mark_stale_for_reparse(&db.conn, conv)
+            .await
+            .expect("re-import");
+        let third =
+            token_usage_sync_core(&db.conn, &EventEmitter::Noop, TokenUsageSyncMode::Incremental)
+                .await
+                .expect("third sync");
+        assert_eq!(third.lost, 1, "a re-import earns one more attempt");
         assert_eq!(
-            second.skipped, 0,
-            "a conversation that failed the rebuild must stay eligible for it"
+            usage_service::fetch_facts(&db.conn, &FactQuery::default(), 100)
+                .await
+                .expect("facts")
+                .len(),
+            1,
+            "and still does not erase what it could not re-derive"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_lost_source_stamp_during_schema_rebuild_stays_retryable() {
+        use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+
+        let _serial = SYNC_TESTS_SERIAL.lock().await;
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/tu-schema-settle-fail").await;
+        let conv = seed_conversation(&db, folder, crate::models::AgentType::ClaudeCode).await;
+        let updated_at = crate::db::entities::conversation::Entity::find_by_id(conv)
+            .one(&db.conn)
+            .await
+            .expect("query")
+            .expect("row")
+            .updated_at;
+        usage_service::replace_conversation_facts(
+            &db.conn,
+            conv,
+            updated_at,
+            &[UsageFact {
+                turn_key: "t1".into(),
+                occurred_at: ts("2026-08-01T10:00:00Z"),
+                model: Some("claude-opus-5".into()),
+                input_tokens: 100,
+                output_tokens: 20,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                duration_ms: 0,
+            }],
+        )
+        .await
+        .expect("seed facts");
+
+        // A schema rebuild selects this otherwise-current row. Fail only the
+        // no-op current-to-current update used to settle the missing source;
+        // the recovery write to the epoch marker must remain available.
+        db.conn
+            .execute(Statement::from_string(
+                DbBackend::Sqlite,
+                r#"CREATE TRIGGER fail_current_token_usage_stamp
+                   BEFORE UPDATE OF source_updated_at ON token_usage_sync
+                   WHEN NEW.source_updated_at = OLD.source_updated_at
+                   BEGIN
+                     SELECT RAISE(ABORT, 'simulated settle failure');
+                   END"#
+                    .to_owned(),
+            ))
+            .await
+            .expect("install failure trigger");
+
+        let first =
+            token_usage_sync_core(&db.conn, &EventEmitter::Noop, TokenUsageSyncMode::Incremental)
+                .await
+                .expect("schema rebuild");
+        assert_eq!(first.failed, 1);
+        assert_eq!(first.lost, 0);
+        let after_failure = usage_service::list_sync_candidates(&db.conn)
+            .await
+            .expect("candidates");
+        assert!(
+            after_failure[0].is_stale(),
+            "a failed settle must survive the advancing schema marker"
+        );
+
+        // The trigger allows epoch-to-current, proving the next incremental
+        // pass actually revisits the row and can settle it normally.
+        let second =
+            token_usage_sync_core(&db.conn, &EventEmitter::Noop, TokenUsageSyncMode::Incremental)
+                .await
+                .expect("retry");
+        assert_eq!(second.failed, 0);
+        assert_eq!(second.lost, 1);
+        assert!(!usage_service::list_sync_candidates(&db.conn)
+            .await
+            .expect("candidates")[0]
+            .is_stale());
+        assert_eq!(
+            usage_service::fetch_facts(&db.conn, &FactQuery::default(), 100)
+                .await
+                .expect("facts")
+                .len(),
+            1,
+            "the failed settle and its retry must both preserve recorded usage"
         );
     }
 }

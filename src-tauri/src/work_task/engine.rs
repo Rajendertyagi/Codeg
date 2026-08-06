@@ -473,9 +473,15 @@ impl TaskEngine {
     }
 
     /// Cancel a task from any non-terminal state except merging. Worktree is
-    /// kept (the card offers cleanup separately).
-    pub async fn cancel(self: &Arc<Self>, task_id: i32) -> Result<(), String> {
-        let won = work_task_service::cancel(&self.db.conn, task_id)
+    /// kept (the card offers cleanup separately). `reason` is the user's own
+    /// note for the timeline; internal cancels (a conversation the user stopped
+    /// from the chat UI, a delete) pass None.
+    pub async fn cancel(
+        self: &Arc<Self>,
+        task_id: i32,
+        reason: Option<String>,
+    ) -> Result<(), String> {
+        let won = work_task_service::cancel(&self.db.conn, task_id, reason.as_deref())
             .await
             .map_err(|e| e.to_string())?;
         if !won {
@@ -1355,7 +1361,7 @@ impl TaskEngine {
             "cancelled" => {
                 // The user stopped the agent from the conversation UI — that is
                 // a task cancel, not an agent failure.
-                work_task_service::cancel(&self.db.conn, task_id)
+                work_task_service::cancel(&self.db.conn, task_id, None)
                     .await
                     .unwrap_or(false)
             }
@@ -2175,7 +2181,7 @@ impl TaskEngine {
                     .unwrap_or(false)
                 }
                 Some(ConversationStatus::Cancelled) => {
-                    work_task_service::cancel(&self.db.conn, task.id)
+                    work_task_service::cancel(&self.db.conn, task.id, None)
                         .await
                         .unwrap_or(false)
                 }

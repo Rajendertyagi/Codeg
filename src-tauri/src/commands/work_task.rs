@@ -112,7 +112,7 @@ pub async fn work_task_delete_core(
             | WorkTaskStatus::Running
             | WorkTaskStatus::AwaitingInput
     ) {
-        engine()?.cancel(id).await.map_err(DbError::Validation)?;
+        engine()?.cancel(id, None).await.map_err(DbError::Validation)?;
     }
     if delete_worktree && task.worktree_folder_id.is_some() {
         if let Err(e) = engine()?.cleanup_task(id).await {
@@ -202,8 +202,13 @@ pub async fn work_task_return_core(
         .map_err(DbError::Validation)
 }
 
-pub async fn work_task_cancel_core(id: i32) -> Result<(), DbError> {
-    engine()?.cancel(id).await.map_err(DbError::Validation)
+/// Stop a task. `reason` is the user's optional note about WHY — it lands on
+/// the `canceled` entry of the progress timeline and nowhere else.
+pub async fn work_task_cancel_core(id: i32, reason: Option<String>) -> Result<(), DbError> {
+    engine()?
+        .cancel(id, reason)
+        .await
+        .map_err(DbError::Validation)
 }
 
 /// Dispatch the merge generation: the agent lands the task in its session and
@@ -506,8 +511,8 @@ pub async fn work_task_return(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn work_task_cancel(id: i32) -> Result<(), DbError> {
-    work_task_cancel_core(id).await
+pub async fn work_task_cancel(id: i32, reason: Option<String>) -> Result<(), DbError> {
+    work_task_cancel_core(id, reason).await
 }
 
 #[cfg(feature = "tauri-runtime")]
