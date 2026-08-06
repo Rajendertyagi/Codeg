@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
-index f025cc1e..ea16eb61 100644
+index 153eb74d..d2ab209b 100644
 --- a/src/i18n/messages/zh-TW.json
 +++ b/src/i18n/messages/zh-TW.json
-@@ -2422,6 +2422,8 @@
+@@ -2496,6 +2496,8 @@
          "noModels": "找不到模型",
          "cancel": "取消",
          "send": "傳送",
@@ -11,7 +11,7 @@ index f025cc1e..ea16eb61 100644
          "forkAndSend": "分叉發送",
          "queueMessage": "加入佇列",
          "steerIntoTurn": "插入目前回合",
-@@ -2603,6 +2605,9 @@
+@@ -2677,6 +2679,9 @@
          "plan": "計畫",
          "allowedActions": "允許的操作",
          "targetMode": "目標模式：{mode}",
@@ -20,5 +20,4 @@ index f025cc1e..ea16eb61 100644
 +        "deny": "拒絕",
          "optionGrants": "各選項將授予的權限",
          "changeScopeSession": "本次工作階段",
-        "changeScopeProcess": "本次執行",
-     "searchPlaceholder": "依名稱、ID 或描述搜尋自訂技能",
+         "changeScopeProcess": "本次執行",

@@ -1,0 +1,14 @@
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 7f7f3037..5e8340ef 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -102,6 +102,9 @@ notify = "6"
+ base64 = "0.22"
+ agent-client-protocol-schema = { version = "0.11", features = ["unstable_session_usage", "unstable_session_fork", "unstable_session_resume", "unstable_elicitation"] }
+ kill_tree = { version = "0.2", features = ["tokio"] }
++# Layer-2 backend (`newplugin/`): decision logic for new functionality.
++# Plain-data in, plain-decision out — never depends back on this crate.
++newplugin-backend = { path = "../newplugin/backend" }
+ which = "7"
+ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
+ axum = { version = "0.8", features = ["ws", "multipart"] }

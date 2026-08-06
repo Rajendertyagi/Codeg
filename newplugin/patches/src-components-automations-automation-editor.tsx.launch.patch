@@ -1,0 +1,499 @@
+diff --git a/src/components/automations/automation-editor.tsx b/src/components/automations/automation-editor.tsx
+index ca2f1809..ac93f68a 100644
+--- a/src/components/automations/automation-editor.tsx
++++ b/src/components/automations/automation-editor.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { useEffect, useMemo, useRef, useState } from "react"
+ import { getAgentLabel } from "@/lib/custom-agents"
+-import { ArrowLeft, Folder, Globe, Wand2 } from "lucide-react"
++import { ArrowLeft, Folder, FolderOpen, Globe, Wand2 } from "lucide-react"
+ import { useTranslations } from "next-intl"
+ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+ import { AgentSelector } from "@/components/chat/agent-selector"
+@@ -20,6 +20,7 @@ import {
+   snapshotLabels,
+ } from "./agent-config-section"
+ import { AutomationBranchPicker } from "./automation-branch-picker"
++import { AutomationConversationPicker } from "../../../newplugin/frontend/automation-conversation-picker"
+ import {
+   ComposerInvocationsPopup,
+   useComposerInvocations,
+@@ -30,6 +31,7 @@ import { Button } from "@/components/ui/button"
+ import { Checkbox } from "@/components/ui/checkbox"
+ import { Input } from "@/components/ui/input"
+ import { Label } from "@/components/ui/label"
++import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+ import {
+   Select,
+   SelectContent,
+@@ -38,6 +40,7 @@ import {
+   SelectValue,
+ } from "@/components/ui/select"
+ import { cn } from "@/lib/utils"
++import { openFileDialog } from "@/lib/platform"
+ import { automationComputeNextRun } from "@/lib/api"
+ import type {
+   AgentType,
+@@ -120,6 +123,23 @@ export function AutomationEditor({
+   const [isRemoteBranch, setIsRemoteBranch] = useState(
+     automation?.is_remote_branch ?? false
+   )
++  // Launch target: a fresh conversation (legacy behavior, the default) or an
++  // existing conversation each fire resumes. Modeled as a radio with the pinned
++  // id alongside so switching back to "new" stays one click away.
++  const [launchTarget, setLaunchTarget] = useState<"new" | "existing">(
++    automation?.config?.existing_conversation_id != null ? "existing" : "new"
++  )
++  const [targetConversationId, setTargetConversationId] = useState<number | null>(
++    automation?.config?.existing_conversation_id ?? null
++  )
++  // Target root: a git workspace folder (legacy) or a plain local folder path
++  // (no git). Mutually exclusive — the saved automation carries exactly one.
++  const [targetKind, setTargetKind] = useState<"workspace" | "local_folder">(
++    automation?.config?.local_folder_path ? "local_folder" : "workspace"
++  )
++  const [localFolderPath, setLocalFolderPath] = useState<string>(
++    automation?.config?.local_folder_path ?? ""
++  )
+   const [error, setError] = useState<string | null>(null)
+   const [saving, setSaving] = useState(false)
+   const [nextRun, setNextRun] = useState<string | null>(null)
+@@ -132,9 +152,15 @@ export function AutomationEditor({
+   // silently swapping it (see the submit handler).
+   const userChoseAgentRef = useRef(false)
+ 
++  // Probe/mention path: the selected workspace folder, or — in local-folder
++  // mode — the typed local path, so the config snapshot scopes to the run's
++  // real directory instead of falling back to a global probe.
+   const folderPath = useMemo(
+-    () => folders.find((f) => f.id === folderId)?.path ?? null,
+-    [folders, folderId]
++    () =>
++      targetKind === "local_folder"
++        ? localFolderPath.trim() || null
++        : folders.find((f) => f.id === folderId)?.path ?? null,
++    [folders, folderId, targetKind, localFolderPath]
+   )
+ 
+   // Task boards bind to project roots only — the enqueue action narrows the
+@@ -151,7 +177,22 @@ export function AutomationEditor({
+   // config. Block saving until the path is known. The run's working dir is
+   // resolved server-side from folderId regardless, so this only keeps the saved
+   // config snapshot scoped to the right folder.
+-  const folderPathResolving = folderId != null && folderPath == null
++  const folderPathResolving =
++    targetKind === "workspace" && folderId != null && folderPath == null
++
++  // Desktop: native directory picker. Web/server mode has no filesystem access
++  // to the server, so `openFileDialog` falls back to a typed-path prompt there.
++  const browseLocalFolder = async () => {
++    try {
++      const picked = await openFileDialog({
++        directory: true,
++        title: t("localFolderBrowse"),
++      })
++      if (typeof picked === "string" && picked) setLocalFolderPath(picked)
++    } catch {
++      // Dialog unavailable or dismissed — leave the typed path as-is.
++    }
++  }
+ 
+   const { groupLabels: referenceGroupLabels, uiLabels: mentionUiLabels } =
+     useComposerMentionLabels()
+@@ -207,12 +248,24 @@ export function AutomationEditor({
+   useEffect(() => {
+     if (
+       folderId == null &&
++      targetKind === "workspace" &&
+       automation?.root_folder_id == null &&
+       selectableFolders.length > 0
+     ) {
+       setFolderId(selectableFolders[0].id)
+     }
+-  }, [selectableFolders, folderId, automation])
++  }, [selectableFolders, folderId, automation, targetKind])
++
++  // Enqueue-task automations are workspace-only: the work-task engine owns
++  // execution and ignores a local path, so a draft must never carry one.
++  // Covers both the action-switch click and a hand-edited row that loads with
++  // a local path while the action is enqueue_task.
++  useEffect(() => {
++    if (action === "enqueue_task" && targetKind !== "workspace") {
++      setTargetKind("workspace")
++      setLocalFolderPath("")
++    }
++  }, [action, targetKind])
+ 
+   const submit = async () => {
+     setError(null)
+@@ -221,11 +274,23 @@ export function AutomationEditor({
+     if (!name.trim()) return setError(t("errorName"))
+     if (!displayText) return setError(t("errorPrompt"))
+     if (trigger === "schedule" && !cron.trim()) return setError(t("errorCron"))
+-    if (folderId == null) return setError(t("errorFolder"))
++    if (targetKind === "workspace" && folderId == null)
++      return setError(t("errorFolder"))
++    if (targetKind === "local_folder" && !localFolderPath.trim())
++      return setError(t("errorLocalFolder"))
+     // Folder selected but its path is still resolving; the probe would be global.
+     // The Save button is disabled in this state, so this is a race-safety net —
+     // bail silently and let it re-enable once the path resolves.
+     if (folderPathResolving) return
++    // An "existing conversation" target is only valid once one is actually
++    // picked; a mid-switch draft would otherwise save a doomed config.
++    if (
++      action === "launch_session" &&
++      launchTarget === "existing" &&
++      targetConversationId == null
++    ) {
++      return setError(t("errorTargetConversation"))
++    }
+ 
+     const blocks: PromptInputBlock[] = editor
+       ? docToPromptBlocks(editor)
+@@ -247,7 +312,16 @@ export function AutomationEditor({
+       // Capture friendly labels for the chosen agent/folder/mode/options so the
+       // detail page renders names, not raw value ids — and keeps doing so if the
+       // agent is later uninstalled or the folder removed.
+-      const folderName = folders.find((f) => f.id === folderId)?.name
++      const folderName =
++        targetKind === "workspace"
++          ? folders.find((f) => f.id === folderId)?.name
++          : null
++      // A local-folder run has no workspace row to name; label it by the path's
++      // leaf so the detail page still shows something readable.
++      const localFolderName =
++        targetKind === "local_folder"
++          ? localFolderPath.trim().split(/[\\/]/).filter(Boolean).pop() ?? null
++          : null
+       // If the saved agent is unavailable on this device, AgentSelector shows a
+       // substitute via onFallback. That swap is display-only: persisting it would
+       // silently change the automation's agent (and invalidate its per-agent
+@@ -264,12 +338,23 @@ export function AutomationEditor({
+       const label_snapshot = {
+         agent_label: getAgentLabel(agentType) ?? agentType,
+         ...(folderName ? { folder_label: folderName } : {}),
++        ...(localFolderName ? { folder_label: localFolderName } : {}),
+         ...snapshotLabels(snapshot, mode_id, config_values),
+       }
+ 
+       // Enqueue-task automations never run in place: canonicalize the
+       // session-only fields so the stored row can't carry a stale branch.
+       const enqueue = action === "enqueue_task"
++      // A local-folder target has no repo state to isolate or branch-switch:
++      // it always runs in the configured path as-is (forced shared_in_root).
++      // Enqueue-task forces the workspace target (see the effect above), so
++      // this only ever applies to launch_session.
++      const isLocal = targetKind === "local_folder" && !enqueue
++      const effectiveIsolation: AutomationIsolation = enqueue
++        ? "worktree_per_run"
++        : isLocal
++          ? "shared_in_root"
++          : isolation
+       const draft: AutomationDraft = {
+         name: name.trim(),
+         // Enable/disable lives on the detail header + row menu now; preserve an
+@@ -279,14 +364,20 @@ export function AutomationEditor({
+         cron: trigger === "schedule" ? cron.trim() : null,
+         timezone,
+         agent_type: persistedAgentType,
+-        root_folder_id: folderId,
+-        isolation: enqueue ? "worktree_per_run" : isolation,
++        root_folder_id: isLocal ? null : folderId,
++        isolation: effectiveIsolation,
+         branch:
+-          !enqueue && isolation === "shared_in_root" && branch.trim()
++          !enqueue &&
++          !isLocal &&
++          isolation === "shared_in_root" &&
++          branch.trim()
+             ? branch.trim()
+             : null,
+         is_remote_branch:
+-          !enqueue && isolation === "shared_in_root" && branch.trim()
++          !enqueue &&
++          !isLocal &&
++          isolation === "shared_in_root" &&
++          branch.trim()
+             ? isRemoteBranch
+             : false,
+         config: fellBackToSubstitute
+@@ -300,6 +391,10 @@ export function AutomationEditor({
+               config_values: automation.config?.config_values ?? {},
+               label_snapshot:
+                 automation.config?.label_snapshot ?? label_snapshot,
++              existing_conversation_id:
++                automation.config?.existing_conversation_id ?? null,
++              local_folder_path:
++                automation.config?.local_folder_path ?? null,
+             }
+           : {
+               action,
+@@ -308,6 +403,13 @@ export function AutomationEditor({
+               mode_id,
+               config_values,
+               label_snapshot,
++              // Enqueue-task fires never touch the session machinery, so the
++              // target only applies to launch_session.
++              existing_conversation_id:
++                action === "launch_session" && launchTarget === "existing"
++                  ? targetConversationId
++                  : null,
++              local_folder_path: isLocal ? localFolderPath.trim() : null,
+             },
+       }
+       await onSubmit(draft)
+@@ -462,85 +564,183 @@ export function AutomationEditor({
+             {t("actionEnqueueTaskHint")}
+           </p>
+         ) : null}
++        {/* Launch target — a fresh conversation per fire (legacy) or a pinned
++            existing conversation each fire resumes. Only launch_session runs a
++            session, so the choice is hidden for enqueue_task. */}
++        {action === "launch_session" ? (
++          <div className="flex flex-col gap-2">
++            <RadioGroup
++              value={launchTarget}
++              onValueChange={(v) => setLaunchTarget(v as "new" | "existing")}
++              aria-label={t("launchTarget")}
++              className="flex w-fit flex-row gap-4"
++            >
++              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++                <RadioGroupItem value="new" />
++                {t("targetNewConversation")}
++              </label>
++              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++                <RadioGroupItem value="existing" />
++                {t("targetExistingConversation")}
++              </label>
++            </RadioGroup>
++            {launchTarget === "existing" ? (
++              <>
++                <AutomationConversationPicker
++                  agentType={agentType}
++                  value={targetConversationId}
++                  onChange={setTargetConversationId}
++                  placeholder={t("conversationSearchPlaceholder")}
++                />
++                <p className="text-xs text-muted-foreground">
++                  {t("existingConversationHint")}
++                </p>
++              </>
++            ) : null}
++          </div>
++        ) : null}
+       </div>
+ 
+-      {/* Target — where the run happens: workspace folder, isolation, branch. */}
++      {/* Target — where the run happens: a workspace folder (with isolation and
++          branch) or a plain local folder path with no git involvement. */}
+       <div className="flex flex-col gap-2">
+         <h3 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
+           {t("sectionTarget")}
+         </h3>
+-        <div className="flex flex-wrap items-center gap-2">
+-          <Select
+-            value={folderId != null ? String(folderId) : undefined}
+-            // A branch belongs to a specific repo, so switching folders must drop
+-            // the previous folder's branch (else it'd be saved against the new
+-            // one). Done in this user-action handler, not a folderId effect, so
+-            // the initial hydrate/backfill never wipes a seeded branch on edit.
++        {action === "launch_session" ? (
++          <RadioGroup
++            value={targetKind}
+             onValueChange={(v) => {
+-              setFolderId(Number(v))
+-              setBranch("")
+-              setIsRemoteBranch(false)
++              const kind = v as "workspace" | "local_folder"
++              setTargetKind(kind)
++              // A branch belongs to a repo; a folderless target must not carry
++              // it against the local path.
++              if (kind === "local_folder") {
++                setBranch("")
++                setIsRemoteBranch(false)
++              }
+             }}
++            aria-label={t("targetKind")}
++            className="flex w-fit flex-row gap-4"
+           >
+-            <SelectTrigger size="sm" className="h-7 gap-1.5 text-xs">
+-              <Folder
+-                className="size-3.5 text-muted-foreground"
+-                aria-hidden="true"
+-              />
+-              <SelectValue placeholder={t("folderPlaceholder")} />
+-            </SelectTrigger>
+-            <SelectContent>
+-              {selectableFolders.map((f) => (
+-                <SelectItem key={f.id} value={String(f.id)}>
+-                  {f.name}
+-                </SelectItem>
+-              ))}
+-            </SelectContent>
+-          </Select>
+-
+-          {/* A worktree run gets its own fresh tree, so a branch only applies to
+-              the shared-folder case — the picker shows there and the checkbox
+-              sits after it. Ticking the checkbox switches to worktree isolation
+-              and hides the picker. Enqueued tasks mint their own worktree in
+-              the work-task engine, so neither control applies. */}
+-          {action === "launch_session" && isolation === "shared_in_root" ? (
+-            <AutomationBranchPicker
+-              folderPath={folderPath}
+-              value={branch}
+-              onChange={(b, isRemote) => {
+-                setBranch(b)
+-                setIsRemoteBranch(isRemote)
+-              }}
+-              placeholder={t("branchPlaceholder")}
+-              disabled={folderId == null}
+-              // shared_in_root checks the branch out in the root tree, which
+-              // can't track a remote-only branch — the backend rejects that
+-              // combination, so don't offer it here.
+-              allowRemote={false}
+-            />
+-          ) : null}
+-
+-          {action === "launch_session" ? (
+-            <Label className="h-7 text-xs font-normal text-muted-foreground">
+-              <Checkbox
+-                checked={isolation === "worktree_per_run"}
+-                onCheckedChange={(v) =>
+-                  setIsolation(
+-                    v === true ? "worktree_per_run" : "shared_in_root"
+-                  )
+-                }
+-              />
+-              {t("isolationWorktree")}
+-            </Label>
+-          ) : null}
+-        </div>
+-        {/* Running in the folder shares the user's working tree (and any
+-            concurrent shared run); surface that trade-off where it's chosen. */}
+-        {action === "launch_session" && isolation === "shared_in_root" ? (
+-          <p className="text-xs text-muted-foreground">
+-            {t("isolationSharedCaveat")}
+-          </p>
++            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++              <RadioGroupItem value="workspace" />
++              {t("targetGitWorkspace")}
++            </label>
++            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++              <RadioGroupItem value="local_folder" />
++              {t("targetLocalFolder")}
++            </label>
++          </RadioGroup>
+         ) : null}
++
++        {targetKind === "local_folder" && action === "launch_session" ? (
++          <div className="flex flex-col gap-2">
++            <div className="flex flex-wrap items-center gap-2">
++              <Input
++                value={localFolderPath}
++                onChange={(e) => setLocalFolderPath(e.target.value)}
++                placeholder={t("localFolderPathPlaceholder")}
++                aria-label={t("targetLocalFolder")}
++                className="h-7 flex-1 text-xs"
++              />
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                onClick={browseLocalFolder}
++                className="h-7 gap-1.5 text-xs"
++              >
++                <FolderOpen
++                  className="size-3.5 text-muted-foreground"
++                  aria-hidden="true"
++                />
++                {t("localFolderBrowse")}
++              </Button>
++            </div>
++            <p className="text-xs text-muted-foreground">
++              {t("localFolderHint")}
++            </p>
++          </div>
++        ) : (
++          <>
++            <div className="flex flex-wrap items-center gap-2">
++              <Select
++                value={folderId != null ? String(folderId) : undefined}
++                // A branch belongs to a specific repo, so switching folders must
++                // drop the previous folder's branch (else it'd be saved against
++                // the new one). Done in this user-action handler, not a
++                // folderId effect, so the initial hydrate/backfill never wipes a
++                // seeded branch on edit.
++                onValueChange={(v) => {
++                  setFolderId(Number(v))
++                  setBranch("")
++                  setIsRemoteBranch(false)
++                }}
++              >
++                <SelectTrigger size="sm" className="h-7 gap-1.5 text-xs">
++                  <Folder
++                    className="size-3.5 text-muted-foreground"
++                    aria-hidden="true"
++                  />
++                  <SelectValue placeholder={t("folderPlaceholder")} />
++                </SelectTrigger>
++                <SelectContent>
++                  {selectableFolders.map((f) => (
++                    <SelectItem key={f.id} value={String(f.id)}>
++                      {f.name}
++                    </SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++
++              {/* A worktree run gets its own fresh tree, so a branch only
++                  applies to the shared-folder case — the picker shows there and
++                  the checkbox sits after it. Ticking the checkbox switches to
++                  worktree isolation and hides the picker. Enqueued tasks mint
++                  their own worktree in the work-task engine, so neither control
++                  applies. */}
++              {action === "launch_session" && isolation === "shared_in_root" ? (
++                <AutomationBranchPicker
++                  folderPath={folderPath}
++                  value={branch}
++                  onChange={(b, isRemote) => {
++                    setBranch(b)
++                    setIsRemoteBranch(isRemote)
++                  }}
++                  placeholder={t("branchPlaceholder")}
++                  disabled={folderId == null}
++                  // shared_in_root checks the branch out in the root tree,
++                  // which can't track a remote-only branch — the backend
++                  // rejects that combination, so don't offer it here.
++                  allowRemote={false}
++                />
++              ) : null}
++
++              {action === "launch_session" ? (
++                <Label className="h-7 text-xs font-normal text-muted-foreground">
++                  <Checkbox
++                    checked={isolation === "worktree_per_run"}
++                    onCheckedChange={(v) =>
++                      setIsolation(
++                        v === true ? "worktree_per_run" : "shared_in_root"
++                      )
++                    }
++                  />
++                  {t("isolationWorktree")}
++                </Label>
++              ) : null}
++            </div>
++            {/* Running in the folder shares the user's working tree (and any
++                concurrent shared run); surface that trade-off where it's
++                chosen. */}
++            {action === "launch_session" && isolation === "shared_in_root" ? (
++              <p className="text-xs text-muted-foreground">
++                {t("isolationSharedCaveat")}
++              </p>
++            ) : null}
++          </>
++        )}
+       </div>
+ 
+       {/* Trigger — manual vs scheduled, with the schedule details folded in. */}

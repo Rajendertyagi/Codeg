@@ -1,0 +1,28 @@
+diff --git a/src/i18n/messages/de.json b/src/i18n/messages/de.json
+index 11a73382..fadfe06f 100644
+--- a/src/i18n/messages/de.json
++++ b/src/i18n/messages/de.json
+@@ -4175,7 +4175,22 @@
+     "branchLocal": "Lokal",
+     "branchRemote": "Remote",
+     "branchSearchPlaceholder": "Branches suchen…",
+-    "branchNone": "Keine Branches"
++    "branchNone": "Keine Branches",
++    "launchTarget": "Startziel",
++    "targetNewConversation": "Neue Unterhaltung",
++    "targetExistingConversation": "Vorhandene Unterhaltung",
++    "conversationSearchPlaceholder": "Unterhaltungen durchsuchen…",
++    "conversationNone": "Keine Unterhaltungen",
++    "existingConversationHint": "Jede Ausführung setzt diese Unterhaltung fort und fügt eine neue Runde hinzu, statt eine neue Sitzung zu starten.",
++    "errorTargetConversation": "Wähle eine Unterhaltung zum Fortsetzen",
++    "targetKind": "Zielverzeichnis",
++    "targetGitWorkspace": "Git-Arbeitsbereich",
++    "targetLocalFolder": "Lokaler Ordner",
++    "localFolderBrowse": "Durchsuchen…",
++    "localFolderPathPlaceholder": "Absoluten Ordnerpfad eingeben",
++    "localFolderHint": "Jede Ausführung arbeitet direkt in diesem Ordner — ohne Git-Repository, Branch oder Worktree.",
++    "errorLocalFolder": "Ordnerpfad eingeben",
++    "untitledConversation": "Unbenannte Unterhaltung"
+   },
+   "Tasks": {
+     "title": "Aufgabenboard",

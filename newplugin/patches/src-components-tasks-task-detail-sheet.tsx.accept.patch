@@ -1,34 +1,64 @@
 diff --git a/src/components/tasks/task-detail-sheet.tsx b/src/components/tasks/task-detail-sheet.tsx
-index 28cda10e6866c772568e48676a95f48780431b8e..0000000000000000000000000000000000000000
+index 4517cde..06c6e98 100644
 --- a/src/components/tasks/task-detail-sheet.tsx
 +++ b/src/components/tasks/task-detail-sheet.tsx
-@@ -21,2 +21,3 @@
+@@ -19,6 +19,7 @@ import {
+   CircleAlert,
+   CircleCheck,
    CircleX,
 +  Check,
    Coins,
-@@ -37,4 +38,5 @@
+   FileDiff,
+   FolderX,
+@@ -36,6 +37,7 @@ import {
+ } from "lucide-react"
  import {
    workTaskArchive,
 +  workTaskAccept,
-   workTaskCancel,
    getFolderConversation,
-@@ -294,9 +296,13 @@
+   workTaskChangedFiles,
+   workTaskCleanup,
+@@ -369,22 +371,31 @@ export function TaskDetailSheet({
+     return (composerRef.current?.getText() ?? composerText).trim() || null
+   }
    if (isReview) {
--    zoneActions.push({
--      icon: GitMerge,
--      label: t("actionMerge"),
--      filled: true,
--      onClick: () => onMerge(task),
--    })
+-    // A task that changed nothing has no merge to offer — accepting it IS the
+-    // primary action (same swap the board card makes).
 +    // No worktree → accept directly to done (no git merge); with a worktree
-+    // the merge dialog stays the path.
++    // the merge dialog stays the path (or the complete swap when the task
++    // changed nothing).
 +    const canAccept = task.worktree_folder_id == null
-+    zoneActions.push({
-+      icon: canAccept ? Check : GitMerge,
-+      label: t(canAccept ? "actionAccept" : "actionMerge"),
-+      filled: true,
-+      onClick: () =>
-+        canAccept ? run(() => workTaskAccept(task.id)) : onMerge(task),
-+    })
+     zoneActions.push(
+-      hasNothingToMerge(task)
++      canAccept
+         ? {
+-            icon: CircleCheck,
+-            label: t("actionComplete"),
++            icon: Check,
++            label: t("actionAccept"),
+             filled: true,
+-            onClick: () => onComplete(task),
+-          }
+-        : {
+-            icon: GitMerge,
+-            label: t("actionMerge"),
+-            filled: true,
+-            onClick: () => onMerge(task),
++            onClick: () => run(() => workTaskAccept(task.id)),
+           }
++        : hasNothingToMerge(task)
++          ? {
++              icon: CircleCheck,
++              label: t("actionComplete"),
++              filled: true,
++              onClick: () => onComplete(task),
++            }
++          : {
++              icon: GitMerge,
++              label: t("actionMerge"),
++              filled: true,
++              onClick: () => onMerge(task),
++            }
+     )
      zoneActions.push({
        icon: Undo2,

@@ -1,0 +1,28 @@
+diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
+index ccac2750..6d781a7c 100644
+--- a/src/i18n/messages/fr.json
++++ b/src/i18n/messages/fr.json
+@@ -4175,7 +4175,22 @@
+     "branchLocal": "Locale",
+     "branchRemote": "Distante",
+     "branchSearchPlaceholder": "Rechercher des branches…",
+-    "branchNone": "Aucune branche"
++    "branchNone": "Aucune branche",
++    "launchTarget": "Cible de lancement",
++    "targetNewConversation": "Nouvelle conversation",
++    "targetExistingConversation": "Conversation existante",
++    "conversationSearchPlaceholder": "Rechercher des conversations…",
++    "conversationNone": "Aucune conversation",
++    "existingConversationHint": "Chaque exécution reprend cette conversation en ajoutant un nouveau tour, au lieu de démarrer une nouvelle session.",
++    "errorTargetConversation": "Sélectionnez une conversation à reprendre",
++    "targetKind": "Racine cible",
++    "targetGitWorkspace": "Espace de travail Git",
++    "targetLocalFolder": "Dossier local",
++    "localFolderBrowse": "Parcourir…",
++    "localFolderPathPlaceholder": "Saisissez un chemin absolu",
++    "localFolderHint": "Chaque exécution travaille directement dans ce dossier, sans dépôt git, branche ni worktree.",
++    "errorLocalFolder": "Saisissez un chemin de dossier",
++    "untitledConversation": "Conversation sans titre"
+   },
+   "Tasks": {
+     "title": "Tableau des tâches",

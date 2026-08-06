@@ -110,11 +110,6 @@ pub struct WorkTaskConfig {
     pub config_values: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub label_snapshot: Option<serde_json::Value>,
-    /// When set, this task fires into an existing conversation (resuming its
-    /// external session) instead of creating a fresh one. `None` (the legacy
-    /// default) keeps the always-fresh behavior.
-    #[serde(default)]
-    pub existing_conversation_id: Option<i32>,
 }
 
 /// Per-folder defaults stored in `work_task_settings.config`.

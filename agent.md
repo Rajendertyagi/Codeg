@@ -20,8 +20,20 @@ Working guidance for Code Agent when working in this repository (Codeg).
 
 ## Carried State (repo invariants)
 
-- **TARGET SCOPE:** `newplugin/patches/` - the per-file patch files (26 files: 17 legacy + 9 accept, 2026-08-06). Custom-workflow patch content was purged from the archive when the feature was unwired; it now documents auto-approve + task-accept only.
-- **Custom workflow feature is unwired** (2026-08-06): only the left-sidebar tab remains (renders a "not in use" placeholder in `src/components/workbench/workbench-content.tsx`). Engine seams removed (`lib.rs` cron spawn + workflow commands, `router.rs` workflow routes); auto-approval + task-accept stay live; `newplugin/` code untouched (dead-but-present).
+- **PATCH-ARCHIVE MODEL** (2026-08-06): engine + frontend tree = 100% pure `origin/main`
+  (0.23.x) — zero custom seams in Codeg-owned files. Every custom feature lives ONLY as an
+  apply-on-demand patch under `newplugin/patches/` (46 files: 17 legacy auto-approve +
+  9 task-accept + 20 launch-target) and is OFF by default. Apply with
+  `git apply newplugin/patches/<file>.patch` from the repo root on a clean `origin/main`
+  checkout; all 46 pass `git apply --check` and compose cleanly in sequence (verified
+  2026-08-06).
+- **Archived features:** auto-approval (`web/handlers/auto_approve.rs` + `custom_hooks`
+  hydration in `lib.rs`), task-accept (`workTaskAccept` command + route + review UI),
+  launch-target (`local_folder_path` + `existing_conversation_id` resume for work-task and
+  automation runs, incl. non-git Local Folder execution). Engine stays read-only even for
+  defects; new features are expressed as `newplugin/` hooks or new patches, never edits.
+- **Custom workflow feature is fully removed** (2026-08-06): sidebar tab, placeholder
+  component, and route died with the upstream overwrite; no trace remains in tree or archive.
 - Untracked, leave alone: `.qartez/`, `.github/workflows/codeg-portable-win64.yml`
 - Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP leak at `chat_channel.rs:78-90`.
 

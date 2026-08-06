@@ -1,0 +1,28 @@
+diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
+index a4bf787e..fd1d4398 100644
+--- a/src/i18n/messages/zh-CN.json
++++ b/src/i18n/messages/zh-CN.json
+@@ -4175,7 +4180,22 @@
+     "branchLocal": "本地",
+     "branchRemote": "远程",
+     "branchSearchPlaceholder": "搜索分支…",
+-    "branchNone": "无分支"
++    "branchNone": "无分支",
++    "launchTarget": "启动目标",
++    "targetNewConversation": "新建对话",
++    "targetExistingConversation": "现有对话",
++    "conversationSearchPlaceholder": "搜索对话…",
++    "conversationNone": "没有对话",
++    "existingConversationHint": "每次触发将恢复此对话，在其中新增一轮，而不是启动新会话。",
++    "errorTargetConversation": "请选择要恢复的对话",
++    "targetKind": "目标根目录",
++    "targetGitWorkspace": "Git 工作区",
++    "targetLocalFolder": "本地文件夹",
++    "localFolderBrowse": "浏览…",
++    "localFolderPathPlaceholder": "输入绝对文件夹路径",
++    "localFolderHint": "每次运行直接在此文件夹中执行——不涉及 git 仓库、分支或工作树。",
++    "errorLocalFolder": "请输入文件夹路径",
++    "untitledConversation": "未命名对话"
+   },
+   "Tasks": {
+     "title": "任务看板",

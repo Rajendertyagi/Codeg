@@ -35,9 +35,6 @@ interface ConversationShellProps {
   error: string | null
   claudeApiRetry: ClaudeApiRetryState | null
   pendingPermission: PendingPermission | null
-  /** All awaiting-decision permissions, oldest first. Defaults to
-   *  `[pendingPermission]` when omitted; renders one card per entry. */
-  pendingPermissions?: PendingPermission[]
   pendingQuestion: PendingQuestion | null
   /** Awaiting-answer multiple-choice `ask_user_question`. */
   pendingAskQuestion: PendingQuestionState | null
@@ -113,7 +110,6 @@ export function ConversationShell({
   error,
   claudeApiRetry,
   pendingPermission,
-  pendingPermissions,
   pendingQuestion,
   pendingAskQuestion,
   pendingPlanApproval,
@@ -219,18 +215,10 @@ export function ConversationShell({
       {topBanner}
       <div className="flex-1 min-h-0">{children}</div>
 
-      {(pendingPermissions && pendingPermissions.length > 0
-        ? pendingPermissions
-        : pendingPermission
-          ? [pendingPermission]
-          : []
-      ).map((permission) => (
-        <PermissionDialog
-          key={permission.request_id}
-          permission={permission}
-          onRespond={onRespondPermission}
-        />
-      ))}
+      <PermissionDialog
+        permission={pendingPermission}
+        onRespond={onRespondPermission}
+      />
 
       <QuestionDialog question={pendingQuestion} onAnswer={onAnswerQuestion} />
 

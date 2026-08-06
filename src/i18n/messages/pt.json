@@ -4175,22 +4175,7 @@
     "branchLocal": "Local",
     "branchRemote": "Remoto",
     "branchSearchPlaceholder": "Pesquisar branches…",
-    "branchNone": "Sem branches",
-    "launchTarget": "Destino de execução",
-    "targetNewConversation": "Nova conversa",
-    "targetExistingConversation": "Conversa existente",
-    "conversationSearchPlaceholder": "Pesquisar conversas…",
-    "conversationNone": "Nenhuma conversa",
-    "existingConversationHint": "Cada execução retoma esta conversa adicionando uma nova rodada, em vez de iniciar uma nova sessão.",
-    "errorTargetConversation": "Selecione uma conversa para retomar",
-    "targetKind": "Diretório de destino",
-    "targetGitWorkspace": "Espaço de trabalho Git",
-    "targetLocalFolder": "Pasta local",
-    "localFolderBrowse": "Procurar…",
-    "localFolderPathPlaceholder": "Insira um caminho absoluto",
-    "localFolderHint": "Cada execução trabalha diretamente nesta pasta, sem repositório git, branch ou worktree.",
-    "errorLocalFolder": "Insira um caminho de pasta",
-    "untitledConversation": "Conversa sem título"
+    "branchNone": "Sem branches"
   },
   "Tasks": {
     "title": "Quadro de tarefas",

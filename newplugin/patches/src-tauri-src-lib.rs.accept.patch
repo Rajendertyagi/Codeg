@@ -1,12 +1,11 @@
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
-index 797015982061958b314d88f462f44135946b496d..0000000000000000000000000000000000000000
+index 14b9fbb3c40643e577ef9eeac6145cbcec603af9..0000000000000000000000000000000000000000
 --- a/src-tauri/src/lib.rs
 +++ b/src-tauri/src/lib.rs
-@@ -1306,4 +1306,7 @@
+@@ -1264,3 +1264,6 @@
                  work_task_commands::work_task_cancel,
                  work_task_commands::work_task_merge,
 +                // Non-git accept (custom hooks): review → done without a
 +                // merge, for tasks without a worktree.
 +                custom_hooks::work_task_accept,
-                 work_task_commands::work_task_archive,
-                 work_task_commands::work_task_cleanup,
+                 work_task_commands::work_task_complete,

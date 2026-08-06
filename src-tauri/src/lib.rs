@@ -9,10 +9,6 @@
 
 pub mod acp;
 pub mod acp_transcript;
-// Custom Codeg hooks live outside the upstream crate tree (`newplugin/hooks/`)
-// so they survive upstream merges; see `newplugin/hooks/mod.rs`.
-#[path = "../../newplugin/hooks/mod.rs"]
-pub mod custom_hooks;
 pub use acp::{
     idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
 };
@@ -84,7 +80,6 @@ mod tauri_app {
     };
     use crate::terminal::manager::TerminalManager;
     use crate::{db, git_credential, network, paths, process, web};
-    use crate::custom_hooks;
     use tauri::Manager;
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
@@ -710,24 +705,6 @@ mod tauri_app {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
 
-                // Global auto-accept flag (custom hooks): hydrate the in-process
-                // cache from `app_metadata` before any permission request can
-                // reach the gate (fail-closed OFF until loaded; the web handlers
-                // and toggles re-load lazily, so this is only a warm-up).
-                let auto_approve_db = crate::db::AppDatabase {
-                    conn: app.state::<crate::db::AppDatabase>().conn.clone(),
-                };
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) =
-                        custom_hooks::custom_auto_approve::init_global_auto_approve(
-                            &auto_approve_db,
-                        )
-                        .await
-                    {
-                        tracing::warn!("init_global_auto_approve failed: {e}");
-                    }
-                });
-
                 // Single-window workspace: ensure the main window exists.
                 // Workspace state (open folders, opened tabs, active tab) is
                 // restored by the frontend via `list_open_folder_details` /
@@ -1267,8 +1244,6 @@ mod tauri_app {
                 automation_commands::automation_compute_next_run,
                 automation_commands::automation_run_now,
                 automation_commands::automation_cancel_run,
-                custom_hooks::toggle_auto_approve_global,
-                custom_hooks::get_auto_approve_global,
                 token_usage_commands::token_usage_report,
                 token_usage_commands::token_usage_facets,
                 token_usage_commands::token_usage_status,

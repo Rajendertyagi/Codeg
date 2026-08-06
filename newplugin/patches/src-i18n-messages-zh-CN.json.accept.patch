@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
-index 8c846bc39b9f9b4257a621a2e5e3f272f73b7e3c..0000000000000000000000000000000000000000
+index a4bf787e352c4a8af55ed15d86f88a757cbfdc1e..0000000000000000000000000000000000000000
 --- a/src/i18n/messages/zh-CN.json
 +++ b/src/i18n/messages/zh-CN.json
-@@ -4240,2 +4240,3 @@
+@@ -4220,2 +4220,3 @@
      "actionMerge": "合并",
 +    "actionAccept": "接受",
-     "actionReturn": "打回",
+     "actionComplete": "完成",

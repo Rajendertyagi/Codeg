@@ -4609,36 +4609,6 @@ async fn handle_permission_request(
         }
     }
 
-    // Auto-accept gate (custom plugin): when the GLOBAL auto-accept toggle is
-    // on, answer the request with the first "allow" option the agent offered ΓÇö
-    // BEFORE it is parked or broadcast, so no subscriber (permission dialog,
-    // chat-channel relay, webhook) ever sees a stuck card. Resolves exactly
-    // like the `ConnectionCommand::RespondPermission` path (respond_selected ->
-    // `PermissionResolved`) so the agent sees an ordinary selected outcome.
-    // The toggle is app-wide (persisted in `app_metadata`); it deliberately
-    // consults no conversation/folder/sender context. When the toggle is off ΓÇö
-    // or the request offers no allow option ΓÇö fall through to the existing
-    // flow unchanged (never manufacture an approval the agent didn't offer).
-    let approved = crate::custom_hooks::custom_auto_approve::is_auto_approved()
-        .await
-        .unwrap_or(false);
-    tracing::warn!(
-        "auto-approve gate: approved={} option_kinds={:?}",
-        approved,
-        options.iter().map(|o| &o.kind).collect::<Vec<_>>()
-    );
-    if approved {
-        if let Some(allow_option) = options
-            .iter()
-            .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
-        {
-            PendingPermission::Acp(responder).respond_selected(allow_option.option_id.clone());
-            emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id })
-                .await;
-            return;
-        }
-    }
-
     perms
         .lock()
         .await

@@ -41,7 +41,6 @@ use crate::db::entities::work_task::WorkTaskStatus;
 use crate::db::entities::{folder, folder_command};
 use crate::db::service::{conversation_service, tab_service, work_task_service};
 use crate::db::AppDatabase;
-use crate::git_repo::is_git_repo;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
     AgentType, FollowUpIntent, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
@@ -780,7 +779,7 @@ impl TaskEngine {
         // "land" as a no-op tree match.
         let wt = if matches!(mode, LaunchMode::Merge { .. }) {
             self.existing_worktree(&task).await?
-        } else if is_git_repo(Path::new(&root.path)) {
+        } else {
             let wt = self.ensure_worktree(&task, &root).await?;
             // Run the folder's init command (deps install etc.) before the
             // agent ever sees the tree. Gated on the setup marker, NOT on "the
@@ -801,14 +800,6 @@ impl TaskEngine {
                 }
             }
             wt
-        } else {
-            // Non-Git folder (Local Folder): run directly in the selected
-            // directory with no worktree isolation. Git detection is a runtime
-            // property of the path, not a label on the row.
-            WorktreeRef {
-                folder_id: root.id,
-                path: root.path,
-            }
         };
 
         let _ = work_task_service::record_event(
@@ -831,20 +822,8 @@ impl TaskEngine {
         }
 
         // Resume the previous session for retry/return/merge when we have one.
-        // For Fresh tasks, resume an existing conversation if one is pinned.
         let resume_session_id = match mode {
-            LaunchMode::Fresh => {
-                if let Some(conv_id) = cfg.existing_conversation_id {
-                    conversation::Entity::find_by_id(conv_id)
-                        .one(&self.db.conn)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|c| c.external_id)
-                } else {
-                    None
-                }
-            }
+            LaunchMode::Fresh => None,
             LaunchMode::Retry | LaunchMode::Return { .. } | LaunchMode::Merge { .. } => {
                 match task.conversation_id {
                     Some(conv_id) => conversation::Entity::find_by_id(conv_id)
@@ -2616,17 +2595,12 @@ async fn compose_prompt(
 
     // The standing worktree guard — a merge generation replaces it with its
     // own instructions (it exists to forbid exactly what a merge must do).
-    // Skipped for non-Git tasks (no worktree, no branch to protect), except
-    // on read-only turns where the licence clause below is the last thing the
-    // agent reads and must hold even without a worktree.
     //
     // It is the LAST built-in block, so its licence clause is the last thing
     // the agent reads: a read-only turn has to swap that clause out, or "commit
     // to the current branch as you like" would quietly undo the intent's own
     // "don't touch any file" instruction several blocks earlier.
-    if !matches!(mode, LaunchMode::Merge { .. })
-        && (task.work_branch.is_some() || mode.is_read_only())
-    {
+    if !matches!(mode, LaunchMode::Merge { .. }) {
         let branch = task
             .work_branch
             .as_deref()

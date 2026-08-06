@@ -1,8 +1,8 @@
 diff --git a/src-tauri/src/web/router.rs b/src-tauri/src/web/router.rs
-index 05c9b01d..975fc42d 100644
+index a57fac30..f8e80bcf 100644
 --- a/src-tauri/src/web/router.rs
 +++ b/src-tauri/src/web/router.rs
-@@ -1146,6 +1146,15 @@ pub fn build_router(
+@@ -1174,6 +1174,15 @@ pub fn build_router(
              "/quick_messages_reorder",
              post(handlers::quick_messages::quick_messages_reorder),
          )
@@ -17,4 +17,4 @@ index 05c9b01d..975fc42d 100644
 +        )
          // ─── Automations ───
          .route(
-            "/automation_list",
+             "/automation_list",

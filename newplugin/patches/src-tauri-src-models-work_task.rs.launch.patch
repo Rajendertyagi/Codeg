@@ -1,0 +1,16 @@
+diff --git a/src-tauri/src/models/work_task.rs b/src-tauri/src/models/work_task.rs
+index 10735d5f..364969c6 100644
+--- a/src-tauri/src/models/work_task.rs
++++ b/src-tauri/src/models/work_task.rs
+@@ -110,6 +110,11 @@ pub struct WorkTaskConfig {
+     pub config_values: std::collections::BTreeMap<String, String>,
+     #[serde(default)]
+     pub label_snapshot: Option<serde_json::Value>,
++    /// When set, this task fires into an existing conversation (resuming its
++    /// external session) instead of creating a fresh one. `None` (the legacy
++    /// default) keeps the always-fresh behavior.
++    #[serde(default)]
++    pub existing_conversation_id: Option<i32>,
+ }
+ 
+ /// Per-folder defaults stored in `work_task_settings.config`.

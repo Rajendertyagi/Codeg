@@ -1,9 +1,9 @@
 diff --git a/src/lib/api.ts b/src/lib/api.ts
-index 0f97412e..761f5adf 100644
+index 06bb2ba0..34c61901 100644
 --- a/src/lib/api.ts
 +++ b/src/lib/api.ts
-@@ -2596,6 +2596,18 @@ export async function automationCancelRun(runId: number): Promise<void> {
-  return getTransport().call("automation_cancel_run", { runId })
+@@ -2811,6 +2811,18 @@ export async function automationCancelRun(runId: number): Promise<void> {
+   return getTransport().call("automation_cancel_run", { runId })
  }
  
 +// Global auto-accept (custom hooks)
@@ -20,4 +20,4 @@ index 0f97412e..761f5adf 100644
 +
  // Work tasks
  
-  export async function workTaskList(
+ export async function workTaskList(

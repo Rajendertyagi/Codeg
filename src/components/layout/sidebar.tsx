@@ -9,7 +9,6 @@ import {
   Search,
   ListTodo,
   SquarePen,
-  Workflow,
   Zap,
   type LucideIcon,
 } from "lucide-react"
@@ -436,12 +435,6 @@ export function Sidebar() {
               </span>
             ) : null
           }
-        />
-        <SidebarNavButton
-          icon={Workflow}
-          label="Custom Workflows"
-          active={routeId === "custom-workflows"}
-          onClick={() => setRoute("custom-workflows")}
         />
       </div>
 

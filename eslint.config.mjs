@@ -17,11 +17,6 @@ const eslintConfig = defineConfig([
     "src-tauri/target/**",
     "src-tauri/experts/**",
     "public/vs/**",
-    // Dead custom-workflow archive copies: unwired since the purge; their
-    // i18n namespace (CustomWorkflows) no longer exists. Kept as patch
-    // archive, excluded from lint + type-check.
-    "newplugin/frontend/automation-editor.tsx",
-    "newplugin/frontend/custom-page.tsx",
   ]),
   eslintConfigPrettier,
   eslintPluginPrettierRecommended,

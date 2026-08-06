@@ -22,19 +22,9 @@ import {
  * route: extend WorkbenchRouteId, add an entry below, and add a SidebarNavButton
  * that calls `setRoute("<id>")`.
  */
-/** Placeholder for the custom-workflows route — feature not in use. */
-function CustomWorkflowsPlaceholder() {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      Custom Workflows — not in use
-    </div>
-  )
-}
-
 const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
   automations: AutomationsPage,
   tasks: TasksPage,
-  "custom-workflows": CustomWorkflowsPlaceholder,
   tokenUsage: TokenUsagePage,
 }
 

@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
-index 3c2aee55..8ca955d0 100644
+index 8896456e..47098cf2 100644
 --- a/src/i18n/messages/en.json
 +++ b/src/i18n/messages/en.json
-@@ -2424,6 +2424,8 @@
+@@ -2498,6 +2498,8 @@
          "noModels": "No models found",
          "cancel": "Cancel",
          "send": "Send",
@@ -11,7 +11,7 @@ index 3c2aee55..8ca955d0 100644
          "forkAndSend": "Fork & Send",
          "queueMessage": "Queue message",
          "steerIntoTurn": "Insert into current turn",
-@@ -2603,6 +2605,9 @@
+@@ -2677,6 +2679,9 @@
          "plan": "Plan",
          "allowedActions": "Allowed actions",
          "targetMode": "Target mode: {mode}",
@@ -20,4 +20,4 @@ index 3c2aee55..8ca955d0 100644
 +        "deny": "Deny",
          "optionGrants": "What each option grants",
          "changeScopeSession": "This session",
-        "changeScopeProcess": "This run",
+         "changeScopeProcess": "This run",

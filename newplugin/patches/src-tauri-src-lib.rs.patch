@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
-index cc670429..c71bb5b4 100644
+index 14b9fbb3..f946b664 100644
 --- a/src-tauri/src/lib.rs
 +++ b/src-tauri/src/lib.rs
 @@ -9,6 +9,10 @@
@@ -13,7 +13,7 @@ index cc670429..c71bb5b4 100644
  pub use acp::{
      idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
  };
-@@ -78,6 +82,7 @@ mod tauri_app {
+@@ -80,6 +84,7 @@ mod tauri_app {
      };
      use crate::terminal::manager::TerminalManager;
      use crate::{db, git_credential, network, paths, process, web};
@@ -21,9 +21,9 @@ index cc670429..c71bb5b4 100644
      use tauri::Manager;
  
      static APP_QUITTING: AtomicBool = AtomicBool::new(false);
-@@ -703,6 +708,24 @@ mod tauri_app {
-                    tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
-                }
+@@ -705,6 +710,24 @@ mod tauri_app {
+                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
+                 }
  
 +                // Global auto-accept flag (custom hooks): hydrate the in-process
 +                // cache from `app_metadata` before any permission request can
@@ -43,15 +43,15 @@ index cc670429..c71bb5b4 100644
 +                    }
 +                });
 +
-                // Single-window workspace: ensure the main window exists.
+                 // Single-window workspace: ensure the main window exists.
                  // Workspace state (open folders, opened tabs, active tab) is
                  // restored by the frontend via `list_open_folder_details` /
-@@ -1235,6 +1270,8 @@ mod tauri_app {
-                automation_commands::automation_compute_next_run,
-                automation_commands::automation_run_now,
-                automation_commands::automation_cancel_run,
+@@ -1244,6 +1267,8 @@ mod tauri_app {
+                 automation_commands::automation_compute_next_run,
+                 automation_commands::automation_run_now,
+                 automation_commands::automation_cancel_run,
 +                custom_hooks::toggle_auto_approve_global,
 +                custom_hooks::get_auto_approve_global,
-                work_task_commands::work_task_list,
-                 work_task_commands::work_task_get,
-                 work_task_commands::work_task_events,
+                 token_usage_commands::token_usage_report,
+                 token_usage_commands::token_usage_facets,
+                 token_usage_commands::token_usage_status,

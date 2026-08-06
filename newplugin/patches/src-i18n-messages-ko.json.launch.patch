@@ -1,0 +1,28 @@
+diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
+index 710a6cd0..ad62c783 100644
+--- a/src/i18n/messages/ko.json
++++ b/src/i18n/messages/ko.json
+@@ -4175,7 +4175,22 @@
+     "branchLocal": "로컬",
+     "branchRemote": "원격",
+     "branchSearchPlaceholder": "브랜치 검색…",
+-    "branchNone": "브랜치 없음"
++    "branchNone": "브랜치 없음",
++    "launchTarget": "시작 대상",
++    "targetNewConversation": "새 대화",
++    "targetExistingConversation": "기존 대화",
++    "conversationSearchPlaceholder": "대화 검색…",
++    "conversationNone": "대화 없음",
++    "existingConversationHint": "실행할 때마다 이 대화를 재개하고 새 턴을 추가합니다(새 세션을 시작하지 않음).",
++    "errorTargetConversation": "재개할 대화를 선택하세요",
++    "targetKind": "실행 대상",
++    "targetGitWorkspace": "Git 워크스페이스",
++    "targetLocalFolder": "로컬 폴더",
++    "localFolderBrowse": "찾아보기…",
++    "localFolderPathPlaceholder": "절대 경로를 입력하세요",
++    "localFolderHint": "각 실행은 이 폴더에서 직접 수행되며 git 저장소·브랜치·워크트리를 사용하지 않습니다.",
++    "errorLocalFolder": "폴더 경로를 입력하세요",
++    "untitledConversation": "제목 없는 대화"
+   },
+   "Tasks": {
+     "title": "작업 보드",

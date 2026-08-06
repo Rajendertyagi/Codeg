@@ -1,14 +1,20 @@
 diff --git a/src/components/tasks/tasks-page.tsx b/src/components/tasks/tasks-page.tsx
-index 789bb83fab831ebc7aae1bcc1640135a47025bab..0000000000000000000000000000000000000000
+index 18030f5..a9a9753 100644
 --- a/src/components/tasks/tasks-page.tsx
 +++ b/src/components/tasks/tasks-page.tsx
-@@ -18,4 +18,5 @@
+@@ -17,6 +17,7 @@ import { useTasksView } from "@/contexts/tasks-view-context"
+ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
  import {
    workTaskArchive,
 +  workTaskAccept,
-   workTaskCancel,
    workTaskCreate,
-@@ -657,2 +658,3 @@
+   workTaskReorder,
+   workTaskStart,
+@@ -682,6 +683,7 @@ export function TasksPage() {
+                   onRequeue={() => openRestart(task, "requeue")}
+                   onViewSession={() => openSession(task)}
                    onMerge={() => openMerge(task)}
 +                  onAccept={() => void act(() => workTaskAccept(task.id))}
+                   onComplete={() => openComplete(task)}
                    onArchive={() =>
+                     void act(() =>

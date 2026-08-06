@@ -2811,62 +2811,6 @@ export async function automationCancelRun(runId: number): Promise<void> {
   return getTransport().call("automation_cancel_run", { runId })
 }
 
-// Global auto-accept (custom hooks)
-
-/** Read whether global auto-accept (the shield) is on. */
-export async function getGlobalAutoApprove(): Promise<{ enabled: boolean }> {
-  return getTransport().call("get_auto_approve_global")
-}
-
-/** Toggle global auto-accept; resolves with the new state. */
-export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
-  return getTransport().call("toggle_auto_approve_global")
-}
-
-// Custom Workflows (custom hooks)
-
-/** Outcome of the most recent fire, as persisted by the Rust scheduler. */
-export type WorkflowStatus = "idle" | "running" | "success" | "failed"
-
-export interface CustomWorkflow {
-  id: string
-  name: string
-  conversation_id: number
-  cron: string
-  prompt: string
-  enabled: boolean
-  last_run: string | null
-  last_status: WorkflowStatus
-  last_error: string
-  run_count: number
-  created_at: string
-}
-
-export async function listCustomWorkflows(): Promise<CustomWorkflow[]> {
-  return getTransport().call("list_custom_workflows")
-}
-
-export async function saveCustomWorkflow(
-  workflow: CustomWorkflow
-): Promise<void> {
-  return getTransport().call("save_custom_workflow", { workflow })
-}
-
-export async function deleteCustomWorkflow(id: string): Promise<void> {
-  return getTransport().call("delete_custom_workflow", { id })
-}
-
-export async function setCustomWorkflowEnabled(
-  id: string,
-  enabled: boolean
-): Promise<void> {
-  return getTransport().call("set_custom_workflow_enabled", { id, enabled })
-}
-
-export async function runCustomWorkflowNow(id: string): Promise<void> {
-  return getTransport().call("run_custom_workflow_now", { id })
-}
-
 // Work tasks
 
 export async function workTaskList(

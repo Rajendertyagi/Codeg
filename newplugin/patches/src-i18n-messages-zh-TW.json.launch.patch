@@ -1,0 +1,28 @@
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index 153eb74d..d2ab209b 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -4175,7 +4180,22 @@
+     "branchLocal": "本機",
+     "branchRemote": "遠端",
+     "branchSearchPlaceholder": "搜尋分支…",
+-    "branchNone": "無分支"
++    "branchNone": "無分支",
++    "launchTarget": "啟動目標",
++    "targetNewConversation": "新對話",
++    "targetExistingConversation": "既有對話",
++    "conversationSearchPlaceholder": "搜尋對話…",
++    "conversationNone": "沒有對話",
++    "existingConversationHint": "每次觸發將恢復此對話，在其中新增一輪，而不是啟動新工作階段。",
++    "errorTargetConversation": "請選擇要恢復的對話",
++    "targetKind": "目標根目錄",
++    "targetGitWorkspace": "Git 工作區",
++    "targetLocalFolder": "本機資料夾",
++    "localFolderBrowse": "瀏覽…",
++    "localFolderPathPlaceholder": "輸入絕對資料夾路徑",
++    "localFolderHint": "每次執行會直接在此資料夾中進行——不涉及 git 存放庫、分支或工作樹。",
++    "errorLocalFolder": "請輸入資料夾路徑",
++    "untitledConversation": "未命名對話"
+   },
+   "Tasks": {
+     "title": "任務看板",

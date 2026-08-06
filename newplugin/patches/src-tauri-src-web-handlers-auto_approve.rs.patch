@@ -1,32 +1,18 @@
 diff --git a/src-tauri/src/web/handlers/auto_approve.rs b/src-tauri/src/web/handlers/auto_approve.rs
-index 35e72f0d..2678cdcd 100644
---- a/src-tauri/src/web/handlers/auto_approve.rs
+new file mode 100644
+index 00000000..cfacc233
+--- /dev/null
 +++ b/src-tauri/src/web/handlers/auto_approve.rs
-@@ -1,27 +1,44 @@
--use axum::Json;
--use serde::Deserialize;
+@@ -0,0 +1,44 @@
 +use std::sync::Arc;
- 
--use crate::app_error::AppCommandError;
--use crate::custom_hooks::custom_auto_approve;
++
 +use axum::{Extension, Json};
- 
--#[derive(Deserialize)]
--#[serde(rename_all = "camelCase")]
--pub struct ConversationAutoApproveParams {
--    pub conversation_id: i32,
--}
++
 +use crate::app_error::{AppCommandError, AppErrorCode};
 +use crate::app_state::AppState;
 +use crate::custom_hooks::custom_auto_approve;
 +use crate::custom_hooks::{AutoApproveGetResult, AutoApproveToggleResult};
- 
--pub async fn conversation_auto_approve_get(
--    Json(params): Json<ConversationAutoApproveParams>,
--) -> Result<Json<bool>, AppCommandError> {
--    Ok(Json(custom_auto_approve::get_conversation_auto_approve(
--        params.conversation_id,
--    )))
++
 +/// Read the GLOBAL auto-accept state (persisted in `app_metadata`). No
 +/// conversation/sender scoping: the toggle is app-wide and applies to every
 +/// permission-request surface.
@@ -43,14 +29,8 @@ index 35e72f0d..2678cdcd 100644
 +            ))
 +        }
 +    }
- }
- 
--pub async fn conversation_auto_approve_toggle(
--    Json(params): Json<ConversationAutoApproveParams>,
--) -> Result<Json<bool>, AppCommandError> {
--    Ok(Json(custom_auto_approve::toggle_conversation_auto_approve(
--        params.conversation_id,
--    )))
++}
++
 +/// Flip the GLOBAL auto-accept toggle; resolves with the new state. Persists to
 +/// `app_metadata` before returning, so the permission-request gate sees the new
 +/// value immediately and it survives restarts.
@@ -67,4 +47,4 @@ index 35e72f0d..2678cdcd 100644
 +            ))
 +        }
 +    }
- }
++}

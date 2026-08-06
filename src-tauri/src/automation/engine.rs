@@ -32,8 +32,7 @@ use crate::commands::folders::{
     git_worktree_add, open_worktree_folder_core, resolve_worktree_folder_core,
 };
 use crate::db::entities::conversation::{self, ConversationStatus};
-use crate::db::entities::folder::FolderKind;
-use crate::db::service::{automation_service, conversation_service, folder_service};
+use crate::db::service::automation_service;
 use crate::db::AppDatabase;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
@@ -97,11 +96,6 @@ struct ResolvedCwd {
     folder_id: i32,
     working_dir: String,
     worktree_folder_id: Option<i32>,
-    /// The resolved folder row's kind — drives which conversation kind a fresh
-    /// launch creates, so the `(conversation.kind, folder.kind)` pair always
-    /// matches a combination the frontend renders today (folderless-chat or
-    /// regular-folder), never a mixed one.
-    folder_kind: FolderKind,
 }
 
 /// Build the engine and publish it to the process global, then return the handle
@@ -388,7 +382,6 @@ impl AutomationEngine {
             mode_id: cfg.mode_id.clone(),
             config_values: cfg.config_values.clone(),
             label_snapshot: cfg.label_snapshot.clone(),
-            existing_conversation_id: None,
         };
         let draft = crate::models::WorkTaskDraft {
             folder_id,
@@ -441,40 +434,7 @@ impl AutomationEngine {
             return Err("prompt is empty".to_string());
         }
 
-        // Resume target: when the config pins an existing conversation, fire into
-        // that row (resuming its external session) instead of creating a fresh
-        // conversation. The row lookup is I/O glue (core); the fresh-vs-resume
-        // decision lives in the Layer-2 backend (`newplugin_backend`). Resolved
-        // BEFORE `resolve_cwd` so a vanished/deleted target fails fast without
-        // creating a per-run worktree.
-        let pinned_target = match cfg.existing_conversation_id {
-            Some(conv_id) => Some(
-                conversation_service::get_by_id(&self.db.conn, conv_id)
-                    .await
-                    .map_err(|e| format!("target conversation {conv_id}: {e}"))?,
-            ),
-            None => None,
-        };
-        let launch_target = newplugin_backend::launch_target::decide(
-            cfg.existing_conversation_id,
-            pinned_target.as_ref().map(|conv| {
-                newplugin_backend::launch_target::TargetConversationView {
-                    id: conv.id,
-                    folder_id: conv.folder_id,
-                    external_id: conv.external_id.clone(),
-                }
-            }),
-        )
-        .map_err(|vanished| format!("target conversation {} not found", vanished.0))?;
-        let resume_session_id = match &launch_target {
-            newplugin_backend::launch_target::LaunchTarget::Fresh => None,
-            newplugin_backend::launch_target::LaunchTarget::Resume {
-                resume_session_id,
-                ..
-            } => resume_session_id.clone(),
-        };
-
-        let cwd = self.resolve_cwd(auto, &cfg, run_id).await?;
+        let cwd = self.resolve_cwd(auto, run_id).await?;
 
         // Announce the resolved working folder so every client's sidebar knows it
         // BEFORE the conversation upsert below lands — a conversation in a fresh
@@ -486,13 +446,10 @@ impl AutomationEngine {
         }
 
         // Recompute env from current settings (never snapshotted); hard-fail
-        // visibly if the agent is disabled or not installed. A pinned target
-        // passes its session id so per-session env (e.g. OpenClaw's reset flag)
-        // matches a resume, exactly like the UI / work-task resume paths.
-        let runtime_env =
-            build_session_runtime_env(&self.db, agent_type, resume_session_id.as_deref(), &self.data_dir)
-                .await
-                .map_err(|e| e.to_string())?;
+        // visibly if the agent is disabled or not installed.
+        let runtime_env = build_session_runtime_env(&self.db, agent_type, None, &self.data_dir)
+            .await
+            .map_err(|e| e.to_string())?;
         verify_agent_installed(agent_type)
             .await
             .map_err(|e| e.to_string())?;
@@ -520,15 +477,13 @@ impl AutomationEngine {
             return Ok(());
         }
 
-        // New conversation → fresh connection (session_id=None); pinned target →
-        // resume its external session (`spawn_agent` dedup re-attaches an
-        // already-live one for the same session). Owner-labelled "automation".
+        // Fresh connection (session_id=None), owner-labelled "automation".
         let conn_id = self
             .manager
             .spawn_agent(
                 agent_type,
                 Some(cwd.working_dir.clone()),
-                resume_session_id,
+                None,
                 runtime_env,
                 "automation".to_string(),
                 self.emitter.clone(),
@@ -538,49 +493,17 @@ impl AutomationEngine {
             .await
             .map_err(|e| e.to_string())?;
 
-        // Conversation row: adopt the pinned target (Branch A in
-        // send_prompt_linked, which re-flips it InProgress and backfills a fresh
-        // external session if the target never ran) or create a fresh one for a
-        // new conversation. The prompt groups under the row's own folder when
-        // resuming, the per-run worktree folder otherwise.
-        let (conversation_id, prompt_folder_id) = match launch_target {
-            newplugin_backend::launch_target::LaunchTarget::Resume {
-                conversation_id,
-                folder_id,
-                ..
-            } => (conversation_id, Some(folder_id)),
-            newplugin_backend::launch_target::LaunchTarget::Fresh => {
-                let title = first_chars(&cfg.display_text, 80);
-                // A fresh conversation in a hidden runtime folder is a
-                // folderless-chat row (kind follows the folder); one in a real
-                // workspace folder is a regular row. Both (kind, folder.kind)
-                // combinations are rendered by the sidebar today.
-                let conversation_id = match cwd.folder_kind {
-                    FolderKind::Chat => conversation_service::create_chat(
-                        &self.db.conn,
-                        cwd.folder_id,
-                        agent_type,
-                        Some(title),
-                        None,
-                    )
-                    .await
-                    .map(|model| model.id)
-                    .map_err(|e| e.to_string()),
-                    FolderKind::Regular => {
-                        create_conversation_core(&self.db.conn, cwd.folder_id, agent_type, Some(title))
-                            .await
-                            .map_err(|e| e.to_string())
-                    }
-                };
-                match conversation_id {
-                    Ok(id) => (id, Some(cwd.folder_id)),
-                    Err(e) => {
-                        let _ = self.manager.disconnect(&conn_id).await;
-                        return Err(e);
-                    }
+        // Create the conversation row, then adopt it in send_prompt (Branch A).
+        let title = first_chars(&cfg.display_text, 80);
+        let conversation_id =
+            match create_conversation_core(&self.db.conn, cwd.folder_id, agent_type, Some(title)).await
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    let _ = self.manager.disconnect(&conn_id).await;
+                    return Err(e.to_string());
                 }
-            }
-        };
+            };
 
         // Surface the produced conversation in every client's sidebar the instant
         // it exists (InProgress) — independent of the implicit upsert inside
@@ -621,13 +544,7 @@ impl AutomationEngine {
         if run_no_longer_running(&self.db.conn, run_id).await {
             self.index.lock().await.remove(&conn_id);
             let _ = self.manager.disconnect(&conn_id).await;
-            // Converge only a row this launch created/flipped InProgress: a
-            // pinned target untouched by this launch keeps its status.
-            if self.conversation_status(conversation_id).await
-                == Some(ConversationStatus::InProgress)
-            {
-                self.cancel_conversation(conversation_id).await;
-            }
+            self.cancel_conversation(conversation_id).await;
             return Ok(());
         }
 
@@ -637,7 +554,7 @@ impl AutomationEngine {
                 &self.db,
                 &conn_id,
                 blocks,
-                prompt_folder_id,
+                Some(cwd.folder_id),
                 Some(conversation_id),
                 None,
                 None,
@@ -648,221 +565,130 @@ impl AutomationEngine {
             Err(e) => {
                 self.index.lock().await.remove(&conn_id);
                 let _ = self.manager.disconnect(&conn_id).await;
-                // A new conversation row was created `InProgress`, and a prompt on
-                // a pinned target flips its row InProgress too (in the manager)
-                // before enqueue; with the prompt never sent and the connection
-                // gone, no TurnComplete will flip it and reconcile won't revisit
-                // a Failed run — so flip it terminal here to avoid stranding a
-                // stuck-in-progress conversation. Guard on InProgress so a pinned
-                // target whose send failed BEFORE the flip keeps its status.
-                if self.conversation_status(conversation_id).await
-                    == Some(ConversationStatus::InProgress)
-                {
-                    self.cancel_conversation(conversation_id).await;
-                }
+                // The conversation row was created `InProgress`; with the prompt
+                // never sent and the connection gone, no TurnComplete will flip it
+                // and reconcile won't revisit a Failed run — so flip it terminal
+                // here to avoid stranding a stuck-in-progress conversation.
+                self.cancel_conversation(conversation_id).await;
                 Err(e.to_string())
             }
         }
     }
 
-    /// Resolve the working directory for a run from `(target kind, isolation,
-    /// branch)`. A GitWorkspace target reuses the existing worktree/checkout
-    /// machinery; a LocalFolder target runs directly in the configured path with
-    /// no git involvement (isolation and branch are ignored — there is no repo
-    /// state to switch). v1 requires exactly one target.
-    async fn resolve_cwd(
-        &self,
-        auto: &AutomationInfo,
-        cfg: &AutomationConfig,
-        run_id: i32,
-    ) -> Result<ResolvedCwd, String> {
-        let target = newplugin_backend::target_kind::decide(
-            auto.root_folder_id,
-            cfg.local_folder_path.as_deref(),
-        )
-        .map_err(|e| {
-            match e {
-                newplugin_backend::target_kind::TargetError::NoTarget => {
-                    "automation has no target folder".to_string()
-                }
-                newplugin_backend::target_kind::TargetError::Ambiguous => {
-                    "automation targets both a workspace folder and a local folder; clear one"
-                        .to_string()
-                }
-                newplugin_backend::target_kind::TargetError::EmptyLocalFolder => {
-                    "automation target folder path is empty".to_string()
-                }
-            }
-        })?;
+    /// Resolve the working directory for a run from `(root_folder_id, isolation,
+    /// branch)`, reusing the existing worktree/checkout machinery. v1 requires a
+    /// target folder (folderless deferred).
+    async fn resolve_cwd(&self, auto: &AutomationInfo, run_id: i32) -> Result<ResolvedCwd, String> {
+        let Some(root_folder_id) = auto.root_folder_id else {
+            return Err("automation has no target folder".to_string());
+        };
+        let root = get_folder_core(&self.db, root_folder_id)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        match target {
-            newplugin_backend::target_kind::TargetKind::LocalFolder { working_dir } => {
-                // Fail fast on a bogus path BEFORE any row churn, mirroring the
-                // worktree branch's fail-fast philosophy: a missing directory can
-                // only be caught here, at fire time (the editor stores the path,
-                // it does not verify it).
-                if !std::path::Path::new(&working_dir).is_dir() {
-                    return Err(format!(
-                        "automation target folder does not exist: {working_dir}"
-                    ));
-                }
-                // The fresh-launch conversation row requires a NOT-NULL
-                // `folder_id` FK, and this run must execute in the configured
-                // directory, so the folder row is anchored at the user's path.
-                // Reuse an existing row for that path (a user-opened workspace or
-                // a prior run's row) so nothing duplicate is minted; otherwise
-                // mint a Regular folder — a normal user folder that surfaces in
-                // the sidebar. Git detection is a runtime property of the path,
-                // not a label on the row, so the Git chrome auto-hides for
-                // non-repos.
-                let folder = folder_service::get_or_create_automation_folder(
-                    &self.db.conn,
-                    &working_dir,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-                let folder_id = folder.id;
-                Ok(ResolvedCwd {
-                    folder_id,
-                    working_dir,
-                    // Run history links its folder via
-                    // `worktree_folder_id ?? root_folder_id`; a local run has no
-                    // root_folder_id, so surface the runtime folder here.
-                    worktree_folder_id: Some(folder_id),
-                    folder_kind: folder.kind,
-                })
-            }
+        match auto.isolation {
+            IsolationMode::WorktreePerRun => {
+                // Fresh isolated worktree per run; names carry the automation +
+                // run id so `git worktree list` / the branch tree groups them.
+                let branch = format!("automation/{}/run-{}", auto.id, run_id);
+                let dir = format!(
+                    "{}-automation-{}-run-{}",
+                    basename(&root.path),
+                    auto.id,
+                    run_id
+                );
+                let mut wt_path = sibling_path(&root.path, &dir);
 
-            newplugin_backend::target_kind::TargetKind::GitWorkspace => {
-                let Some(root_folder_id) = auto.root_folder_id else {
-                    return Err("automation has no target folder".to_string());
-                };
-                let root = get_folder_core(&self.db, root_folder_id)
+                // Retry once with a short suffix if a leftover collides (a prior
+                // attempt for this run id that failed before cleanup).
+                if let Err(e) =
+                    git_worktree_add(root.path.clone(), branch.clone(), wt_path.clone(), None).await
+                {
+                    let suffix = short_suffix(run_id);
+                    let branch2 = format!("{branch}-{suffix}");
+                    wt_path = sibling_path(&root.path, &format!("{dir}-{suffix}"));
+                    git_worktree_add(root.path.clone(), branch2, wt_path.clone(), None)
+                        .await
+                        .map_err(|_| format!("worktree add failed: {e}"))?;
+                }
+
+                let wt = open_worktree_folder_core(&self.db, wt_path, root_folder_id)
                     .await
                     .map_err(|e| e.to_string())?;
+                Ok(ResolvedCwd {
+                    folder_id: wt.id,
+                    working_dir: wt.path,
+                    worktree_folder_id: Some(wt.id),
+                })
+            }
+            IsolationMode::SharedInRoot => {
+                let Some(branch) = auto.branch.clone() else {
+                    // No branch pinned: run in the root tree as-is.
+                    return Ok(ResolvedCwd {
+                        folder_id: root_folder_id,
+                        working_dir: root.path,
+                        worktree_folder_id: None,
+                    });
+                };
 
-                match auto.isolation {
-                    IsolationMode::WorktreePerRun => {
-                        // Fresh isolated worktree per run; names carry the
-                        // automation + run id so `git worktree list` / the branch
-                        // tree groups them.
-                        let branch = format!("automation/{}/run-{}", auto.id, run_id);
-                        let dir = format!(
-                            "{}-automation-{}-run-{}",
-                            basename(&root.path),
-                            auto.id,
-                            run_id
-                        );
-                        let mut wt_path = sibling_path(&root.path, &dir);
+                // Serialize checkout per root so concurrent shared runs can't
+                // corrupt each other's index during the switch.
+                let lock = self.root_lock(root_folder_id).await;
+                let _guard = lock.lock().await;
 
-                        // Retry once with a short suffix if a leftover collides
-                        // (a prior attempt for this run id that failed before
-                        // cleanup).
-                        if let Err(e) = git_worktree_add(
-                            root.path.clone(),
-                            branch.clone(),
-                            wt_path.clone(),
-                            None,
-                        )
+                let resolution =
+                    resolve_worktree_folder_core(&self.db, root.path.clone(), branch.clone())
                         .await
-                        {
-                            let suffix = short_suffix(run_id);
-                            let branch2 = format!("{branch}-{suffix}");
-                            wt_path = sibling_path(&root.path, &format!("{dir}-{suffix}"));
-                            git_worktree_add(root.path.clone(), branch2, wt_path.clone(), None)
+                        .map_err(|e| e.to_string())?;
+                match resolution.path {
+                    Some(path) => Ok(ResolvedCwd {
+                        folder_id: resolution.folder_id.unwrap_or(root_folder_id),
+                        working_dir: path,
+                        worktree_folder_id: resolution.folder_id,
+                    }),
+                    None => {
+                        // A remote pick stores the stripped leaf name, and a bare
+                        // `git checkout <leaf>` silently prefers a same-named local
+                        // branch (possibly divergent) over the intended remote.
+                        // Refuse that ambiguity loudly rather than run the wrong
+                        // branch. With no local match the checkout below DWIMs a
+                        // unique remote into a tracking branch (and git raises its
+                        // own error when multiple remotes share the name).
+                        if auto.is_remote_branch {
+                            let locals = git_list_branches(root.path.clone())
                                 .await
-                                .map_err(|_| format!("worktree add failed: {e}"))?;
+                                .map_err(|e| e.to_string())?;
+                            if locals.iter().any(|b| b == &branch) {
+                                return Err(format!(
+                                    "automation targets remote branch '{branch}' but a local \
+                                     branch of that name exists — use a per-run worktree or \
+                                     remove the local branch"
+                                ));
+                            }
                         }
-
-                        let wt = open_worktree_folder_core(&self.db, wt_path, root_folder_id)
+                        // Switching the user's shared root tree to the target
+                        // branch must not drag their uncommitted work along: a
+                        // dirty tree would carry those edits onto the target
+                        // branch (or make `git checkout` fail). Refuse loudly and
+                        // tell them to commit/stash or use a per-run worktree.
+                        if !git_is_clean(root.path.clone())
+                            .await
+                            .map_err(|e| e.to_string())?
+                        {
+                            return Err(format!(
+                                "the shared root working tree has uncommitted changes, so it \
+                                 can't be switched to '{branch}' — commit or stash them, or \
+                                 use a per-run worktree for this automation"
+                            ));
+                        }
+                        git_checkout(root.path.clone(), branch)
                             .await
                             .map_err(|e| e.to_string())?;
                         Ok(ResolvedCwd {
-                            folder_id: wt.id,
-                            working_dir: wt.path,
-                            worktree_folder_id: Some(wt.id),
-                            folder_kind: FolderKind::Regular,
+                            folder_id: root_folder_id,
+                            working_dir: root.path,
+                            worktree_folder_id: None,
                         })
-                    }
-                    IsolationMode::SharedInRoot => {
-                        let Some(branch) = auto.branch.clone() else {
-                            // No branch pinned: run in the root tree as-is.
-                            return Ok(ResolvedCwd {
-                                folder_id: root_folder_id,
-                                working_dir: root.path,
-                                worktree_folder_id: None,
-                                folder_kind: root.kind,
-                            });
-                        };
-
-                        // Serialize checkout per root so concurrent shared runs
-                        // can't corrupt each other's index during the switch.
-                        let lock = self.root_lock(root_folder_id).await;
-                        let _guard = lock.lock().await;
-
-                        let resolution = resolve_worktree_folder_core(
-                            &self.db,
-                            root.path.clone(),
-                            branch.clone(),
-                        )
-                        .await
-                        .map_err(|e| e.to_string())?;
-                        match resolution.path {
-                            Some(path) => Ok(ResolvedCwd {
-                                folder_id: resolution.folder_id.unwrap_or(root_folder_id),
-                                working_dir: path,
-                                worktree_folder_id: resolution.folder_id,
-                                folder_kind: FolderKind::Regular,
-                            }),
-                            None => {
-                                // A remote pick stores the stripped leaf name, and
-                                // a bare `git checkout <leaf>` silently prefers a
-                                // same-named local branch (possibly divergent)
-                                // over the intended remote. Refuse that ambiguity
-                                // loudly rather than run the wrong branch. With no
-                                // local match the checkout below DWIMs a unique
-                                // remote into a tracking branch (and git raises
-                                // its own error when multiple remotes share the
-                                // name).
-                                if auto.is_remote_branch {
-                                    let locals = git_list_branches(root.path.clone())
-                                        .await
-                                        .map_err(|e| e.to_string())?;
-                                    if locals.iter().any(|b| b == &branch) {
-                                        return Err(format!(
-                                            "automation targets remote branch '{branch}' but a \
-                                             local branch of that name exists — use a per-run \
-                                             worktree or remove the local branch"
-                                        ));
-                                    }
-                                }
-                                // Switching the user's shared root tree to the
-                                // target branch must not drag their uncommitted
-                                // work along: a dirty tree would carry those edits
-                                // onto the target branch (or make `git checkout`
-                                // fail). Refuse loudly and tell them to
-                                // commit/stash or use a per-run worktree.
-                                if !git_is_clean(root.path.clone())
-                                    .await
-                                    .map_err(|e| e.to_string())?
-                                {
-                                    return Err(format!(
-                                        "the shared root working tree has uncommitted changes, \
-                                         so it can't be switched to '{branch}' — commit or stash \
-                                         them, or use a per-run worktree for this automation"
-                                    ));
-                                }
-                                git_checkout(root.path.clone(), branch)
-                                    .await
-                                    .map_err(|e| e.to_string())?;
-                                Ok(ResolvedCwd {
-                                    folder_id: root_folder_id,
-                                    working_dir: root.path,
-                                    worktree_folder_id: None,
-                                    folder_kind: root.kind,
-                                })
-                            }
-                        }
                     }
                 }
             }

@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
-index ef5dc82c..5eda78a0 100644
+index a4bf787e..fd1d4398 100644
 --- a/src/i18n/messages/zh-CN.json
 +++ b/src/i18n/messages/zh-CN.json
-@@ -2424,6 +2424,8 @@
+@@ -2498,6 +2498,8 @@
          "noModels": "未找到模型",
          "cancel": "取消",
          "send": "发送",
@@ -11,7 +11,7 @@ index ef5dc82c..5eda78a0 100644
          "forkAndSend": "分叉发送",
          "queueMessage": "加入队列",
          "steerIntoTurn": "插入当前回合",
-@@ -2603,6 +2605,9 @@
+@@ -2677,6 +2679,9 @@
          "plan": "计划",
          "allowedActions": "允许的操作",
          "targetMode": "目标模式：{mode}",
@@ -20,5 +20,4 @@ index ef5dc82c..5eda78a0 100644
 +        "deny": "拒绝",
          "optionGrants": "各选项将授予的权限",
          "changeScopeSession": "本次会话",
-        "changeScopeProcess": "本次运行",
-     "searchPlaceholder": "按名称、ID 或描述搜索自定义技能",
+         "changeScopeProcess": "本次运行",
