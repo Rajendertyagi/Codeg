@@ -8,14 +8,14 @@ Working guidance for Code Agent when working in this repository (Codeg).
 
 ## Core System Profile
 
-- **ROLE:** Building a custom platform **on top of** Codeg.
+- **ROLE:** Building a custom platform **on top of** Codeg — all custom work lives in `newplugin/`, never in engine files.
 - **POLICY:** Never edit Codeg native engine files. Manage custom files/hooks only.
 
 ## Immutable Architect Rules
 
 1. **Codeg = base platform/engine.** The custom platform is layered on top of it.
 2. **Never edit Codeg native engine files** - this covers the Rust engine (`src-tauri/src/**`), the core TypeScript engine, and vendored native components.
-3. **Custom work lives in `newplugin/` and custom platform files only.** New features for the custom platform are expressed as custom hooks, adapters, and extension points - not as patches to the engine.
+3. **Custom work lives in `newplugin/` only** — `newplugin/patches/` (apply-on-demand engine/frontend patches), `newplugin/hooks/` (out-of-tree Rust hooks), `newplugin/backend/`, `newplugin/frontend/`. New features are delivered as patches in `newplugin/patches/` and/or `newplugin/` hooks — never as edits to engine files.
 4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged as open debt with `file:line` citations, never silently fixed.
 
 ## Carried State (repo invariants)
@@ -66,7 +66,7 @@ server/Docker deployment.
 
 1. **Branch discipline**
    - `main` is a clean upstream mirror. NEVER commit to, modify, or merge into it.
-   - All work happens on `plugin-dev` (or a task branch off it).
+   - All work happens on `plugin-dev` (legacy branch name; the custom layer is `newplugin/`), or a task branch off it.
 2. **Audit-first development**
    - Architecture understanding is done as phased audits; each phase produces a report
      under `audit/` (e.g. `audit/<phase>.md`) committed to `plugin-dev`.
