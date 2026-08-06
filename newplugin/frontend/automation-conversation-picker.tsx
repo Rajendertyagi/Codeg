@@ -63,7 +63,7 @@ export function AutomationConversationPicker({
   onChange,
   placeholder,
 }: AutomationConversationPickerProps) {
-  const t = useTranslations("Automations")
+  const t = useTranslations("Folder")
   const [open, setOpen] = useState(false)
   const [conversations, setConversations] = useState<
     DbConversationSummary[] | null
@@ -113,7 +113,7 @@ export function AutomationConversationPicker({
     if (!open) setQuery("")
   }
 
-  const untitled = t("untitledConversation")
+  const untitled = t("search.untitledConversation")
   const selected = conversations?.find((c) => c.id === value) ?? null
   const triggerLabel = selected
     ? conversationTitle(selected, untitled)
@@ -164,7 +164,7 @@ export function AutomationConversationPicker({
       <PopoverContent align="start" className="w-80 overflow-hidden p-0">
         <Command className="rounded-2xl">
           <CommandInput
-            placeholder={t("conversationSearchPlaceholder")}
+            placeholder={t("sidebar.searchPlaceholder")}
             value={query}
             onValueChange={setQuery}
           />
@@ -178,7 +178,7 @@ export function AutomationConversationPicker({
               </div>
             ) : (
               <>
-                <CommandEmpty>{t("conversationNone")}</CommandEmpty>
+                <CommandEmpty>{t("sidebar.noConversationsFound")}</CommandEmpty>
                 {visible.length > 0 ? (
                   <CommandGroup>
                     {visible.map((c) => (

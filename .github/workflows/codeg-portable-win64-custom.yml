@@ -1,4 +1,4 @@
-name: Build Codeg Portable Windows x64 (custom hooks)
+name: Build Codeg Portable Windows x64
 
 on:
   push:
@@ -22,9 +22,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # The vendor patch content is migrated into the tree (F1-F6), so no
-      # `git apply` step here - the per-file patches under `newplugin/patches/`
-      # document the already-applied seams; CI builds the tree as-is.
+      # Patch-archive model (2026-08-06): the tree is 100% pure origin/main;
+      # custom features are OFF by default and archived as apply-on-demand
+      # patches under newplugin/patches/. This build compiles the pure tree.
+      # To build WITH a feature, first apply its patches, e.g.
+      #   git apply newplugin/patches/<file>.patch
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
