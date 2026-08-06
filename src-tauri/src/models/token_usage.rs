@@ -246,9 +246,16 @@ pub struct TokenUsageSyncResult {
     pub synced: u32,
     /// Conversations skipped because nothing changed since the last pass.
     pub skipped: u32,
-    /// Conversations whose transcript could not be parsed. Their previous facts
-    /// are left untouched.
+    /// Conversations that hit a real fault — a transcript that would not parse,
+    /// a write that errored. Their previous facts are left untouched and the
+    /// next pass retries them. This is the only counter the UI treats as bad
+    /// news, so it must never carry a state the user cannot act on.
     pub failed: u32,
+    /// Conversations whose transcript is gone. Their recorded facts are kept
+    /// exactly as they were and their stamp is settled, so a source that can
+    /// never be re-derived stops being re-attempted (and re-reported) on every
+    /// pass. Not a failure: nothing was lost that was not already lost on disk.
+    pub lost: u32,
     pub turns_written: u64,
     pub tokens_written: u64,
     /// Fact rows dropped because their conversation no longer exists.
