@@ -25,7 +25,8 @@
 //! `record_event` with the same kind/payload shape.
 
 use chrono::Utc;
-use sea_orm::{ColumnTrait, EntityTrait, Expr, QueryFilter};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 
 use crate::db::entities::work_task::{self, WorkTaskStatus};
 use crate::db::service::work_task_service::{self, record_event};
