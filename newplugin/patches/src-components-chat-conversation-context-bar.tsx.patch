@@ -1,7 +1,22 @@
 diff --git a/src/components/chat/conversation-context-bar.tsx b/src/components/chat/conversation-context-bar.tsx
-index ba445d70..997cf1e0 100644
+index ba445d70..b7e461d9 100644
 --- a/src/components/chat/conversation-context-bar.tsx
 +++ b/src/components/chat/conversation-context-bar.tsx
+@@ -392,11 +392,11 @@ interface FolderPickerProps {
+   labelEmpty: string
+   labelSearch: string
+   /** Label for the pinned "no-folder (chat) mode" item at the bottom. */
+-  labelChatMode: string
++  labelChatMode?: string
+   /** Whether the draft is currently in chat mode (shows the check mark). */
+-  isChatMode: boolean
++  isChatMode?: boolean
+   /** Select folderless chat mode. */
+-  onSelectChatMode: () => void
++  onSelectChatMode?: () => void
+   /** Trigger appearance. `"chip"` (default) = folder icon + name + chevron, the
+    *  compact below-input row (mobile). `"header"` = bare text sized to the
+    *  conversation title, alias-aware, themed while editable — the desktop
 @@ -405,9 +405,12 @@ interface FolderPickerProps {
    /** Folder alias for the `"header"` variant's `alias [ name ]` label (rendered
     *  via {@link FolderAliasLabel}). Ignored by the chip variant. */
@@ -16,8 +31,16 @@ index ba445d70..997cf1e0 100644
    folders,
    currentFolderId,
    currentFolderName,
-@@ -421,6 +424,7 @@ const FolderPicker = memo(function FolderPicker({
-   onSelectChatMode,
+@@ -416,11 +419,12 @@ const FolderPicker = memo(function FolderPicker({
+   onSelect,
+   labelEmpty,
+   labelSearch,
+-  labelChatMode,
+-  isChatMode,
+-  onSelectChatMode,
++  labelChatMode = "",
++  isChatMode = false,
++  onSelectChatMode = () => {},
    variant = "chip",
    alias = null,
 +  hideChatMode = false,
