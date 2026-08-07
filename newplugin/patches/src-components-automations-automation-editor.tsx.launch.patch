@@ -1,5 +1,5 @@
 diff --git a/src/components/automations/automation-editor.tsx b/src/components/automations/automation-editor.tsx
-index ca2f1809..e9805897 100644
+index ca2f1809..fb20f8c8 100644
 --- a/src/components/automations/automation-editor.tsx
 +++ b/src/components/automations/automation-editor.tsx
 @@ -2,7 +2,7 @@
@@ -29,7 +29,15 @@ index ca2f1809..e9805897 100644
  import {
    Select,
    SelectContent,
-@@ -84,6 +88,21 @@ export function AutomationEditor({
+@@ -38,6 +42,7 @@ import {
+   SelectValue,
+ } from "@/components/ui/select"
+ import { cn } from "@/lib/utils"
++import { excludeChatFolders, filterTopLevelFolders } from "@/lib/folder-display"
+ import { automationComputeNextRun } from "@/lib/api"
+ import type {
+   AgentType,
+@@ -84,6 +89,21 @@ export function AutomationEditor({
    const t = useTranslations("Automations")
    const folders = useAppWorkspaceStore((s) => s.folders)
  
@@ -51,7 +59,7 @@ index ca2f1809..e9805897 100644
    const [name, setName] = useState(automation?.name ?? "")
    const [action, setAction] = useState<AutomationAction>(
      automation?.config?.action ?? "launch_session"
-@@ -120,6 +139,23 @@ export function AutomationEditor({
+@@ -120,6 +140,23 @@ export function AutomationEditor({
    const [isRemoteBranch, setIsRemoteBranch] = useState(
      automation?.is_remote_branch ?? false
    )
@@ -75,7 +83,7 @@ index ca2f1809..e9805897 100644
    const [error, setError] = useState<string | null>(null)
    const [saving, setSaving] = useState(false)
    const [nextRun, setNextRun] = useState<string | null>(null)
-@@ -132,9 +168,15 @@ export function AutomationEditor({
+@@ -132,15 +169,21 @@ export function AutomationEditor({
    // silently swapping it (see the submit handler).
    const userChoseAgentRef = useRef(false)
  
@@ -93,7 +101,14 @@ index ca2f1809..e9805897 100644
    )
  
    // Task boards bind to project roots only — the enqueue action narrows the
-@@ -151,7 +193,8 @@ export function AutomationEditor({
+   // folder choice accordingly (sessions can still target any folder).
+   const projectFolders = useMemo(
+-    () => folders.filter((f) => f.parent_id == null && f.kind === "regular"),
++    () => excludeChatFolders(filterTopLevelFolders(folders)),
+     [folders]
+   )
+   const selectableFolders = action === "enqueue_task" ? projectFolders : folders
+@@ -151,7 +194,8 @@ export function AutomationEditor({
    // config. Block saving until the path is known. The run's working dir is
    // resolved server-side from folderId regardless, so this only keeps the saved
    // config snapshot scoped to the right folder.
@@ -103,7 +118,7 @@ index ca2f1809..e9805897 100644
  
    const { groupLabels: referenceGroupLabels, uiLabels: mentionUiLabels } =
      useComposerMentionLabels()
-@@ -207,12 +250,24 @@ export function AutomationEditor({
+@@ -207,12 +251,24 @@ export function AutomationEditor({
    useEffect(() => {
      if (
        folderId == null &&
@@ -129,7 +144,7 @@ index ca2f1809..e9805897 100644
  
    const submit = async () => {
      setError(null)
-@@ -221,11 +276,23 @@ export function AutomationEditor({
+@@ -221,11 +277,23 @@ export function AutomationEditor({
      if (!name.trim()) return setError(t("errorName"))
      if (!displayText) return setError(t("errorPrompt"))
      if (trigger === "schedule" && !cron.trim()) return setError(t("errorCron"))
@@ -154,7 +169,7 @@ index ca2f1809..e9805897 100644
  
      const blocks: PromptInputBlock[] = editor
        ? docToPromptBlocks(editor)
-@@ -247,7 +314,16 @@ export function AutomationEditor({
+@@ -247,7 +315,16 @@ export function AutomationEditor({
        // Capture friendly labels for the chosen agent/folder/mode/options so the
        // detail page renders names, not raw value ids — and keeps doing so if the
        // agent is later uninstalled or the folder removed.
@@ -172,7 +187,7 @@ index ca2f1809..e9805897 100644
        // If the saved agent is unavailable on this device, AgentSelector shows a
        // substitute via onFallback. That swap is display-only: persisting it would
        // silently change the automation's agent (and invalidate its per-agent
-@@ -264,12 +340,23 @@ export function AutomationEditor({
+@@ -264,12 +341,23 @@ export function AutomationEditor({
        const label_snapshot = {
          agent_label: getAgentLabel(agentType) ?? agentType,
          ...(folderName ? { folder_label: folderName } : {}),
@@ -196,7 +211,7 @@ index ca2f1809..e9805897 100644
        const draft: AutomationDraft = {
          name: name.trim(),
          // Enable/disable lives on the detail header + row menu now; preserve an
-@@ -279,14 +366,20 @@ export function AutomationEditor({
+@@ -279,14 +367,20 @@ export function AutomationEditor({
          cron: trigger === "schedule" ? cron.trim() : null,
          timezone,
          agent_type: persistedAgentType,
@@ -221,7 +236,7 @@ index ca2f1809..e9805897 100644
              ? isRemoteBranch
              : false,
          config: fellBackToSubstitute
-@@ -300,6 +393,10 @@ export function AutomationEditor({
+@@ -300,6 +394,10 @@ export function AutomationEditor({
                config_values: automation.config?.config_values ?? {},
                label_snapshot:
                  automation.config?.label_snapshot ?? label_snapshot,
@@ -232,7 +247,7 @@ index ca2f1809..e9805897 100644
              }
            : {
                action,
-@@ -308,6 +405,13 @@ export function AutomationEditor({
+@@ -308,6 +406,13 @@ export function AutomationEditor({
                mode_id,
                config_values,
                label_snapshot,
@@ -246,7 +261,7 @@ index ca2f1809..e9805897 100644
              },
        }
        await onSubmit(draft)
-@@ -462,85 +566,199 @@ export function AutomationEditor({
+@@ -462,85 +567,199 @@ export function AutomationEditor({
              {t("actionEnqueueTaskHint")}
            </p>
          ) : null}
