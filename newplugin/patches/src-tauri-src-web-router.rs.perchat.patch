@@ -1,0 +1,16 @@
+diff --git a/src-tauri/src/web/router.rs b/src-tauri/src/web/router.rs
+--- a/src-tauri/src/web/router.rs
++++ b/src-tauri/src/web/router.rs
+@@ -1183,4 +1183,10 @@ pub fn build_router(
+         .route(
+             "/toggle_auto_approve_global",
+             post(handlers::auto_approve::auto_approve_global_toggle),
+         )
++        .route(
++            "/get_auto_approve_conversation",
++            post(handlers::auto_approve::auto_approve_conversation_get),
++        )
++        .route(
++            "/toggle_auto_approve_conversation",
++            post(handlers::auto_approve::auto_approve_conversation_toggle),
++        )

@@ -1,0 +1,9 @@
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1269,2 +1269,4 @@ mod tauri_app {
+                 custom_hooks::toggle_auto_approve_global,
+                 custom_hooks::get_auto_approve_global,
++                custom_hooks::toggle_auto_approve_conversation,
++                custom_hooks::get_auto_approve_conversation,
+                 token_usage_commands::token_usage_report,

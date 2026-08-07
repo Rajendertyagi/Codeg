@@ -24,11 +24,11 @@ pub mod web_workflows;
 #[tauri::command]
 pub async fn toggle_auto_approve_global(
     db: tauri::State<'_, crate::db::AppDatabase>,
+    manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
 ) -> Result<AutoApproveToggleResult, String> {
-    // Delegate to the persistence-backed implementation (persists to
-    // `app_metadata` before returning, so the gate and every consumer see the
-    // new value immediately and it survives restarts).
-    match custom_auto_approve::toggle_global_auto_approve(&db).await {
+    // Delegate to the shared orchestration (persists to `app_metadata`, then
+    // reconciles every parked card when flipping ON).
+    match custom_auto_approve::toggle_global_auto_approve_core(&db, &manager).await {
         Ok(enabled) => {
             tracing::info!("auto_approve toggled globally enabled={enabled}");
             Ok(AutoApproveToggleResult { enabled })
@@ -65,6 +65,53 @@ pub struct AutoApproveToggleResult {
 #[derive(serde::Serialize)]
 pub struct AutoApproveGetResult {
     pub enabled: bool,
+}
+
+/// Per-conversation auto-accept result: the EFFECTIVE state plus the RAW
+/// override, so callers (and future Auto/On/Off tri-state UI) can distinguish
+/// an explicit per-chat ON (`overrideState = true`) from an inherited global
+/// state (`overrideState = null`).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoApproveConversationResult {
+    pub enabled: bool,
+    pub override_state: Option<bool>,
+}
+
+/// Toggle PER-CONVERSATION auto-accept (runtime only, in-memory). Flips the
+/// raw override — absent -> explicit ON, present -> remove (inherit global).
+/// An effective OFF -> ON transition reconciles already-parked permission
+/// cards for that conversation.
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn toggle_auto_approve_conversation(
+    conversation_id: i32,
+    manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
+) -> Result<AutoApproveConversationResult, String> {
+    match custom_auto_approve::toggle_per_chat_auto_approve_core(&manager, conversation_id).await {
+        Ok(result) => {
+            tracing::info!(
+                "auto_approve toggled per-chat conversation_id={conversation_id} enabled={} override={:?}",
+                result.enabled,
+                result.override_state
+            );
+            Ok(result)
+        }
+        Err(e) => {
+            tracing::warn!("toggle_per_chat_auto_approve failed error={e}");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Read the EFFECTIVE auto-accept state + raw override for a conversation
+/// (explicit override wins, else the global flag).
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn get_auto_approve_conversation(
+    conversation_id: i32,
+) -> Result<AutoApproveConversationResult, String> {
+    Ok(custom_auto_approve::get_per_chat_auto_approve_result(conversation_id))
 }
 
 /// Save (insert or replace) a custom workflow.
