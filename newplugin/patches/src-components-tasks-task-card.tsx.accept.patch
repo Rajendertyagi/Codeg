@@ -1,5 +1,5 @@
 diff --git a/src/components/tasks/task-card.tsx b/src/components/tasks/task-card.tsx
-index aa1d851..2f9226b 100644
+index aa1d851e..ce59e7c9 100644
 --- a/src/components/tasks/task-card.tsx
 +++ b/src/components/tasks/task-card.tsx
 @@ -125,6 +125,8 @@ interface TaskCardProps {
@@ -11,7 +11,15 @@ index aa1d851..2f9226b 100644
    /** Takes the merge slot when the task changed nothing (see
     *  `hasNothingToMerge`) — accepts it outright instead. */
    onComplete: () => void
-@@ -247,15 +249,19 @@ export function TaskCard({
+@@ -198,6 +200,7 @@ export function TaskCard({
+   onRequeue,
+   onViewSession,
+   onMerge,
++  onAccept,
+   onComplete,
+   onArchive,
+   onEdit,
+@@ -247,15 +250,19 @@ export function TaskCard({
          primary = { icon: Ban, label: t("actionCancel"), onClick: onCancel }
          break
        case "review":
