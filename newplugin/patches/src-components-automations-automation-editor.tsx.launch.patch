@@ -1,5 +1,5 @@
 diff --git a/src/components/automations/automation-editor.tsx b/src/components/automations/automation-editor.tsx
-index ca2f1809..ac93f68a 100644
+index ca2f1809..e9805897 100644
 --- a/src/components/automations/automation-editor.tsx
 +++ b/src/components/automations/automation-editor.tsx
 @@ -2,7 +2,7 @@
@@ -7,19 +7,21 @@ index ca2f1809..ac93f68a 100644
  import { useEffect, useMemo, useRef, useState } from "react"
  import { getAgentLabel } from "@/lib/custom-agents"
 -import { ArrowLeft, Folder, Globe, Wand2 } from "lucide-react"
-+import { ArrowLeft, Folder, FolderOpen, Globe, Wand2 } from "lucide-react"
++import { ArrowLeft, Folder, Globe, Plus, Wand2 } from "lucide-react"
  import { useTranslations } from "next-intl"
  import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
  import { AgentSelector } from "@/components/chat/agent-selector"
-@@ -20,6 +20,7 @@ import {
+@@ -20,6 +20,9 @@ import {
    snapshotLabels,
  } from "./agent-config-section"
  import { AutomationBranchPicker } from "./automation-branch-picker"
 +import { AutomationConversationPicker } from "../../../newplugin/frontend/automation-conversation-picker"
++import { FolderPicker } from "@/components/chat/conversation-context-bar"
++import { WorkspaceFolderDialog } from "@/components/layout/workspace-folder-dialog"
  import {
    ComposerInvocationsPopup,
    useComposerInvocations,
-@@ -30,6 +31,7 @@ import { Button } from "@/components/ui/button"
+@@ -30,6 +33,7 @@ import { Button } from "@/components/ui/button"
  import { Checkbox } from "@/components/ui/checkbox"
  import { Input } from "@/components/ui/input"
  import { Label } from "@/components/ui/label"
@@ -27,15 +29,29 @@ index ca2f1809..ac93f68a 100644
  import {
    Select,
    SelectContent,
-@@ -38,6 +40,7 @@ import {
-   SelectValue,
- } from "@/components/ui/select"
- import { cn } from "@/lib/utils"
-+import { openFileDialog } from "@/lib/platform"
- import { automationComputeNextRun } from "@/lib/api"
- import type {
-   AgentType,
-@@ -120,6 +123,23 @@ export function AutomationEditor({
+@@ -84,6 +88,21 @@ export function AutomationEditor({
+   const t = useTranslations("Automations")
+   const folders = useAppWorkspaceStore((s) => s.folders)
+ 
++  // Local-folder picker: whether the native "Add Folder" dialog is open, plus a
++  // resolved view of the saved path so the registry picker can highlight the
++  // active row. An unknown/external path (not in the registry) resolves to null
++  // and the picker shows the raw path leaf instead.
++  const [addFolderOpen, setAddFolderOpen] = useState(false)
++  const localFolderMatch = useMemo(
++    () => folders.find((f) => f.path === localFolderPath.trim()) ?? null,
++    [folders, localFolderPath]
++  )
++  const localFolderId = localFolderMatch?.id ?? -1
++  const localFolderDisplayName =
++    localFolderMatch?.name ??
++    localFolderPath.trim().split(/[\\/]/).filter(Boolean).pop() ??
++    t("targetLocalFolder")
++
+   const [name, setName] = useState(automation?.name ?? "")
+   const [action, setAction] = useState<AutomationAction>(
+     automation?.config?.action ?? "launch_session"
+@@ -120,6 +139,23 @@ export function AutomationEditor({
    const [isRemoteBranch, setIsRemoteBranch] = useState(
      automation?.is_remote_branch ?? false
    )
@@ -59,7 +75,7 @@ index ca2f1809..ac93f68a 100644
    const [error, setError] = useState<string | null>(null)
    const [saving, setSaving] = useState(false)
    const [nextRun, setNextRun] = useState<string | null>(null)
-@@ -132,9 +152,15 @@ export function AutomationEditor({
+@@ -132,9 +168,15 @@ export function AutomationEditor({
    // silently swapping it (see the submit handler).
    const userChoseAgentRef = useRef(false)
  
@@ -77,31 +93,17 @@ index ca2f1809..ac93f68a 100644
    )
  
    // Task boards bind to project roots only — the enqueue action narrows the
-@@ -151,7 +177,22 @@ export function AutomationEditor({
+@@ -151,7 +193,8 @@ export function AutomationEditor({
    // config. Block saving until the path is known. The run's working dir is
    // resolved server-side from folderId regardless, so this only keeps the saved
    // config snapshot scoped to the right folder.
 -  const folderPathResolving = folderId != null && folderPath == null
 +  const folderPathResolving =
 +    targetKind === "workspace" && folderId != null && folderPath == null
-+
-+  // Desktop: native directory picker. Web/server mode has no filesystem access
-+  // to the server, so `openFileDialog` falls back to a typed-path prompt there.
-+  const browseLocalFolder = async () => {
-+    try {
-+      const picked = await openFileDialog({
-+        directory: true,
-+        title: t("localFolderBrowse"),
-+      })
-+      if (typeof picked === "string" && picked) setLocalFolderPath(picked)
-+    } catch {
-+      // Dialog unavailable or dismissed — leave the typed path as-is.
-+    }
-+  }
  
    const { groupLabels: referenceGroupLabels, uiLabels: mentionUiLabels } =
      useComposerMentionLabels()
-@@ -207,12 +248,24 @@ export function AutomationEditor({
+@@ -207,12 +250,24 @@ export function AutomationEditor({
    useEffect(() => {
      if (
        folderId == null &&
@@ -127,7 +129,7 @@ index ca2f1809..ac93f68a 100644
  
    const submit = async () => {
      setError(null)
-@@ -221,11 +274,23 @@ export function AutomationEditor({
+@@ -221,11 +276,23 @@ export function AutomationEditor({
      if (!name.trim()) return setError(t("errorName"))
      if (!displayText) return setError(t("errorPrompt"))
      if (trigger === "schedule" && !cron.trim()) return setError(t("errorCron"))
@@ -152,7 +154,7 @@ index ca2f1809..ac93f68a 100644
  
      const blocks: PromptInputBlock[] = editor
        ? docToPromptBlocks(editor)
-@@ -247,7 +312,16 @@ export function AutomationEditor({
+@@ -247,7 +314,16 @@ export function AutomationEditor({
        // Capture friendly labels for the chosen agent/folder/mode/options so the
        // detail page renders names, not raw value ids — and keeps doing so if the
        // agent is later uninstalled or the folder removed.
@@ -170,7 +172,7 @@ index ca2f1809..ac93f68a 100644
        // If the saved agent is unavailable on this device, AgentSelector shows a
        // substitute via onFallback. That swap is display-only: persisting it would
        // silently change the automation's agent (and invalidate its per-agent
-@@ -264,12 +338,23 @@ export function AutomationEditor({
+@@ -264,12 +340,23 @@ export function AutomationEditor({
        const label_snapshot = {
          agent_label: getAgentLabel(agentType) ?? agentType,
          ...(folderName ? { folder_label: folderName } : {}),
@@ -194,7 +196,7 @@ index ca2f1809..ac93f68a 100644
        const draft: AutomationDraft = {
          name: name.trim(),
          // Enable/disable lives on the detail header + row menu now; preserve an
-@@ -279,14 +364,20 @@ export function AutomationEditor({
+@@ -279,14 +366,20 @@ export function AutomationEditor({
          cron: trigger === "schedule" ? cron.trim() : null,
          timezone,
          agent_type: persistedAgentType,
@@ -219,7 +221,7 @@ index ca2f1809..ac93f68a 100644
              ? isRemoteBranch
              : false,
          config: fellBackToSubstitute
-@@ -300,6 +391,10 @@ export function AutomationEditor({
+@@ -300,6 +393,10 @@ export function AutomationEditor({
                config_values: automation.config?.config_values ?? {},
                label_snapshot:
                  automation.config?.label_snapshot ?? label_snapshot,
@@ -230,7 +232,7 @@ index ca2f1809..ac93f68a 100644
              }
            : {
                action,
-@@ -308,6 +403,13 @@ export function AutomationEditor({
+@@ -308,6 +405,13 @@ export function AutomationEditor({
                mode_id,
                config_values,
                label_snapshot,
@@ -244,7 +246,7 @@ index ca2f1809..ac93f68a 100644
              },
        }
        await onSubmit(draft)
-@@ -462,85 +564,183 @@ export function AutomationEditor({
+@@ -462,85 +566,199 @@ export function AutomationEditor({
              {t("actionEnqueueTaskHint")}
            </p>
          ) : null}
@@ -322,7 +324,35 @@ index ca2f1809..ac93f68a 100644
 -              <Folder
 -                className="size-3.5 text-muted-foreground"
 -                aria-hidden="true"
--              />
++            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++              <RadioGroupItem value="workspace" />
++              {t("targetGitWorkspace")}
++            </label>
++            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
++              <RadioGroupItem value="local_folder" />
++              {t("targetLocalFolder")}
++            </label>
++          </RadioGroup>
++        ) : null}
++
++        {targetKind === "local_folder" && action === "launch_session" ? (
++          <div className="flex flex-col gap-2">
++            <div className="flex flex-wrap items-center gap-2">
++              <FolderPicker
++                variant="chip"
++                folders={projectFolders}
++                currentFolderId={localFolderId}
++                currentFolderName={localFolderDisplayName}
++                title={t("targetLocalFolder")}
++                editable
++                onSelect={(id) => {
++                  const f = folders.find((x) => x.id === id)
++                  if (f) setLocalFolderPath(f.path)
++                }}
++                labelEmpty={t("localFolderEmpty")}
++                labelSearch={t("folderPlaceholder")}
++                hideChatMode
+               />
 -              <SelectValue placeholder={t("folderPlaceholder")} />
 -            </SelectTrigger>
 -            <SelectContent>
@@ -346,14 +376,37 @@ index ca2f1809..ac93f68a 100644
 -              onChange={(b, isRemote) => {
 -                setBranch(b)
 -                setIsRemoteBranch(isRemote)
--              }}
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                onClick={() => setAddFolderOpen(true)}
++                className="h-7 gap-1.5 text-xs"
++              >
++                <Plus
++                  className="size-3.5 text-muted-foreground"
++                  aria-hidden="true"
++                />
++                {t("addFolder")}
++              </Button>
++            </div>
++            <p className="text-xs text-muted-foreground">
++              {t("localFolderHint")}
++            </p>
++            <WorkspaceFolderDialog
++              open={addFolderOpen}
++              onOpenChange={setAddFolderOpen}
++              onFolderOpened={(f) => {
++                setLocalFolderPath(f.path)
++                setAddFolderOpen(false)
+               }}
 -              placeholder={t("branchPlaceholder")}
 -              disabled={folderId == null}
 -              // shared_in_root checks the branch out in the root tree, which
 -              // can't track a remote-only branch — the backend rejects that
 -              // combination, so don't offer it here.
 -              allowRemote={false}
--            />
+             />
 -          ) : null}
 -
 -          {action === "launch_session" ? (
@@ -376,44 +429,7 @@ index ca2f1809..ac93f68a 100644
 -          <p className="text-xs text-muted-foreground">
 -            {t("isolationSharedCaveat")}
 -          </p>
-+            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-+              <RadioGroupItem value="workspace" />
-+              {t("targetGitWorkspace")}
-+            </label>
-+            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-+              <RadioGroupItem value="local_folder" />
-+              {t("targetLocalFolder")}
-+            </label>
-+          </RadioGroup>
-         ) : null}
-+
-+        {targetKind === "local_folder" && action === "launch_session" ? (
-+          <div className="flex flex-col gap-2">
-+            <div className="flex flex-wrap items-center gap-2">
-+              <Input
-+                value={localFolderPath}
-+                onChange={(e) => setLocalFolderPath(e.target.value)}
-+                placeholder={t("localFolderPathPlaceholder")}
-+                aria-label={t("targetLocalFolder")}
-+                className="h-7 flex-1 text-xs"
-+              />
-+              <Button
-+                type="button"
-+                variant="outline"
-+                size="sm"
-+                onClick={browseLocalFolder}
-+                className="h-7 gap-1.5 text-xs"
-+              >
-+                <FolderOpen
-+                  className="size-3.5 text-muted-foreground"
-+                  aria-hidden="true"
-+                />
-+                {t("localFolderBrowse")}
-+              </Button>
-+            </div>
-+            <p className="text-xs text-muted-foreground">
-+              {t("localFolderHint")}
-+            </p>
+-        ) : null}
 +          </div>
 +        ) : (
 +          <>

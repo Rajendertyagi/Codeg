@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
-index 710a6cd0..ad62c783 100644
+index 710a6cd0..9a223a8b 100644
 --- a/src/i18n/messages/ko.json
 +++ b/src/i18n/messages/ko.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "로컬",
      "branchRemote": "원격",
      "branchSearchPlaceholder": "브랜치 검색…",
@@ -22,7 +22,9 @@ index 710a6cd0..ad62c783 100644
 +    "localFolderPathPlaceholder": "절대 경로를 입력하세요",
 +    "localFolderHint": "각 실행은 이 폴더에서 직접 수행되며 git 저장소·브랜치·워크트리를 사용하지 않습니다.",
 +    "errorLocalFolder": "폴더 경로를 입력하세요",
-+    "untitledConversation": "제목 없는 대화"
++    "untitledConversation": "제목 없는 대화",
++    "addFolder": "폴더 추가…",
++    "localFolderEmpty": "사용 가능한 폴더 없음"
    },
    "Tasks": {
      "title": "작업 보드",

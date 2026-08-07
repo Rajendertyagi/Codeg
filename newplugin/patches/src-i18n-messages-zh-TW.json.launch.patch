@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
-index 153eb74d..d2ab209b 100644
+index 153eb74d..a813598c 100644
 --- a/src/i18n/messages/zh-TW.json
 +++ b/src/i18n/messages/zh-TW.json
-@@ -4175,7 +4180,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "本機",
      "branchRemote": "遠端",
      "branchSearchPlaceholder": "搜尋分支…",
@@ -22,7 +22,9 @@ index 153eb74d..d2ab209b 100644
 +    "localFolderPathPlaceholder": "輸入絕對資料夾路徑",
 +    "localFolderHint": "每次執行會直接在此資料夾中進行——不涉及 git 存放庫、分支或工作樹。",
 +    "errorLocalFolder": "請輸入資料夾路徑",
-+    "untitledConversation": "未命名對話"
++    "untitledConversation": "未命名對話",
++    "addFolder": "新增資料夾…",
++    "localFolderEmpty": "沒有可用資料夾"
    },
    "Tasks": {
      "title": "任務看板",

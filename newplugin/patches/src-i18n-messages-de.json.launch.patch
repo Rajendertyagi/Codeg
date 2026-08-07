@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/de.json b/src/i18n/messages/de.json
-index 11a73382..fadfe06f 100644
+index 11a73382..37218e24 100644
 --- a/src/i18n/messages/de.json
 +++ b/src/i18n/messages/de.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "Lokal",
      "branchRemote": "Remote",
      "branchSearchPlaceholder": "Branches suchen…",
@@ -22,7 +22,9 @@ index 11a73382..fadfe06f 100644
 +    "localFolderPathPlaceholder": "Absoluten Ordnerpfad eingeben",
 +    "localFolderHint": "Jede Ausführung arbeitet direkt in diesem Ordner — ohne Git-Repository, Branch oder Worktree.",
 +    "errorLocalFolder": "Ordnerpfad eingeben",
-+    "untitledConversation": "Unbenannte Unterhaltung"
++    "untitledConversation": "Unbenannte Unterhaltung",
++    "addFolder": "Ordner hinzufügen…",
++    "localFolderEmpty": "Keine Ordner verfügbar"
    },
    "Tasks": {
      "title": "Aufgabenboard",

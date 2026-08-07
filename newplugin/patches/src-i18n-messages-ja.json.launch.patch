@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
-index c800d1be..c97e0f07 100644
+index c800d1be..33950760 100644
 --- a/src/i18n/messages/ja.json
 +++ b/src/i18n/messages/ja.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "ローカル",
      "branchRemote": "リモート",
      "branchSearchPlaceholder": "ブランチを検索…",
@@ -22,7 +22,9 @@ index c800d1be..c97e0f07 100644
 +    "localFolderPathPlaceholder": "絶対パスを入力",
 +    "localFolderHint": "各実行はこのフォルダー内で直接行われます（git リポジトリ・ブランチ・ワークツリーは関与しません）。",
 +    "errorLocalFolder": "フォルダーのパスを入力してください",
-+    "untitledConversation": "名前のない会話"
++    "untitledConversation": "名前のない会話",
++    "addFolder": "フォルダを追加…",
++    "localFolderEmpty": "利用可能なフォルダはありません"
    },
    "Tasks": {
      "title": "タスクボード",

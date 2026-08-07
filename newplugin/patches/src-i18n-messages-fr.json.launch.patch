@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
-index ccac2750..6d781a7c 100644
+index ccac2750..6340a673 100644
 --- a/src/i18n/messages/fr.json
 +++ b/src/i18n/messages/fr.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "Locale",
      "branchRemote": "Distante",
      "branchSearchPlaceholder": "Rechercher des branches…",
@@ -22,7 +22,9 @@ index ccac2750..6d781a7c 100644
 +    "localFolderPathPlaceholder": "Saisissez un chemin absolu",
 +    "localFolderHint": "Chaque exécution travaille directement dans ce dossier, sans dépôt git, branche ni worktree.",
 +    "errorLocalFolder": "Saisissez un chemin de dossier",
-+    "untitledConversation": "Conversation sans titre"
++    "untitledConversation": "Conversation sans titre",
++    "addFolder": "Ajouter un dossier…",
++    "localFolderEmpty": "Aucun dossier disponible"
    },
    "Tasks": {
      "title": "Tableau des tâches",

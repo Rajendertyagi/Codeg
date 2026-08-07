@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/es.json b/src/i18n/messages/es.json
-index 73c1ed46..a0b53a70 100644
+index 73c1ed46..2ff52629 100644
 --- a/src/i18n/messages/es.json
 +++ b/src/i18n/messages/es.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "Local",
      "branchRemote": "Remota",
      "branchSearchPlaceholder": "Buscar ramas…",
@@ -22,7 +22,9 @@ index 73c1ed46..a0b53a70 100644
 +    "localFolderPathPlaceholder": "Introduce una ruta absoluta",
 +    "localFolderHint": "Cada ejecución trabaja directamente en esta carpeta, sin repositorio git, rama ni worktree.",
 +    "errorLocalFolder": "Introduce una ruta de carpeta",
-+    "untitledConversation": "Conversación sin título"
++    "untitledConversation": "Conversación sin título",
++    "addFolder": "Añadir carpeta…",
++    "localFolderEmpty": "No hay carpetas disponibles"
    },
    "Tasks": {
      "title": "Tablero de tareas",

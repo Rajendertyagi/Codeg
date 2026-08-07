@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/ar.json b/src/i18n/messages/ar.json
-index 07037e89..757c2860 100644
+index 07037e89..25638a10 100644
 --- a/src/i18n/messages/ar.json
 +++ b/src/i18n/messages/ar.json
-@@ -4175,7 +4175,22 @@
+@@ -4175,7 +4175,24 @@
      "branchLocal": "محلي",
      "branchRemote": "بعيد",
      "branchSearchPlaceholder": "بحث في الفروع…",
@@ -22,7 +22,9 @@ index 07037e89..757c2860 100644
 +    "localFolderPathPlaceholder": "أدخل مسار مجلد مطلقًا",
 +    "localFolderHint": "يعمل كل تشغيل مباشرة في هذا المجلد — دون مستودع git أو فرع أو شجرة عمل.",
 +    "errorLocalFolder": "أدخل مسار المجلد",
-+    "untitledConversation": "محادثة بدون عنوان"
++    "untitledConversation": "محادثة بدون عنوان",
++    "addFolder": "إضافة مجلد…",
++    "localFolderEmpty": "لا توجد مجلدات متاحة"
    },
    "Tasks": {
      "title": "لوحة المهام",

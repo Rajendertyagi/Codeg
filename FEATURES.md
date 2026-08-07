@@ -14,7 +14,7 @@ committed custom files under `newplugin/hooks/`, `newplugin/backend/`, and
 The CI workflow `.github/workflows/codeg-portable-win64-custom.yml` applies all
 patches in dependency order **before building** the portable Windows app:
 
-1. 17 auto-approve patches (`.patch`)
+1. 18 patches (`.patch`): 17 auto-approve + 1 `FolderPicker` export (used by the local-folder selector)
 2. 16 task-accept patches (`.accept.patch`)
 3. 20 launch-target patches (`.launch.patch`)
 4. 13 custom-workflows tab patches (`.customtab.patch`)
@@ -156,7 +156,15 @@ instead of requiring a git worktree.
 | `newplugin/patches/src-tauri-src-db-service-folder_service.rs.launch.patch` | Folder/kind support for Local Folder |
 | `newplugin/patches/src-lib-types.ts.launch.patch` | TS type mirrors |
 | `newplugin/patches/src-components-tasks-task-editor-dialog.tsx.launch.patch` | Task editor target UI |
+| `newplugin/patches/src-components-chat-conversation-context-bar.tsx.patch` | Exports native `FolderPicker` + `hideChatMode` (group 1 — applied **before** launch patches so the editor can import it) |
 | `newplugin/patches/src-i18n-messages-{en,zh-CN,zh-TW,ja,ko,es,de,fr,pt,ar}.json.launch.patch` | UI strings (10 locales) |
+
+**Local-folder selector reuse (UI):** the automation editor's `local_folder` target no
+longer uses a text `<Input>` + `[Browse…]`. It reuses the native, registry-backed
+`FolderPicker` (filtered to `kind === "regular"`, top-level — i.e. FolderKind::Regular
+only) with a native `+ Add Folder…` action (`WorkspaceFolderDialog`) that auto-selects
+the new folder. `FolderPicker` is exported from `conversation-context-bar.tsx` via the
+group-1 patch above; `config.local_folder_path` is unchanged.
 
 ---
 
@@ -264,5 +272,5 @@ dispatch.
 | 4 | Scheduled automation → existing chat | Wired | (within launch group) | `frontend/automation-conversation-picker.tsx` |
 | 5 | Custom Workflows tab | Placeholder only | 13 | `frontend/custom-workflows-page.tsx` |
 
-**Total: 66 patches** (17 + 16 + 20 + 13) + committed custom files in
+**Total: 67 patches** (18 + 16 + 20 + 13) + committed custom files in
 `newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/`.
