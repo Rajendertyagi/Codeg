@@ -1,24 +1,40 @@
 diff --git a/src/components/conversations/conversation-detail-header.tsx b/src/components/conversations/conversation-detail-header.tsx
+index 9047b678..4a57afd8 100644
 --- a/src/components/conversations/conversation-detail-header.tsx
 +++ b/src/components/conversations/conversation-detail-header.tsx
-@@ -3,1 +3,1 @@
+@@ -1,6 +1,6 @@
+ "use client"
+ 
 -import { memo, useCallback, useState } from "react"
 +import { memo, useCallback, useEffect, useState } from "react"
-@@ -11,3 +11,5 @@
+ import {
+   ChevronRight,
+   Circle,
+@@ -9,17 +9,22 @@ import {
+   Pencil,
+   Pin,
    PinOff,
 +  Shield,
 +  ShieldCheck,
    SquarePen,
    Trash2,
-@@ -17,2 +17,4 @@
+ } from "lucide-react"
+ import { useTranslations } from "next-intl"
+ import {
    deleteConversation,
 +  getConversationAutoApprove,
 +  toggleConversationAutoApprove,
    updateConversationPinned,
-@@ -22,1 +22,2 @@
+   updateConversationStatus,
+   updateConversationTitle,
+ } from "@/lib/api"
  import { formatConversationTitle } from "@/lib/conversation-title"
 +import { cn } from "@/lib/utils"
-@@ -235,3 +235,28 @@
+ import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-context-bar"
+ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+ import { useTabActions } from "@/contexts/tab-context"
+@@ -234,6 +239,41 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+     setDetails(resolved)
    }, [conversationId, runtimeConversationId, runtimeId])
  
 +  // Per-conversation auto-accept shield (custom hooks): runtime-only, in
@@ -57,7 +73,11 @@ diff --git a/src/components/conversations/conversation-detail-header.tsx b/src/c
 +  const autoApproveOffLabel = t.has("autoApproveOff") ? t("autoApproveOff") : "Auto-accept: off"
 +
    return (
-@@ -260,2 +260,15 @@
+     // Transparent (no surface class): the title header reads as part of the
+     // message canvas below it rather than as a frosted chrome band. With a
+@@ -258,6 +298,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+         </span>
+       </div>
        <div className="flex shrink-0 items-center">
 +        <Button
 +          onClick={handleToggleAutoApprove}
@@ -72,3 +92,5 @@ diff --git a/src/components/conversations/conversation-detail-header.tsx b/src/c
 +          {autoApprove ? <ShieldCheck className="size-4" /> : <Shield className="size-4" />}
 +        </Button>
          <DropdownMenu>
+           <DropdownMenuTrigger asChild>
+             <button

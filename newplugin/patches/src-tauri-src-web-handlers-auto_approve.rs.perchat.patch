@@ -1,12 +1,21 @@
 diff --git a/src-tauri/src/web/handlers/auto_approve.rs b/src-tauri/src/web/handlers/auto_approve.rs
+index cfacc233..27122cb0 100644
 --- a/src-tauri/src/web/handlers/auto_approve.rs
 +++ b/src-tauri/src/web/handlers/auto_approve.rs
-@@ -8,1 +8,4 @@
+@@ -5,7 +5,9 @@ use axum::{Extension, Json};
+ use crate::app_error::{AppCommandError, AppErrorCode};
+ use crate::app_state::AppState;
+ use crate::custom_hooks::custom_auto_approve;
 -use crate::custom_hooks::{AutoApproveGetResult, AutoApproveToggleResult};
 +use crate::custom_hooks::{
 +    AutoApproveConversationResult, AutoApproveGetResult, AutoApproveToggleResult,
 +};
-@@ -33,3 +33,8 @@ pub async fn auto_approve_global_toggle(
+ 
+ /// Read the GLOBAL auto-accept state (persisted in `app_metadata`). No
+ /// conversation/sender scoping: the toggle is app-wide and applies to every
+@@ -31,7 +33,12 @@ pub async fn auto_approve_global_get(
+ pub async fn auto_approve_global_toggle(
+     Extension(state): Extension<Arc<AppState>>,
  ) -> Result<Json<AutoApproveToggleResult>, AppCommandError> {
 -    match custom_auto_approve::toggle_global_auto_approve(&state.db).await {
 +    match custom_auto_approve::toggle_global_auto_approve_core(
@@ -16,7 +25,11 @@ diff --git a/src-tauri/src/web/handlers/auto_approve.rs b/src-tauri/src/web/hand
 +    .await
 +    {
          Ok(enabled) => Ok(Json(AutoApproveToggleResult { enabled })),
-@@ -52,1 +52,37 @@ pub async fn auto_approve_global_toggle(
+         Err(e) => {
+             tracing::warn!("auto_approve_global_toggle failed: error={e}");
+@@ -42,3 +49,44 @@ pub async fn auto_approve_global_toggle(
+         }
+     }
  }
 +
 +/// Read the EFFECTIVE auto-accept state for a conversation (explicit per-chat

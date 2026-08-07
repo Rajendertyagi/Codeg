@@ -1,10 +1,11 @@
 diff --git a/src/lib/api.ts b/src/lib/api.ts
+index 778b3161..21ccff4f 100644
 --- a/src/lib/api.ts
 +++ b/src/lib/api.ts
-@@ -2820,4 +2820,17 @@ export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
+@@ -2823,6 +2823,22 @@ export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
    return getTransport().call("toggle_auto_approve_global")
  }
-+
+ 
 +// Per-conversation auto-accept (custom hooks)
 +
 +/** Read the EFFECTIVE auto-accept state + raw override for a conversation. */
@@ -22,3 +23,5 @@ diff --git a/src/lib/api.ts b/src/lib/api.ts
 +}
 +
  // Work tasks
+ 
+ export async function workTaskList(

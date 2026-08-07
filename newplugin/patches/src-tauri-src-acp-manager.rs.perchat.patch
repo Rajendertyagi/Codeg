@@ -1,7 +1,7 @@
 diff --git a/src-tauri/src/acp/manager.rs b/src-tauri/src/acp/manager.rs
 --- a/src-tauri/src/acp/manager.rs
 +++ b/src-tauri/src/acp/manager.rs
-@@ -1324,3 +1324,26 @@ impl ConnectionManager {
+@@ -1324,5 +1324,30 @@ impl ConnectionManager {
              .await
              .map_err(|_| AcpError::ProcessExited)
      }
