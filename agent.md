@@ -94,6 +94,30 @@ server/Docker deployment.
    If a dependency is missing, flag it as open debt with `file:line` citation — do not
    silently add it. Vendored/built-in tooling only.
 
+## Working Rules (Implementation Discipline)
+
+User-declared 2026-08-07. Optimize for **correctness, traceability, minimal changes**
+— NOT speed. In effect for every task unless explicitly overridden.
+
+1. **Never modify code immediately.** Without an explicit "implement / edit / apply /
+   make the changes", only investigate / analyze / plan. Stop and present findings;
+   wait for approval.
+2. **Always ask before implementation.** After investigation, ask
+   *"Implementation plan is complete. Proceed with implementation?"* Never assume approval.
+3. **Every implementation ends with a report.** Fixed schema: Summary, Files Changed,
+   Functions Changed, What Was Reused, What Was Removed (or "Nothing removed."),
+   Before vs After, Validation Performed, Regression Risk, Backward Compatibility,
+   Commit (hash / branch / push status), Next Recommendation.
+4. **Do not silently edit scope.** Implement ONLY what was requested. Other improvements
+   → "Future Improvements (Not Implemented)".
+5. **Minimize changes.** Prefer: (1) reuse existing Codeg code, (2) extend existing
+   functionality, (3) small localized patches. No new architecture unless explicitly
+   requested.
+6. **Repository evidence.** Every architectural claim must come from repo evidence;
+   never guess. If uncertain, say so.
+7. **Preserve native Codeg.** Native is primary architecture; patches are extensions.
+   Never replace native behavior that can be reused. Extend before creating anything new.
+
 ## Tooling (available via mcpproxy MCP)
 
 Server names below are the EXACT `server:tool` prefixes to call — do NOT invent
