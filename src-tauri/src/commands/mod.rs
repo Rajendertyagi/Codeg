@@ -5,6 +5,7 @@ pub mod automation;
 pub mod background;
 pub mod backup;
 pub mod chat_authoring;
+pub mod chat_channel_messaging;
 pub mod chat_channel;
 pub mod conversations;
 pub mod custom_agents;

@@ -4009,6 +4009,17 @@
     "saveFailed": "No se pudieron guardar los ajustes de crear desde el chat",
     "loadFailed": "Error al cargar: {detail}"
   },
+  "ChannelMessagingSettings": {
+    "title": "Mensajería de canal AI",
+    "description": "Permite que los agentes envíen mensajes a tus canales de chat conectados (Telegram, Lark, Weixin). El mensaje se envía a todos los canales habilitados; no se requiere un ID de canal. Desactivado de forma predeterminada porque el agente escribe en tus canales externos.",
+    "enable": "Mensajería de canal AI",
+    "enableHint": "Agrega la herramienta send_channel_message a los agentes iniciados después de activarla.",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "saved": "Ajustes de mensajería de canal AI guardados",
+    "saveFailed": "No se pudieron guardar los ajustes de mensajería de canal AI",
+    "loadFailed": "Error al cargar: {detail}"
+  },
   "AskQuestionSettings": {
     "title": "Preguntar al usuario",
     "description": "Permite que los agentes se detengan y te hagan una pregunta de opción múltiple que aparece encima del cuadro de entrada de la conversación. El agente espera hasta que respondas (u omitas).",

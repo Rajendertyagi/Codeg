@@ -4237,6 +4237,24 @@ export async function setChatAuthoringSettings(
   return getTransport().call("set_chat_authoring_settings", { settings })
 }
 
+// ─── AI Channel Messaging settings ───────────────────────────────────────
+
+/** Mirror of Rust `ChannelMessagingSettings`. Default OFF — the tool sends
+ * messages into external channels, so the user opts in explicitly. */
+export interface ChannelMessagingSettings {
+  enabled: boolean
+}
+
+export async function getChannelMessagingSettings(): Promise<ChannelMessagingSettings> {
+  return getTransport().call("get_chat_channel_messaging_settings")
+}
+
+export async function setChannelMessagingSettings(
+  settings: ChannelMessagingSettings
+): Promise<ChannelMessagingSettings> {
+  return getTransport().call("set_chat_channel_messaging_settings", { settings })
+}
+
 /** Live probe — opens a transient ACP connection to `agent_type`, reads what
  * it advertises (modes / config_options), and tears down. Used by the
  * delegation-settings UI so the option set on screen matches exactly what

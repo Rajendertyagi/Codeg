@@ -102,6 +102,14 @@ pub fn build_router(
             post(handlers::chat_authoring::set_chat_authoring_settings),
         )
         .route(
+            "/get_chat_channel_messaging_settings",
+            post(handlers::chat_channel_messaging::get_chat_channel_messaging_settings),
+        )
+        .route(
+            "/set_chat_channel_messaging_settings",
+            post(handlers::chat_channel_messaging::set_chat_channel_messaging_settings),
+        )
+        .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
