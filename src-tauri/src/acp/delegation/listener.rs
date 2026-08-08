@@ -20,12 +20,13 @@ use crate::acp::delegation::transport::{
     read_frame, write_frame, BrokerAskRequest, BrokerCancelRequest, BrokerCancelTaskRequest,
     BrokerCommitFeedbackRequest, BrokerFeedbackRequest, BrokerMessage, BrokerRequest,
     BrokerCreateAutomationRequest, BrokerCreateWorkTaskRequest, BrokerResponse,
-    BrokerSessionRequest, BrokerStatusRequest, BrokerTaskCompleteRequest,
-    BrokerTaskProgressRequest,
+    BrokerSendChannelMessageRequest, BrokerSessionRequest, BrokerStatusRequest,
+    BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
 };
 use crate::acp::delegation::types::{DelegationRequest, DelegationTaskReport, TaskStatus};
 use crate::acp::feedback::{PendingFeedback, SessionFeedbackAccess};
 use crate::acp::question::{QuestionOutcome, SessionQuestionAccess};
+use crate::acp::channel_messaging::{ChannelMessageAccess, ChannelMessageOutcome};
 use crate::acp::chat_authoring::{AuthoringContext, AuthoringOutcome, ChatAuthoringAccess};
 use crate::acp::session_info::{SessionInfo, SessionInfoAccess};
 use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
@@ -108,6 +109,10 @@ pub struct DelegationListener {
     /// feature flags at call time, so flipping the setting off stops writes
     /// from sessions that were launched while it was on.
     pub authoring: Arc<dyn ChatAuthoringAccess>,
+    /// Sends messages into the user's enabled chat channels (`send_channel_message`).
+    /// The impl re-checks the feature flag at call time, so flipping the setting
+    /// off stops sends from sessions that were launched while it was on.
+    pub channel_messaging: Arc<dyn ChannelMessageAccess>,
 }
 
 impl DelegationListener {
@@ -121,6 +126,7 @@ impl DelegationListener {
         session_info: Arc<dyn SessionInfoAccess>,
         tasks: Arc<dyn WorkTaskToolAccess>,
         authoring: Arc<dyn ChatAuthoringAccess>,
+        channel_messaging: Arc<dyn ChannelMessageAccess>,
     ) -> Arc<Self> {
         Arc::new(Self {
             broker,
@@ -131,6 +137,7 @@ impl DelegationListener {
             session_info,
             tasks,
             authoring,
+            channel_messaging,
         })
     }
 
@@ -343,6 +350,14 @@ impl DelegationListener {
             }
             BrokerMessage::CreateWorkTask(req) => {
                 authoring_response(self.process_create_work_task(req).await)?
+            }
+            BrokerMessage::SendChannelMessage(req) => {
+                let outcome = self.process_send_channel_message(req).await;
+                BrokerResponse {
+                    outcome: serde_json::to_value(outcome).map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                    })?,
+                }
             }
             BrokerMessage::Cancel(cancel) => {
                 self.process_cancel(cancel).await;
@@ -579,6 +594,24 @@ impl DelegationListener {
             return AuthoringOutcome::rejected("work_task", "invalid token");
         };
         self.authoring.create_work_task(ctx, req.spec).await
+    }
+
+    /// Validate the token and hand the channel-message request to the messaging
+    /// impl, which re-checks the feature flag before sending.
+    async fn process_send_channel_message(
+        &self,
+        req: BrokerSendChannelMessageRequest,
+    ) -> ChannelMessageOutcome {
+        let Some(_ctx) = self.authoring_context(&req.token).await else {
+            return ChannelMessageOutcome::rejected("invalid token");
+        };
+        use crate::acp::channel_messaging::SendChannelMessageRequest;
+        self.channel_messaging
+            .send_message(SendChannelMessageRequest {
+                token: req.token,
+                message: req.message,
+            })
+            .await
     }
 
     async fn process(&self, req: BrokerRequest) -> DelegationTaskReport {
