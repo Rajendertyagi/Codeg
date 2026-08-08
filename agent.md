@@ -118,6 +118,30 @@ User-declared 2026-08-07. Optimize for **correctness, traceability, minimal chan
 7. **Preserve native Codeg.** Native is primary architecture; patches are extensions.
    Never replace native behavior that can be reused. Extend before creating anything new.
 
+## Reuse-First Mandate (user-declared 2026-08-08)
+
+Always maximize reuse of Codeg's existing code, functions, components, UI, state,
+services, APIs, validation, timeout/retry/recovery mechanisms, and infrastructure
+before writing custom code.
+
+**Priority order:**
+1. Existing Codeg implementation — reuse directly.
+2. Existing Codeg component/function with a small extension — preferred.
+3. Existing Codeg mechanism adapted through a patch — preferred over duplication.
+4. New custom code only when Codeg genuinely has no suitable mechanism.
+5. New architecture/infrastructure — last resort and requires justification.
+
+**Specific prohibitions:**
+- Don't recreate native Codeg UI if an equivalent exists.
+- Don't create custom folder/conversation selectors when Codeg already has them.
+- Don't create custom timeout/watchdog systems before checking native timeout/recovery.
+- Don't create parallel retry/reconcile/state-management systems.
+- Don't duplicate existing API/service logic.
+- Don't modify pristine upstream files when the newplugin/patches architecture is being used.
+- Prefer thin patches around native Codeg behavior.
+- Before implementing something substantial, audit the upstream 0.23.5 implementation first.
+- If an agent proposes custom infrastructure, make it prove that the native Codeg equivalent cannot be reused.
+
 ## Tooling (available via mcpproxy MCP)
 
 Server names below are the EXACT `server:tool` prefixes to call — do NOT invent
