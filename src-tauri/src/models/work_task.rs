@@ -38,6 +38,9 @@ pub struct WorkTaskInfo {
     /// preflight command ran for this review.
     pub preflight: Option<serde_json::Value>,
     pub archived_at: Option<DateTime<Utc>>,
+    /// Planned start of a to-do task (`None` = no plan). Cleared the moment the
+    /// task is claimed, by the scheduler or by hand.
+    pub scheduled_at: Option<DateTime<Utc>>,
     /// Latest `agent_progress` milestone (filled by `list` for live tasks only
     /// — the card's realtime progress line).
     #[serde(skip_serializing_if = "Option::is_none")]

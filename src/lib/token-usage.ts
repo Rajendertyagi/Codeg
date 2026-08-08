@@ -53,6 +53,44 @@ export function addLocalDays(d: Date, days: number): Date {
 }
 
 /**
+ * The custom range's wire form is a pair of `YYYY-MM-DD` local days; the
+ * calendar speaks `Date`. These two are that seam.
+ *
+ * Neither goes through `toISOString`/`Date.parse` of a bare date: a date-only
+ * string is parsed as UTC by the language spec, so west of Greenwich the day
+ * would come back as the one before.
+ */
+export function toLocalDayValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** `YYYY-MM-DD` → local midnight; `null` for empty or unparsable input. */
+export function fromLocalDayValue(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const parsed = new Date(`${value}T00:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/**
+ * Which month the two-month range calendar should open on — the LEFT pane, so
+ * the right one lands on the range's end (or on the current month when nothing
+ * is picked yet).
+ *
+ * Without this the calendar opens on today and shows [this month, next month],
+ * and since there are no statistics in the future that entire right pane is
+ * disabled: half the panel is dead and a span reaching back into last month
+ * cannot be drawn without first paging backwards. Anchoring one month earlier
+ * makes both panes usable and puts a cross-month range within one gesture.
+ *
+ * Day 1 of the month, because react-day-picker only reads the month off it.
+ */
+export function rangeDefaultMonth(from: string, to: string, today: Date): Date {
+  const anchor = fromLocalDayValue(to) ?? fromLocalDayValue(from) ?? today
+  return new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)
+}
+
+/**
  * Turn a preset into concrete UTC bounds.
  *
  * Bounds are always local-day aligned and half-open `[start, end)`: "the last 7

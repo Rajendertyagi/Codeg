@@ -1318,6 +1318,9 @@ export interface WorkTask {
    *  command ran. */
   preflight: WorkTaskPreflight | null
   archived_at: string | null
+  /** Planned start of a to-do task (ISO); null = no plan. Consumed the moment
+   *  the task is claimed, by the scheduler or by hand. */
+  scheduled_at: string | null
   /** Latest agent_progress milestone — present on live (running/awaiting/merging) rows only. */
   latest_progress?: string | null
   created_at: string

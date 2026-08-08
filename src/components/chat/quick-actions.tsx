@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  Children,
   useCallback,
   useEffect,
   useMemo,
@@ -9,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { flushSync } from "react-dom"
 import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { ChevronLeft, ChevronRight, Lock, type LucideIcon } from "lucide-react"
@@ -222,33 +220,13 @@ const prefersReducedMotion = () =>
 const RAIL_STEP_RATIO = 0.4
 
 /**
- * Is this bar entirely outside the viewport, past the given LOGICAL edge? Only
- * a bar nobody can see may be recycled around to the far end — moving a
- * partly-visible one would be watched doing it. Logical, so it mirrors on RTL.
- */
-function isBeyond(
-  bar: Element,
-  view: DOMRect,
-  edge: "start" | "end",
-  rtl: boolean
-): boolean {
-  const box = bar.getBoundingClientRect()
-  return edge === "start"
-    ? rtl
-      ? box.left >= view.right - 0.5
-      : box.right <= view.left + 0.5
-    : rtl
-      ? box.right <= view.left + 0.5
-      : box.left >= view.right - 0.5
-}
-
-/**
  * One rail arrow. A real flex item in its own gutter — never an overlay on top
  * of the bars — so nothing a bar shows is ever covered. `mb-1` cancels the
  * viewport's `pb-1` so the glyph centres on the bar row, not on the row plus its
  * bottom slack. Always rendered (the user reads the pair as the rail's controls,
- * and a control that vanishes is a control you stop looking for); it only goes
- * `disabled` when every bar already fits and there is nowhere to travel.
+ * and a control that vanishes is a control you stop looking for); it goes
+ * `disabled` once the rail is parked against that end — including when every bar
+ * already fits and neither arrow has anywhere to travel.
  */
 function RailArrow({
   icon: Icon,
@@ -288,22 +266,14 @@ function RailArrow({
  * it to. The viewport is a plain overflow scroller (its native scrollbar hidden
  * in CSS), so trackpad swipes and "tab onto an off-screen bar" keep working.
  *
- * The loop is seamless, and deliberately NOT a wrap-around jump. An earlier cut
- * scrolled back to offset 0 on reaching the end, which broke twice over: the
- * rail starts AT offset 0, so the very first press of the leading arrow fired
- * the wrap and swept the strip the same way the trailing arrow does (the two
- * buttons looked identical), and reaching the far end rewound the whole row in
- * one lurch. Instead, a press that runs short of runway RECYCLES bars that have
- * already left the viewport on the far side, moving them around to the near side
- * and compensating `scrollLeft` by exactly the width moved. Those bars are
- * off-screen, so the swap is invisible: the strip just keeps going, forever, in
- * either direction, with no seam and no rewind — and each arrow only ever moves
- * the bars its own way.
- *
- * Recycling rotates the rendered order rather than cloning the list, so there is
- * still exactly one button per skill — no duplicate tab stops, no aria-hidden
- * shadow copy. (Trackpad scrolling stays bounded by the real ends; only the
- * arrows recycle.)
+ * Bounded, and deliberately so. An earlier cut recycled bars that had left the
+ * viewport around to the far side, which made the strip scroll forever — but
+ * only where there were enough bars to push a whole one out of sight. That put
+ * the three tabs on different rules: Office and Research (7 bars each) stopped
+ * at the end and greyed their arrow, while Coding (every non-featured expert)
+ * never did. One rail, one behaviour: each arrow is live exactly while there is
+ * scroll runway left in its direction, which is the same measurement the edge
+ * fades already use.
  */
 function SkillRail({
   itemCount,
@@ -315,31 +285,14 @@ function SkillRail({
   const t = useTranslations("Folder.chat.welcomePanel.quickActions")
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const trackRef = useRef<HTMLDivElement | null>(null)
-  // Content exists past that edge — drives the edge fades.
+  // Content exists past that edge: drives both the edge fades and, since the
+  // rail is bounded, whether that arrow has anywhere left to go.
   const [canScrollStart, setCanScrollStart] = useState(false)
   const [canScrollEnd, setCanScrollEnd] = useState(false)
-  // That arrow can actually do something — drives `disabled`. Wider than the
-  // pair above, because an arrow with no scroll runway left can still act by
-  // recycling; narrower than "the rail overflows", because recycling needs a
-  // bar that is genuinely out of sight.
-  const [canGoStart, setCanGoStart] = useState(false)
-  const [canGoEnd, setCanGoEnd] = useState(false)
-  // Net number of bars recycled off the leading edge. Signed and unbounded; it
-  // is reduced modulo the bar count at render, so it survives the list growing
-  // (experts load async) without any reset bookkeeping.
-  const [rotation, setRotation] = useState(0)
-
-  const bars = Children.toArray(children)
-  const start = bars.length
-    ? ((rotation % bars.length) + bars.length) % bars.length
-    : 0
-  const ordered =
-    start === 0 ? bars : [...bars.slice(start), ...bars.slice(0, start)]
 
   const measure = useCallback(() => {
     const el = viewportRef.current
-    const track = trackRef.current
-    if (!el || !track) return
+    if (!el) return
     // Under RTL (ar) every current engine runs `scrollLeft` from 0 down to
     // -max, so take the magnitude: `travelled` is the distance from the start
     // of the content in both directions.
@@ -347,29 +300,8 @@ function SkillRail({
     const max = el.scrollWidth - el.clientWidth
     // 1px of slack absorbs sub-pixel layout, so a rail parked at either end
     // isn't reported as still having somewhere to go.
-    const moreBefore = travelled > 1
-    const moreAfter = travelled < max - 1
-    setCanScrollStart(moreBefore)
-    setCanScrollEnd(moreAfter)
-
-    // Out of runway is not the same as out of moves: an arrow at the end can
-    // still recycle. But recycling needs a bar that has ALREADY left the
-    // viewport on the far side, and a rail only a little wider than its
-    // viewport never pushes a whole bar out of sight — there, a press would
-    // silently clamp and the arrow would look live while doing nothing. So
-    // each arrow is enabled on "can scroll OR can recycle", and honestly
-    // disabled otherwise.
-    const rtl = getComputedStyle(el).direction === "rtl"
-    const view = el.getBoundingClientRect()
-    const bars = track.children
-    const enoughBars = bars.length > 1
-    setCanGoStart(
-      moreBefore ||
-        (enoughBars && isBeyond(bars[bars.length - 1], view, "end", rtl))
-    )
-    setCanGoEnd(
-      moreAfter || (enoughBars && isBeyond(bars[0], view, "start", rtl))
-    )
+    setCanScrollStart(travelled > 1)
+    setCanScrollEnd(travelled < max - 1)
   }, [])
 
   useEffect(() => {
@@ -386,63 +318,14 @@ function SkillRail({
   }, [measure, itemCount])
 
   // `direction` is logical: -1 travels toward the start of the content.
-  // `scrollBy` is physical, so mirror it under RTL.
+  // `scrollBy` is physical, so mirror it under RTL. The engine clamps at both
+  // ends, so a press near the edge simply travels what is left.
   const nudge = useCallback((direction: 1 | -1) => {
     const el = viewportRef.current
-    const track = trackRef.current
-    if (!el || !track) return
-    const rtl = getComputedStyle(el).direction === "rtl"
-    const sign = rtl ? -1 : 1
-    const maxTravel = el.scrollWidth - el.clientWidth
-    if (maxTravel <= 0) return
-
-    const pos = Math.abs(el.scrollLeft)
-    const step = Math.max(120, el.clientWidth * RAIL_STEP_RATIO)
-    // How much of this step the real ends can't absorb. Everything else is
-    // ordinary scrolling and never touches the order.
-    const shortfall = direction === 1 ? step - (maxTravel - pos) : step - pos
-
-    if (shortfall > 0) {
-      const view = el.getBoundingClientRect()
-      const count = track.children.length
-      const rectAt = (i: number) => track.children[i].getBoundingClientRect()
-      // Exact width the leading `k` bars (or trailing, going the other way)
-      // occupy, gaps included, read straight off the layout boxes. Summing each
-      // bar's `offsetWidth` instead rounds every bar to a whole pixel and the
-      // error accumulates across the block, so the strip twitches on each swap
-      // by more the more bars move. Measured in a real browser over 32 presses:
-      // 0.83px worst drift summing `offsetWidth`, 0.50px reading the boxes —
-      // and 0.50px is the floor, since the engine snaps `scrollLeft` to a whole
-      // pixel. Half a pixel at the instant a 200px glide starts is invisible.
-      const blockWidth = (k: number) =>
-        direction === 1
-          ? Math.abs(rectAt(k).left - rectAt(0).left)
-          : Math.abs(rectAt(count - 1).right - rectAt(count - 1 - k).right)
-
-      let recycled = 0
-      let width = 0
-      // Walk in from the edge we are travelling AWAY from, taking only bars
-      // that are already fully outside the viewport — moving a visible bar
-      // would be seen. Keep at least one bar in place, as a floor.
-      while (recycled < count - 1 && width < shortfall) {
-        const index = direction === 1 ? recycled : count - 1 - recycled
-        const bar = track.children[index]
-        if (!bar) break
-        if (!isBeyond(bar, view, direction === 1 ? "start" : "end", rtl)) break
-        recycled += 1
-        width = blockWidth(recycled)
-      }
-      if (recycled > 0) {
-        // Reorder and re-anchor within ONE frame: flushSync commits the new
-        // order synchronously so the compensating offset lands on it, leaving
-        // the visible pixels byte-identical across the swap.
-        flushSync(() => setRotation((r) => r + direction * recycled))
-        el.scrollLeft = sign * (pos - direction * width)
-      }
-    }
-
+    if (!el) return
+    const sign = getComputedStyle(el).direction === "rtl" ? -1 : 1
     el.scrollBy({
-      left: step * direction * sign,
+      left: Math.max(120, el.clientWidth * RAIL_STEP_RATIO) * direction * sign,
       behavior: prefersReducedMotion() ? "auto" : "smooth",
     })
   }, [])
@@ -455,7 +338,7 @@ function SkillRail({
         icon={ChevronLeft}
         label={t("scrollPrev")}
         onClick={() => nudge(-1)}
-        disabled={!canGoStart}
+        disabled={!canScrollStart}
       />
       <div
         ref={viewportRef}
@@ -466,14 +349,14 @@ function SkillRail({
         className="qa-rail-viewport min-w-0 flex-1 pb-1"
       >
         <div ref={trackRef} className="flex w-max gap-2">
-          {ordered}
+          {children}
         </div>
       </div>
       <RailArrow
         icon={ChevronRight}
         label={t("scrollNext")}
         onClick={() => nudge(1)}
-        disabled={!canGoEnd}
+        disabled={!canScrollEnd}
       />
     </div>
   )

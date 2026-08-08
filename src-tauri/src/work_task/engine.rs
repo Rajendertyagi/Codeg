@@ -54,6 +54,11 @@ use crate::work_task::git as task_git;
 /// Reconcile sweep cadence.
 const RECONCILE_INTERVAL_SECS: u64 = 30;
 
+/// How often planned starts are checked. Its own (tighter) tick rather than a
+/// step of the reconcile sweep: this one is a cheap indexed-ish scan, and it
+/// bounds how late a task the user planned for a given minute actually starts.
+const SCHEDULE_INTERVAL_SECS: u64 = 15;
+
 /// Cap on the preflight output tail persisted with a red light.
 const PREFLIGHT_TAIL_CHARS: usize = 4000;
 
@@ -228,6 +233,14 @@ pub async fn run_task_engine(engine: Arc<TaskEngine>) {
         i.set_missed_tick_behavior(MissedTickBehavior::Delay);
         i
     };
+    // Fires immediately on its first tick, which is also the catch-up pass: a
+    // plan whose time passed while the app was closed runs late rather than
+    // never.
+    let mut schedule = {
+        let mut i = tokio::time::interval(Duration::from_secs(SCHEDULE_INTERVAL_SECS));
+        i.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        i
+    };
     let mut lag_throttle = LagLogThrottle::new(LAG_LOG_WINDOW);
 
     loop {
@@ -247,6 +260,7 @@ pub async fn run_task_engine(engine: Arc<TaskEngine>) {
                 }
                 Err(RecvError::Closed) => break,
             },
+            _ = schedule.tick() => engine.claim_due_scheduled().await,
             _ = reconcile.tick() => engine.reconcile_once().await,
         }
     }
@@ -379,8 +393,16 @@ impl TaskEngine {
                 .map_err(|e| e.to_string())?;
             let mut folder_claimed = 0u32;
             for id in ids {
-                if work_task_service::claim_for_run(&self.db.conn, id, WorkTaskStatus::Todo, "user")
-                    .await
+                // The unplanned-only claim, not the generic one: `ids` is a
+                // snapshot, and a plan set in the meantime must still be
+                // honoured rather than silently overridden by a bulk button.
+                if work_task_service::claim_unplanned_for_run(
+                    &self.db.conn,
+                    id,
+                    WorkTaskStatus::Todo,
+                    "user",
+                )
+                .await
                     .map_err(|e| e.to_string())?
                     .is_some()
                 {
@@ -533,6 +555,40 @@ impl TaskEngine {
             self.pump_folder(folder_id).await;
         }
         Ok(())
+    }
+
+    // ── scheduler ───────────────────────────────────────────────────────────
+
+    /// Queue every to-do task whose planned start has arrived, then pump the
+    /// folders that gained one. Runs on its own tick and also as a nudge right
+    /// after a plan is set, so a time already in the past takes effect at once.
+    ///
+    /// Claiming does not launch: the task lands in `queued` like any manual
+    /// start, and the folder's concurrency limit still governs what actually
+    /// runs.
+    pub async fn claim_due_scheduled(self: &Arc<Self>) {
+        let claimed =
+            match work_task_service::claim_due_scheduled(&self.db.conn, chrono::Utc::now()).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!("[work_task] scheduled claim error: {e}");
+                    return;
+                }
+            };
+        if claimed.is_empty() {
+            return;
+        }
+        let mut folders: Vec<i32> = Vec::new();
+        for (task_id, folder_id) in claimed {
+            tracing::info!("[work_task] scheduled start claimed task {task_id}");
+            self.emit_upsert(task_id);
+            if !folders.contains(&folder_id) {
+                folders.push(folder_id);
+            }
+        }
+        for folder_id in folders {
+            self.pump_folder(folder_id).await;
+        }
     }
 
     // ── pump ────────────────────────────────────────────────────────────────
@@ -3063,6 +3119,7 @@ mod tests {
             merge_commit: None,
             preflight: None,
             archived_at: None,
+            scheduled_at: None,
             created_at: now,
             updated_at: now,
             started_at: None,

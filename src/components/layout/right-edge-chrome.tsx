@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
-import { ArrowLeft, PanelRight, Settings, SquareTerminal } from "lucide-react"
+import { PanelRight, Settings, SquareTerminal } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { openSettingsWindow } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
+import { WorkbenchRouteChromeActions } from "@/components/workbench/workbench-content"
 import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
 import { useIsMac } from "@/hooks/use-is-mac"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
@@ -18,8 +19,9 @@ import { rightChromeClusterWidth } from "@/lib/window-chrome"
 
 /**
  * Contents of the window's fixed top-RIGHT chrome overlay: terminal + aux-panel
- * toggles (conversations) or a back-to-conversations exit (full-page routes),
- * then settings. `FolderLayoutShell` pins this at the window's top-right
+ * toggles (conversations) or the active route's own page-level controls
+ * (full-page routes), then settings. `FolderLayoutShell` pins this at the
+ * window's top-right
  * corner (to the LEFT of the Windows/Linux caption buttons) so it never moves —
  * or re-mounts — when the aux panel opens or closes. Preserves the old title
  * bar's disabled predicates and active styling. A leading drag filler right-
@@ -32,8 +34,11 @@ export function RightEdgeChrome() {
   const isChatMode = useIsActiveChatMode()
   // Full-page workbench routes (tasks / automations) overlay the workspace the
   // terminal and aux panel live in — toggling them there is invisible, so the
-  // two buttons hide and a back-to-conversations exit takes their slot instead.
-  const { isConversations, openConversations } = useWorkbenchRoute()
+  // two buttons hide and the route's own page-level controls take their slots
+  // (WorkbenchRouteChromeActions below). The way OUT of such a route is the
+  // breadcrumb button at the head of its title (see WorkbenchPageTitle), not
+  // this corner.
+  const { isConversations } = useWorkbenchRoute()
   const { isOpen: auxPanelOpen, toggle: toggleAuxPanel } = useAuxPanelContext()
   const { isOpen: terminalOpen, toggle: toggleTerminal } = useTerminalContext()
   const isMac = useIsMac()
@@ -87,21 +92,10 @@ export function RightEdgeChrome() {
             </Button>
           </>
         )}
-        {/* Full-page routes (tasks / automations) cover the workspace with no
-            other way out of the chrome strip — this is their exit back to the
-            conversation workspace, sitting just left of the settings gear. */}
-        {!isConversations && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 hover:bg-foreground/10 hover:text-foreground/80 dark:hover:bg-foreground/10"
-            onClick={openConversations}
-            title={tTitleBar("backToConversations")}
-            aria-label={tTitleBar("backToConversations")}
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </Button>
-        )}
+        <WorkbenchRouteChromeActions
+          buttonClassName="h-6 w-6 hover:bg-foreground/10 hover:text-foreground/80 dark:hover:bg-foreground/10"
+          iconClassName="h-3.5 w-3.5"
+        />
         <Button
           variant="ghost"
           size="icon"

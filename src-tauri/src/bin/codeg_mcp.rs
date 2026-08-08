@@ -2,8 +2,10 @@
 //! to surface codeg's tools to its LLM: the multi-agent delegation tools
 //! (`delegate_to_agent` etc.), `check_user_feedback` (pull the user's mid-turn
 //! steering notes), `ask_user_question` (block on a multiple-choice card), and
-//! `get_session_info` (resolve a referenced session by id), gated by the
-//! `--features` groups (`delegation` / `feedback` / `ask` / `sessions` / `tasks`).
+//! `get_session_info` (resolve a referenced session by id), plus the
+//! chat-authoring tools (`create_automation` / `create_work_task`), gated by the
+//! `--features` groups (`delegation` / `feedback` / `ask` / `sessions` /
+//! `tasks` / `automations` / `taskboard`).
 //!
 //! The agent's MCP config (injected by codeg via `load_mcp_servers_for_agent`)
 //! spawns this binary with three required flags:
@@ -53,7 +55,7 @@ struct Args {
     /// from. Omitted by older parents — backward compatible.
     parent_pid: Option<u32>,
     /// Comma-joined tool groups to expose (e.g.
-    /// `delegation,feedback,ask,sessions`). Omitted by parents that predate
+    /// `delegation,feedback,ask,sessions,automations,taskboard`). Omitted by parents that predate
     /// feature gating; see `CompanionFeatures::parse` (defaults to
     /// delegation-only).
     features: Option<String>,

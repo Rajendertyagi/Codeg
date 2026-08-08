@@ -90,6 +90,7 @@ function task(overrides: Partial<WorkTask> = {}): WorkTask {
     worktree_folder_id: null,
     conversation_id: null,
     archived_at: null,
+    scheduled_at: null,
     cleanup_state: null,
     preflight: null,
     files_changed: 0,
@@ -110,6 +111,7 @@ function mount(row: WorkTask) {
         onComplete={() => {}}
         onCancel={() => {}}
         onEdit={() => {}}
+        onSchedule={() => {}}
       />
     </NextIntlClientProvider>
   )

@@ -35,6 +35,7 @@ mod m20260801_000002_work_task_p2;
 mod m20260801_000003_work_task_template;
 mod m20260803_000001_folder_link;
 mod m20260803_000001_token_usage;
+mod m20260807_000001_work_task_scheduled_at;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -76,6 +77,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260801_000003_work_task_template::Migration),
             Box::new(m20260803_000001_folder_link::Migration),
             Box::new(m20260803_000001_token_usage::Migration),
+            Box::new(m20260807_000001_work_task_scheduled_at::Migration),
         ]
     }
 }

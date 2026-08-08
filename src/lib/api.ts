@@ -2860,14 +2860,6 @@ export async function workTaskStart(id: number): Promise<void> {
   return getTransport().call("work_task_start", { id })
 }
 
-/** Queue every todo of the folder — or of every folder holding todos when
- *  `folderId` is null. Returns how many were claimed. */
-export async function workTaskStartAll(
-  folderId: number | null
-): Promise<number> {
-  return getTransport().call("work_task_start_all", { folderId })
-}
-
 /** failed → queued. `note` (optional) reaches the retry prompt. */
 export async function workTaskRetry(
   id: number,
@@ -2885,6 +2877,18 @@ export async function workTaskRequeue(
   note?: string | null
 ): Promise<void> {
   return getTransport().call("work_task_requeue", { id, note: note ?? null })
+}
+
+/**
+ * Plan when a to-do task starts (`scheduledAt` is an ISO instant; `null`
+ * clears the plan). The engine claims it at that time exactly as if the start
+ * button had been pressed — the folder's concurrency limit still applies.
+ */
+export async function workTaskSchedule(
+  id: number,
+  scheduledAt: string | null
+): Promise<void> {
+  return getTransport().call("work_task_schedule", { id, scheduledAt })
 }
 
 /**
@@ -4211,6 +4215,26 @@ export async function setSessionInfoSettings(
   settings: SessionInfoSettings
 ): Promise<SessionInfoSettings> {
   return getTransport().call("set_session_info_settings", { settings })
+}
+
+// ─── Create-from-chat (chat authoring) settings ────────────────────────────
+
+/** Mirror of Rust `ChatAuthoringSettings`. Both default OFF — these tools write
+ * app state (and a scheduled automation goes on to spawn agents), so they are
+ * opt-in rather than on like the read-only lookups. */
+export interface ChatAuthoringSettings {
+  automations_enabled: boolean
+  work_tasks_enabled: boolean
+}
+
+export async function getChatAuthoringSettings(): Promise<ChatAuthoringSettings> {
+  return getTransport().call("get_chat_authoring_settings")
+}
+
+export async function setChatAuthoringSettings(
+  settings: ChatAuthoringSettings
+): Promise<ChatAuthoringSettings> {
+  return getTransport().call("set_chat_authoring_settings", { settings })
 }
 
 /** Live probe — opens a transient ACP connection to `agent_type`, reads what

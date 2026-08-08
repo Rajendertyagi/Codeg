@@ -55,6 +55,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { AgentIcon } from "@/components/agent-icon"
+import { WorkbenchPageTitle } from "@/components/workbench/workbench-page-title"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -202,19 +203,12 @@ type EditingState =
   | { kind: "edit"; automation: Automation }
 
 /** Page title rendered into the window-chrome strip above the page (the h-10
- *  band shared with the fixed corner overlays) — same metrics and icon-then-
- *  label shape as TasksPageTitle, so the two workbench routes open with an
- *  identical header rhythm instead of one burying its title inside a pane. */
+ *  band shared with the fixed corner overlays) — the shared breadcrumb header,
+ *  so all three workbench routes open with an identical header rhythm and the
+ *  same way back to the conversation workspace. */
 export function AutomationsPageTitle() {
   const t = useTranslations("Automations")
-  return (
-    <div className="flex h-10 shrink-0 items-center gap-2 pl-4">
-      <h1 className="flex items-center gap-1.5 text-[0.8125rem] font-semibold leading-none">
-        <Zap className="size-4 text-muted-foreground" aria-hidden="true" />
-        {t("title")}
-      </h1>
-    </div>
-  )
+  return <WorkbenchPageTitle title={t("title")} />
 }
 
 export function AutomationsPage() {

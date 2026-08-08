@@ -34,6 +34,14 @@ fn nudge_pump(folder_id: i32) {
     }
 }
 
+/// Best-effort sweep of planned starts, for the one case the 15s tick handles
+/// visibly late: a time that is already in the past when it is set.
+fn nudge_schedule() {
+    if let Some(engine) = crate::work_task::engine() {
+        tokio::spawn(async move { engine.claim_due_scheduled().await });
+    }
+}
+
 // ── shared business logic (both modes) ──────────────────────────────────────
 
 pub async fn work_task_list_core(
@@ -90,42 +98,75 @@ pub async fn work_task_update_core(
     Ok(info)
 }
 
+/// How many times a delete re-reads before giving up. A retry only happens when
+/// something claimed the task mid-delete; more than a couple in a row means the
+/// board is fighting the user, and an error is a better answer than a loop.
+const DELETE_ATTEMPTS: usize = 4;
+
 /// Delete a task. An active run is canceled first; `delete_worktree` also
 /// removes its worktree (best-effort — a cleanup failure does not block the
 /// delete, the worktree just stays on disk). Refused while merging.
+///
+/// The whole thing runs as converge-then-tombstone rather than
+/// decide-once-then-write: three arms can claim a `todo` task out from under
+/// this call (the user, the folder's auto-processor, a planned start coming
+/// due), and a tombstone written over a generation that just started would
+/// leave its freshly minted worktree — and possibly its agent process — behind,
+/// with the row that knows about them gone. So the final `soft_delete` is
+/// guarded on the status we validated, and losing that guard sends us round
+/// again to cancel whatever claimed it.
 pub async fn work_task_delete_core(
     emitter: &EventEmitter,
     db: &AppDatabase,
     id: i32,
     delete_worktree: bool,
 ) -> Result<(), DbError> {
-    let task = work_task_service::get_model(&db.conn, id).await?;
-    if task.status == WorkTaskStatus::Merging {
-        return Err(DbError::Validation(
-            "task is merging — wait for it to finish".to_string(),
-        ));
-    }
-    if matches!(
-        task.status,
-        WorkTaskStatus::Queued
-            | WorkTaskStatus::Preparing
-            | WorkTaskStatus::Running
-            | WorkTaskStatus::AwaitingInput
-    ) {
-        engine()?.cancel(id, None).await.map_err(DbError::Validation)?;
-    }
-    if delete_worktree && task.worktree_folder_id.is_some() {
-        if let Err(e) = engine()?.cleanup_task(id).await {
-            tracing::warn!("[work_task] cleanup during delete of task {id}: {e}");
+    // Kept only to report the reason if we run out of attempts.
+    let mut last_conflict: Option<String> = None;
+    for _ in 0..DELETE_ATTEMPTS {
+        let task = work_task_service::get_model(&db.conn, id).await?;
+        if task.status == WorkTaskStatus::Merging {
+            return Err(DbError::Validation(
+                "task is merging — wait for it to finish".to_string(),
+            ));
         }
+        if matches!(
+            task.status,
+            WorkTaskStatus::Queued
+                | WorkTaskStatus::Preparing
+                | WorkTaskStatus::Running
+                | WorkTaskStatus::AwaitingInput
+        ) {
+            // `cancel` waits on the engine's per-task lock, which a launch holds
+            // across its whole setup — so when it returns, that generation has
+            // stopped touching the worktree. A cancel that loses its own CAS
+            // just means the task settled by itself; re-read and decide again
+            // instead of failing the delete.
+            if let Err(e) = engine()?.cancel(id, None).await {
+                last_conflict = Some(e);
+            }
+            continue;
+        }
+        // Read from THIS pass, not from a stale first look: a run that started
+        // and was cancelled above has a worktree the first snapshot never saw.
+        if delete_worktree && task.worktree_folder_id.is_some() {
+            if let Err(e) = engine()?.cleanup_task(id).await {
+                tracing::warn!("[work_task] cleanup during delete of task {id}: {e}");
+            }
+        }
+        if work_task_service::soft_delete(&db.conn, id, task.status).await? {
+            emit_event(
+                emitter,
+                WORK_TASK_CHANGED_EVENT,
+                WorkTaskChange::Deleted { id },
+            );
+            return Ok(());
+        }
+        last_conflict = Some("task was claimed while being deleted".to_string());
     }
-    work_task_service::soft_delete(&db.conn, id).await?;
-    emit_event(
-        emitter,
-        WORK_TASK_CHANGED_EVENT,
-        WorkTaskChange::Deleted { id },
-    );
-    Ok(())
+    Err(DbError::Validation(last_conflict.unwrap_or_else(|| {
+        "task kept changing while being deleted — try again".to_string()
+    })))
 }
 
 /// Persist the pending column's drag order. `sort_order` also drives the
@@ -178,6 +219,40 @@ pub async fn work_task_requeue_core(
     );
     if let Ok(task) = work_task_service::get_model(&db.conn, id).await {
         nudge_pump(task.folder_id);
+    }
+    Ok(())
+}
+
+/// Plan when a to-do task starts. `scheduled_at` is an RFC 3339 instant (the
+/// client sends the time the user picked, converted from its own zone);
+/// `None` clears the plan. Pure DB — the engine's schedule tick claims the task
+/// when its time comes, and the nudge below covers a time already in the past.
+pub async fn work_task_schedule_core(
+    emitter: &EventEmitter,
+    db: &AppDatabase,
+    id: i32,
+    scheduled_at: Option<String>,
+) -> Result<(), DbError> {
+    let at = match scheduled_at.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .map_err(|e| DbError::Validation(format!("invalid scheduled_at: {e}")))?
+                .with_timezone(&chrono::Utc),
+        ),
+        None => None,
+    };
+    if !work_task_service::set_schedule(&db.conn, id, at).await? {
+        return Err(DbError::Validation(
+            "only to-do tasks can be scheduled".to_string(),
+        ));
+    }
+    emit_event(
+        emitter,
+        WORK_TASK_CHANGED_EVENT,
+        WorkTaskChange::Upsert { id },
+    );
+    if at.is_some() {
+        nudge_schedule();
     }
     Ok(())
 }
@@ -497,6 +572,17 @@ pub async fn work_task_requeue(
     note: Option<String>,
 ) -> Result<(), DbError> {
     work_task_requeue_core(&EventEmitter::Tauri(app), &db, id, note).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn work_task_schedule(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    id: i32,
+    scheduled_at: Option<String>,
+) -> Result<(), DbError> {
+    work_task_schedule_core(&EventEmitter::Tauri(app), &db, id, scheduled_at).await
 }
 
 #[cfg(feature = "tauri-runtime")]

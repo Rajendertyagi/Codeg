@@ -408,11 +408,19 @@ export function Sidebar() {
             ) : null
           }
         />
+        {/* Both route rows close the mobile Sheet on the way out, like tapping a
+            conversation card (handled by the list wrapper below) — otherwise the
+            page they just opened stays hidden behind the sidebar. "Search" above
+            is deliberately left alone: it opens a dialog that sits on top of the
+            sidebar, and closing it would only cost the user their place. */}
         <SidebarNavButton
           icon={Zap}
           label={t("automations")}
           active={routeId === "automations"}
-          onClick={() => setRoute("automations")}
+          onClick={() => {
+            if (isMobile) toggle()
+            setRoute("automations")
+          }}
           trailing={
             unseenFailures > 0 ? (
               <span className="ml-auto inline-flex h-[0.9375rem] min-w-[0.9375rem] shrink-0 items-center justify-center rounded-full bg-destructive/15 px-1 font-mono text-[0.625rem] font-medium leading-none text-destructive">
@@ -425,7 +433,10 @@ export function Sidebar() {
           icon={ListTodo}
           label={t("tasks")}
           active={routeId === "tasks"}
-          onClick={() => setRoute("tasks")}
+          onClick={() => {
+            if (isMobile) toggle()
+            setRoute("tasks")
+          }}
           trailing={
             attentionCount > 0 ? (
               // Attention (not failure): tasks waiting on the user — primary

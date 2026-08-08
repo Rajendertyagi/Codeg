@@ -2625,6 +2625,12 @@ pub struct DelegationInjection {
     /// is on, and the companion's `--features` lists `sessions` to expose the
     /// `get_session_info` tool. No teardown handle (the lookup is stateless).
     pub sessions: crate::acp::session_info::SessionInfoRuntimeConfig,
+    /// Hot-swappable chat-authoring flags (`create_automation` /
+    /// `create_work_task`). Read at injection time like the others so the
+    /// companion's `--features` lists `automations` / `taskboard`. Unlike the
+    /// read-only groups these are ALSO re-read at call time by the authoring
+    /// access impl — see [`crate::acp::chat_authoring::ChatAuthoringRuntimeConfig`].
+    pub authoring: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
     /// Question registry handle for the teardown cascade. The `run_connection`
     /// cleanup guard calls `cancel_questions_by_parent` through this so a pending
     /// `ask_user_question` is reclaimed synchronously on disconnect, mirroring
@@ -2721,42 +2727,55 @@ fn is_executable_file(path: &Path) -> bool {
 /// delegate tool silently. Skipping leaves the agent fully functional minus
 /// `delegate_to_agent`, which is the right degradation when codeg-mcp didn't
 /// make it into the install.
-/// The `--features` value for a companion launch given the five feature flags,
-/// or `None` when none is enabled (the companion isn't injected at all).
-/// Pulled out as a pure function so the inject/skip decision is unit-testable
-/// without a real binary on disk or a live broker. `tasks` is per-spawn (task
-/// engine launches only), not a settings toggle — on its own it still injects
-/// the companion so a task session always has its reporting tools.
-fn companion_features_arg(
-    delegation_enabled: bool,
-    feedback_enabled: bool,
-    ask_enabled: bool,
-    sessions_enabled: bool,
-    tasks_enabled: bool,
-) -> Option<String> {
-    if !delegation_enabled
-        && !feedback_enabled
-        && !ask_enabled
-        && !sessions_enabled
-        && !tasks_enabled
-    {
-        return None;
-    }
+/// Which tool groups a companion launch should expose. A struct rather than a
+/// positional bool list: the groups keep growing and seven adjacent `bool`s at a
+/// call site is a silent argument-swap waiting to happen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CompanionFeatureFlags {
+    delegation: bool,
+    feedback: bool,
+    ask: bool,
+    sessions: bool,
+    /// Per-spawn (task-engine launches only), not a settings toggle — on its own
+    /// it still injects the companion so a task session always has its reporting
+    /// tools.
+    tasks: bool,
+    /// `create_automation`, gated by the chat-authoring setting.
+    automations: bool,
+    /// `create_work_task`, gated by the chat-authoring setting.
+    taskboard: bool,
+}
+
+/// The `--features` value for a companion launch, or `None` when no group is
+/// enabled (the companion isn't injected at all). Pulled out as a pure function
+/// so the inject/skip decision is unit-testable without a real binary on disk or
+/// a live broker. The order here is the order the companion's
+/// `CompanionFeatures::parse` recognizes.
+fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
     let mut features: Vec<&str> = Vec::new();
-    if delegation_enabled {
+    if flags.delegation {
         features.push("delegation");
     }
-    if feedback_enabled {
+    if flags.feedback {
         features.push("feedback");
     }
-    if ask_enabled {
+    if flags.ask {
         features.push("ask");
     }
-    if sessions_enabled {
+    if flags.sessions {
         features.push("sessions");
     }
-    if tasks_enabled {
+    if flags.tasks {
         features.push("tasks");
+    }
+    if flags.automations {
+        features.push("automations");
+    }
+    if flags.taskboard {
+        features.push("taskboard");
+    }
+    if features.is_empty() {
+        return None;
     }
     Some(features.join(","))
 }
@@ -2782,18 +2801,19 @@ async fn inject_codeg_mcp(
     // surface to the LLM. (Historically this was gated on delegation alone.)
     // `tasks_enabled` is per-spawn: true only for task-engine launches, which
     // must get their reporting tools regardless of the settings toggles.
-    let delegation_enabled = injection.broker.config_snapshot().await.enabled;
     let feedback_enabled = injection.feedback.is_enabled().await;
-    let ask_enabled = injection.ask.is_enabled().await;
-    let sessions_enabled = injection.sessions.is_enabled().await;
+    let authoring = injection.authoring.snapshot().await;
+    let flags = CompanionFeatureFlags {
+        delegation: injection.broker.config_snapshot().await.enabled,
+        feedback: feedback_enabled,
+        ask: injection.ask.is_enabled().await,
+        sessions: injection.sessions.is_enabled().await,
+        tasks: tasks_enabled,
+        automations: authoring.automations_enabled,
+        taskboard: authoring.work_tasks_enabled,
+    };
     // `None` (no feature enabled) short-circuits the whole injection.
-    let features_arg = companion_features_arg(
-        delegation_enabled,
-        feedback_enabled,
-        ask_enabled,
-        sessions_enabled,
-        tasks_enabled,
-    )?;
+    let features_arg = companion_features_arg(flags)?;
     let Some(binary_path) = locate_codeg_mcp_binary() else {
         tracing::warn!(
             "[delegation][WARN] codeg-mcp companion binary not found (checked CODEG_MCP_BIN, \
@@ -2828,7 +2848,7 @@ async fn inject_codeg_mcp(
         // (any platform).
         "--parent-pid".to_string(),
         std::process::id().to_string(),
-        // Tool groups to expose this launch (delegation / feedback / ask / sessions).
+        // Tool groups to expose this launch (see `CompanionFeatureFlags`).
         "--features".to_string(),
         features_arg,
     ];
@@ -11786,6 +11806,7 @@ mod tests {
             feedback: crate::acp::feedback::FeedbackRuntimeConfig::new(),
             ask: crate::acp::question::QuestionRuntimeConfig::new(),
             sessions: crate::acp::session_info::SessionInfoRuntimeConfig::new(),
+            authoring: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig::new(),
             questions: Arc::new(NoQuestions)
                 as Arc<dyn crate::acp::question::SessionQuestionAccess>,
             plan_approvals: Arc::new(NoPlanApprovals)
@@ -11885,42 +11906,49 @@ mod tests {
     // have skipped it).
     #[test]
     fn companion_features_arg_inject_skip_decision() {
+        let only = |f: fn(&mut CompanionFeatureFlags)| {
+            let mut flags = CompanionFeatureFlags::default();
+            f(&mut flags);
+            companion_features_arg(flags)
+        };
         // All off → no companion at all.
-        assert_eq!(companion_features_arg(false, false, false, false, false), None);
+        assert_eq!(
+            companion_features_arg(CompanionFeatureFlags::default()),
+            None
+        );
         // Delegation only.
         assert_eq!(
-            companion_features_arg(true, false, false, false, false),
+            only(|f| f.delegation = true),
             Some("delegation".to_string())
         );
         // Feedback only — the decoupling: companion injected for feedback even
         // when delegation is off.
-        assert_eq!(
-            companion_features_arg(false, true, false, false, false),
-            Some("feedback".to_string())
-        );
+        assert_eq!(only(|f| f.feedback = true), Some("feedback".to_string()));
         // Ask only — likewise injects the companion on its own.
-        assert_eq!(
-            companion_features_arg(false, false, true, false, false),
-            Some("ask".to_string())
-        );
+        assert_eq!(only(|f| f.ask = true), Some("ask".to_string()));
         // Sessions only — likewise injects the companion on its own.
+        assert_eq!(only(|f| f.sessions = true), Some("sessions".to_string()));
+        // Per-spawn tasks group: injects alone.
+        assert_eq!(only(|f| f.tasks = true), Some("tasks".to_string()));
+        // Each chat-authoring group injects the companion on its own too, so a
+        // user who only wants "create a task from chat" still gets the tool.
         assert_eq!(
-            companion_features_arg(false, false, false, true, false),
-            Some("sessions".to_string())
+            only(|f| f.automations = true),
+            Some("automations".to_string())
         );
-        // All on → comma-joined, in declaration order.
+        assert_eq!(only(|f| f.taskboard = true), Some("taskboard".to_string()));
+        // All on → comma-joined, in the order the companion parses.
         assert_eq!(
-            companion_features_arg(true, true, true, true, false),
-            Some("delegation,feedback,ask,sessions".to_string())
-        );
-        // Per-spawn tasks group: injects alone, and rides along with the rest.
-        assert_eq!(
-            companion_features_arg(false, false, false, false, true),
-            Some("tasks".to_string())
-        );
-        assert_eq!(
-            companion_features_arg(true, true, true, true, true),
-            Some("delegation,feedback,ask,sessions,tasks".to_string())
+            companion_features_arg(CompanionFeatureFlags {
+                delegation: true,
+                feedback: true,
+                ask: true,
+                sessions: true,
+                tasks: true,
+                automations: true,
+                taskboard: true,
+            }),
+            Some("delegation,feedback,ask,sessions,tasks,automations,taskboard".to_string())
         );
     }
 }

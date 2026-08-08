@@ -13,14 +13,17 @@ import {
   formatDuration,
   formatTokensPrecise,
   freshTokens,
+  fromLocalDayValue,
   idleDays,
   localTzOffsetMinutes,
   peakHour,
   peakPoint,
+  rangeDefaultMonth,
   resolveRange,
   shareCardFilename,
   startOfLocalDay,
   suggestBucket,
+  toLocalDayValue,
 } from "./token-usage"
 import type {
   TokenUsageBreakdownItem,
@@ -174,6 +177,65 @@ describe("startOfLocalDay / addLocalDays", () => {
     const d = addLocalDays(new Date(2026, 7, 31), 1)
     expect(d.getMonth()).toBe(8)
     expect(d.getDate()).toBe(1)
+  })
+})
+
+describe("toLocalDayValue / fromLocalDayValue", () => {
+  it("round-trips a day without slipping a timezone", () => {
+    // The bug this guards: `new Date("2026-08-03")` is UTC midnight, which is
+    // Aug 2 anywhere west of Greenwich — the range would start a day early.
+    const day = toLocalDayValue(new Date(2026, 7, 3, 23, 59, 59))
+    expect(day).toBe("2026-08-03")
+    const back = fromLocalDayValue(day)!
+    expect(back.getFullYear()).toBe(2026)
+    expect(back.getMonth()).toBe(7)
+    expect(back.getDate()).toBe(3)
+    expect(back.getHours()).toBe(0)
+  })
+
+  it("pads single-digit parts", () => {
+    expect(toLocalDayValue(new Date(2026, 0, 2))).toBe("2026-01-02")
+  })
+
+  it("returns null for an empty or malformed day", () => {
+    expect(fromLocalDayValue("")).toBeNull()
+    expect(fromLocalDayValue("2026-8-3")).toBeNull()
+    expect(fromLocalDayValue("nope")).toBeNull()
+  })
+})
+
+describe("rangeDefaultMonth", () => {
+  const monthOf = (d: Date) => [d.getFullYear(), d.getMonth(), d.getDate()]
+
+  it("opens one month before today when nothing is picked", () => {
+    // The point of the offset: the calendar shows two months and everything
+    // after today is disabled, so opening ON today would leave the whole right
+    // pane dead.
+    expect(monthOf(rangeDefaultMonth("", "", new Date(2026, 7, 20)))).toEqual([
+      2026, 6, 1,
+    ])
+  })
+
+  it("anchors on the range's end so the whole span is visible", () => {
+    expect(
+      monthOf(
+        rangeDefaultMonth("2026-07-15", "2026-08-07", new Date(2026, 7, 20))
+      )
+    ).toEqual([2026, 6, 1])
+  })
+
+  it("falls back to the start while only one end is picked", () => {
+    expect(
+      monthOf(rangeDefaultMonth("2026-05-04", "", new Date(2026, 7, 20)))
+    ).toEqual([2026, 3, 1])
+  })
+
+  it("crosses a year boundary backwards", () => {
+    expect(
+      monthOf(
+        rangeDefaultMonth("2026-01-03", "2026-01-09", new Date(2026, 0, 9))
+      )
+    ).toEqual([2025, 11, 1])
   })
 })
 

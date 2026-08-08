@@ -43,9 +43,11 @@ pub struct Model {
     pub id: i32,
     pub folder_id: i32,
     pub title: Option<String>,
-    /// True once the user manually renamed this conversation. Gates the
-    /// per-turn auto-title backfill (see `get_folder_conversation_core`) so a
-    /// hand-set title is never overwritten by a parsed session-file title.
+    /// True once a deliberate user action fixed this conversation's name:
+    /// a manual rename, or the `[Fork] ` prefix a fork stamps on the row it
+    /// re-points. Gates the per-turn auto-title backfill (see
+    /// `get_folder_conversation_core`) so such a title is never overwritten by
+    /// a parsed session-file title.
     pub title_locked: bool,
     pub agent_type: String,
     pub status: ConversationStatus,

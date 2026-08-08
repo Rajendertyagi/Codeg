@@ -19,12 +19,14 @@ use crate::acp::delegation::broker::{DelegationBroker, StatusWait};
 use crate::acp::delegation::transport::{
     read_frame, write_frame, BrokerAskRequest, BrokerCancelRequest, BrokerCancelTaskRequest,
     BrokerCommitFeedbackRequest, BrokerFeedbackRequest, BrokerMessage, BrokerRequest,
-    BrokerResponse, BrokerSessionRequest, BrokerStatusRequest, BrokerTaskCompleteRequest,
+    BrokerCreateAutomationRequest, BrokerCreateWorkTaskRequest, BrokerResponse,
+    BrokerSessionRequest, BrokerStatusRequest, BrokerTaskCompleteRequest,
     BrokerTaskProgressRequest,
 };
 use crate::acp::delegation::types::{DelegationRequest, DelegationTaskReport, TaskStatus};
 use crate::acp::feedback::{PendingFeedback, SessionFeedbackAccess};
 use crate::acp::question::{QuestionOutcome, SessionQuestionAccess};
+use crate::acp::chat_authoring::{AuthoringContext, AuthoringOutcome, ChatAuthoringAccess};
 use crate::acp::session_info::{SessionInfo, SessionInfoAccess};
 use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
 use crate::models::AgentType;
@@ -101,6 +103,11 @@ pub struct DelegationListener {
     /// task the parent connection is executing. Same token → parent-connection
     /// scoping as the delegation arms.
     pub tasks: Arc<dyn WorkTaskToolAccess>,
+    /// Creates automations / board tasks on behalf of the chat that asked
+    /// (`create_automation` / `create_work_task`). The impl re-checks the
+    /// feature flags at call time, so flipping the setting off stops writes
+    /// from sessions that were launched while it was on.
+    pub authoring: Arc<dyn ChatAuthoringAccess>,
 }
 
 impl DelegationListener {
@@ -113,6 +120,7 @@ impl DelegationListener {
         questions: Arc<dyn SessionQuestionAccess>,
         session_info: Arc<dyn SessionInfoAccess>,
         tasks: Arc<dyn WorkTaskToolAccess>,
+        authoring: Arc<dyn ChatAuthoringAccess>,
     ) -> Arc<Self> {
         Arc::new(Self {
             broker,
@@ -122,6 +130,7 @@ impl DelegationListener {
             questions,
             session_info,
             tasks,
+            authoring,
         })
     }
 
@@ -325,6 +334,16 @@ impl DelegationListener {
             BrokerMessage::TaskComplete(req) => {
                 task_ack_response(self.process_task_complete(req).await)?
             }
+            BrokerMessage::CreateAutomation(req) => {
+                // A bounded DB write. Like SessionInfo it never long-polls, so
+                // there is no peer-close race to run — and unlike Ask there is
+                // nothing to tear down if the caller cancels: either the row
+                // landed or it didn't, and the response is simply dropped.
+                authoring_response(self.process_create_automation(req).await)?
+            }
+            BrokerMessage::CreateWorkTask(req) => {
+                authoring_response(self.process_create_work_task(req).await)?
+            }
             BrokerMessage::Cancel(cancel) => {
                 self.process_cancel(cancel).await;
                 // Empty ack — the companion only uses this to detect the
@@ -525,6 +544,43 @@ impl DelegationListener {
             .await
     }
 
+    /// Resolve the caller's [`AuthoringContext`] from its per-launch token: the
+    /// conversation it is currently in (for defaulting the target project) plus
+    /// the working directory recorded at injection. `None` when the token is
+    /// invalid — the caller gets a soft refusal, not a leak of whether the token
+    /// merely expired.
+    async fn authoring_context(&self, token: &str) -> Option<AuthoringContext> {
+        let entry = self.tokens.lookup(token).await?;
+        let conversation_id = self
+            .parent_lookup
+            .current_conversation_id(&entry.parent_connection_id)
+            .await;
+        Some(AuthoringContext {
+            conversation_id,
+            working_dir: entry.working_dir,
+        })
+    }
+
+    /// Validate the token and hand the automation spec to the authoring impl,
+    /// which re-checks the feature flag before writing.
+    async fn process_create_automation(
+        &self,
+        req: BrokerCreateAutomationRequest,
+    ) -> AuthoringOutcome {
+        let Some(ctx) = self.authoring_context(&req.token).await else {
+            return AuthoringOutcome::rejected("automation", "invalid token");
+        };
+        self.authoring.create_automation(ctx, req.spec).await
+    }
+
+    /// Validate the token and hand the task spec to the authoring impl.
+    async fn process_create_work_task(&self, req: BrokerCreateWorkTaskRequest) -> AuthoringOutcome {
+        let Some(ctx) = self.authoring_context(&req.token).await else {
+            return AuthoringOutcome::rejected("work_task", "invalid token");
+        };
+        self.authoring.create_work_task(ctx, req.spec).await
+    }
+
     async fn process(&self, req: BrokerRequest) -> DelegationTaskReport {
         // 1. Token + parent_connection_id consistency check. Treat both as
         //    "canceled" since the LLM can't usefully react to either —
@@ -661,6 +717,17 @@ fn session_response(info: SessionInfo) -> std::io::Result<BrokerResponse> {
 fn task_ack_response(ack: TaskReportAck) -> std::io::Result<BrokerResponse> {
     Ok(BrokerResponse {
         outcome: serde_json::to_value(&ack).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("encode: {e}"))
+        })?,
+    })
+}
+
+/// Serialize an [`AuthoringOutcome`] into a [`BrokerResponse`] for the
+/// `CreateAutomation` / `CreateWorkTask` arms — the companion renders it into
+/// the tool result.
+fn authoring_response(outcome: AuthoringOutcome) -> std::io::Result<BrokerResponse> {
+    Ok(BrokerResponse {
+        outcome: serde_json::to_value(&outcome).map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("encode: {e}"))
         })?,
     })
@@ -900,6 +967,45 @@ mod tests {
         }
     }
 
+    use crate::acp::chat_authoring::{NewAutomationSpec, NewWorkTaskSpec};
+
+    /// Records what the listener handed down and returns a canned outcome, so
+    /// authoring tests can assert the token → context resolution without a DB.
+    #[derive(Default)]
+    struct StubAuthoring {
+        automations: tokio::sync::Mutex<Vec<(AuthoringContext, NewAutomationSpec)>>,
+        work_tasks: tokio::sync::Mutex<Vec<(AuthoringContext, NewWorkTaskSpec)>>,
+    }
+    #[async_trait]
+    impl ChatAuthoringAccess for StubAuthoring {
+        async fn create_automation(
+            &self,
+            ctx: AuthoringContext,
+            spec: NewAutomationSpec,
+        ) -> AuthoringOutcome {
+            self.automations.lock().await.push((ctx, spec));
+            AuthoringOutcome {
+                created: true,
+                kind: "automation".into(),
+                id: Some(7),
+                ..Default::default()
+            }
+        }
+        async fn create_work_task(
+            &self,
+            ctx: AuthoringContext,
+            spec: NewWorkTaskSpec,
+        ) -> AuthoringOutcome {
+            self.work_tasks.lock().await.push((ctx, spec));
+            AuthoringOutcome {
+                created: true,
+                kind: "work_task".into(),
+                id: Some(9),
+                ..Default::default()
+            }
+        }
+    }
+
     use tokio::sync::oneshot;
 
     async fn make_broker(mock: Arc<MockSpawner>) -> Arc<DelegationBroker> {
@@ -933,6 +1039,7 @@ mod tests {
             Arc::new(StubQuestion::default()),
             Arc::new(StubSessionInfo::default()),
             Arc::new(StubTaskTools),
+            Arc::new(StubAuthoring::default()),
         )
     }
 
@@ -954,6 +1061,7 @@ mod tests {
             Arc::new(StubQuestion::default()),
             Arc::new(StubSessionInfo::default()),
             Arc::new(StubTaskTools),
+            Arc::new(StubAuthoring::default()),
         )
     }
 
@@ -976,6 +1084,7 @@ mod tests {
             questions,
             Arc::new(StubSessionInfo::default()),
             Arc::new(StubTaskTools),
+            Arc::new(StubAuthoring::default()),
         )
     }
 
@@ -997,6 +1106,31 @@ mod tests {
             Arc::new(StubQuestion::default()),
             session_info,
             Arc::new(StubTaskTools),
+            Arc::new(StubAuthoring::default()),
+        )
+    }
+
+    /// Build a listener whose authoring access is the given stub, so
+    /// `create_automation` / `create_work_task` tests can assert what the
+    /// listener resolved and passed down.
+    fn make_authoring_listener(
+        tokens: Arc<TokenRegistry>,
+        authoring: Arc<StubAuthoring>,
+        parent_conversation: Option<i32>,
+    ) -> Arc<DelegationListener> {
+        let broker = Arc::new(DelegationBroker::new(
+            Arc::new(MockSpawner::new()) as Arc<dyn ConnectionSpawner>,
+            Arc::new(AlwaysRootLookup) as Arc<dyn ConversationDepthLookup>,
+        ));
+        DelegationListener::new(
+            broker,
+            tokens,
+            Arc::new(StaticParentLookup(parent_conversation)),
+            Arc::new(StubFeedback::default()),
+            Arc::new(StubQuestion::default()),
+            Arc::new(StubSessionInfo::default()),
+            Arc::new(StubTaskTools),
+            authoring,
         )
     }
 
@@ -1823,6 +1957,131 @@ mod tests {
         assert_eq!(resp.outcome["session_id"], 42);
         // The resolver was never consulted for an unauthenticated caller.
         assert!(session_info.calls.lock().await.is_empty());
+    }
+
+    /// A valid token resolves the caller's conversation + working dir and hands
+    /// both down as the [`AuthoringContext`], so the impl can default the target
+    /// project to the project this chat is in.
+    #[tokio::test]
+    async fn create_automation_resolves_caller_context() {
+        let authoring = Arc::new(StubAuthoring::default());
+        let tokens = Arc::new(TokenRegistry::default());
+        tokens
+            .register(
+                "tok".into(),
+                TokenEntry {
+                    parent_connection_id: "parent-conn".into(),
+                    working_dir: PathBuf::from("/repo/app"),
+                },
+            )
+            .await;
+        let listener = make_authoring_listener(tokens, authoring.clone(), Some(42));
+
+        let (mut client, mut server) = duplex(8 * 1024);
+        let server_task = tokio::spawn(async move {
+            listener.serve_one(&mut server).await.unwrap();
+        });
+        let msg = BrokerMessage::CreateAutomation(BrokerCreateAutomationRequest {
+            token: "tok".into(),
+            spec: NewAutomationSpec {
+                name: "Nightly audit".into(),
+                prompt: "audit deps".into(),
+                cron: Some("0 3 * * *".into()),
+                timezone: None,
+                action: Default::default(),
+                agent_type: None,
+                folder_path: None,
+                enabled: true,
+            },
+        });
+        write_frame(&mut client, &msg).await.unwrap();
+        let resp: BrokerResponse = read_frame(&mut client).await.unwrap();
+        server_task.await.unwrap();
+
+        assert_eq!(resp.outcome["created"], true);
+        assert_eq!(resp.outcome["id"], 7);
+        let calls = authoring.automations.lock().await;
+        let (ctx, spec) = calls.first().expect("impl was called");
+        assert_eq!(ctx.conversation_id, Some(42));
+        assert_eq!(ctx.working_dir, PathBuf::from("/repo/app"));
+        assert_eq!(spec.name, "Nightly audit");
+    }
+
+    /// A caller with no conversation yet still reaches the impl — the working
+    /// directory alone can resolve a project — so the arm must not gate on it.
+    #[tokio::test]
+    async fn create_work_task_passes_through_without_a_conversation() {
+        let authoring = Arc::new(StubAuthoring::default());
+        let tokens = Arc::new(TokenRegistry::default());
+        tokens
+            .register(
+                "tok".into(),
+                TokenEntry {
+                    parent_connection_id: "parent-conn".into(),
+                    working_dir: PathBuf::from("/repo/app"),
+                },
+            )
+            .await;
+        let listener = make_authoring_listener(tokens, authoring.clone(), None);
+
+        let (mut client, mut server) = duplex(8 * 1024);
+        let server_task = tokio::spawn(async move {
+            listener.serve_one(&mut server).await.unwrap();
+        });
+        let msg = BrokerMessage::CreateWorkTask(BrokerCreateWorkTaskRequest {
+            token: "tok".into(),
+            spec: NewWorkTaskSpec {
+                title: "Fix the flake".into(),
+                prompt: "the retry test is flaky".into(),
+                agent_type: None,
+                folder_path: None,
+            },
+        });
+        write_frame(&mut client, &msg).await.unwrap();
+        let resp: BrokerResponse = read_frame(&mut client).await.unwrap();
+        server_task.await.unwrap();
+
+        assert_eq!(resp.outcome["created"], true);
+        assert_eq!(resp.outcome["id"], 9);
+        let calls = authoring.work_tasks.lock().await;
+        let (ctx, spec) = calls.first().expect("impl was called");
+        assert_eq!(ctx.conversation_id, None);
+        assert_eq!(spec.title, "Fix the flake");
+    }
+
+    /// An invalid token is a soft refusal that NEVER reaches the impl — nothing
+    /// gets written on behalf of an unauthenticated caller.
+    #[tokio::test]
+    async fn create_automation_invalid_token_never_reaches_impl() {
+        let authoring = Arc::new(StubAuthoring::default());
+        // No token registered.
+        let tokens = Arc::new(TokenRegistry::default());
+        let listener = make_authoring_listener(tokens, authoring.clone(), Some(1));
+
+        let (mut client, mut server) = duplex(8 * 1024);
+        let server_task = tokio::spawn(async move {
+            listener.serve_one(&mut server).await.unwrap();
+        });
+        let msg = BrokerMessage::CreateAutomation(BrokerCreateAutomationRequest {
+            token: "bogus".into(),
+            spec: NewAutomationSpec {
+                name: "n".into(),
+                prompt: "p".into(),
+                cron: None,
+                timezone: None,
+                action: Default::default(),
+                agent_type: None,
+                folder_path: None,
+                enabled: true,
+            },
+        });
+        write_frame(&mut client, &msg).await.unwrap();
+        let resp: BrokerResponse = read_frame(&mut client).await.unwrap();
+        server_task.await.unwrap();
+
+        assert_eq!(resp.outcome["created"], false);
+        assert_eq!(resp.outcome["kind"], "automation");
+        assert!(authoring.automations.lock().await.is_empty());
     }
 
     /// `CommitFeedback` marks the named ids delivered, scoped (via the token) to

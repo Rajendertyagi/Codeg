@@ -14,6 +14,7 @@ import {
   Archive,
   ArchiveRestore,
   Ban,
+  CalendarClock,
   ChevronDown,
   ChevronUp,
   CircleAlert,
@@ -146,6 +147,8 @@ interface TaskDetailSheetProps {
    *  backend transition, same thing worth writing down. */
   onCancel: (task: WorkTask) => void
   onEdit: (task: WorkTask) => void
+  /** Opens the page-owned schedule dialog (to-do tasks only). */
+  onSchedule: (task: WorkTask) => void
 }
 
 /** One button of the sheet's action panel (see below). */
@@ -179,6 +182,7 @@ export function TaskDetailSheet({
   onComplete,
   onCancel,
   onEdit,
+  onSchedule,
 }: TaskDetailSheetProps) {
   const t = useTranslations("Tasks")
   // Backs the follow-up composer's `@` references and `/` command probe. The
@@ -415,6 +419,13 @@ export function TaskDetailSheet({
             label: t("actionStart"),
             filled: true,
             onClick: () => run(() => workTaskStart(task.id)),
+          })
+          // Starting later is the same decision as starting now, so it sits
+          // beside it rather than in the utility bar below.
+          zoneActions.push({
+            icon: CalendarClock,
+            label: t("actionSchedule"),
+            onClick: () => onSchedule(task),
           })
           break
         case "queued":
@@ -900,6 +911,16 @@ export function TaskDetailSheet({
                             -{task.deletions ?? 0}
                           </span>
                         </span>
+                      </span>
+                    </InfoRow>
+                  ) : null}
+                  {/* Above "created": it is the only date here that is still
+                      ahead of the task rather than behind it. */}
+                  {task.status === "todo" && task.scheduled_at ? (
+                    <InfoRow label={t("detailScheduled")}>
+                      <span className="inline-flex items-center gap-1 text-primary">
+                        <CalendarClock className="size-3" aria-hidden="true" />
+                        {formatDateTime(task.scheduled_at)}
                       </span>
                     </InfoRow>
                   ) : null}
