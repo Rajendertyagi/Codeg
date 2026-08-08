@@ -1,5 +1,5 @@
 diff --git a/src/components/conversations/conversation-detail-header.tsx b/src/components/conversations/conversation-detail-header.tsx
-index 9047b678..4a57afd8 100644
+index 9047b678..c636bc87 100644
 --- a/src/components/conversations/conversation-detail-header.tsx
 +++ b/src/components/conversations/conversation-detail-header.tsx
 @@ -1,6 +1,6 @@
@@ -33,7 +33,7 @@ index 9047b678..4a57afd8 100644
  import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-context-bar"
  import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
  import { useTabActions } from "@/contexts/tab-context"
-@@ -234,6 +239,41 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+@@ -234,6 +239,42 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
      setDetails(resolved)
    }, [conversationId, runtimeConversationId, runtimeId])
  
@@ -69,13 +69,14 @@ index 9047b678..4a57afd8 100644
 +    }
 +  }, [conversationId])
 +
-+  const autoApproveOnLabel = t.has("autoApproveOn") ? t("autoApproveOn") : "Auto-accept: on"
-+  const autoApproveOffLabel = t.has("autoApproveOff") ? t("autoApproveOff") : "Auto-accept: off"
++  const tAuto = useTranslations("Folder.chat.messageInput")
++  const autoApproveOnLabel = tAuto.has("autoApproveOn") ? tAuto("autoApproveOn") : "Auto-accept: on"
++  const autoApproveOffLabel = tAuto.has("autoApproveOff") ? tAuto("autoApproveOff") : "Auto-accept: off"
 +
    return (
      // Transparent (no surface class): the title header reads as part of the
      // message canvas below it rather than as a frosted chrome band. With a
-@@ -258,6 +298,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+@@ -258,6 +299,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
          </span>
        </div>
        <div className="flex shrink-0 items-center">
