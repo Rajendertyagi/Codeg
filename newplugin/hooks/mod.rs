@@ -111,7 +111,7 @@ pub async fn toggle_auto_approve_conversation(
 pub async fn get_auto_approve_conversation(
     conversation_id: i32,
 ) -> Result<AutoApproveConversationResult, String> {
-    Ok(custom_auto_approve::get_per_chat_auto_approve_result(conversation_id))
+    Ok(custom_auto_approve::get_per_chat_auto_approve_result(conversation_id).await)
 }
 
 /// Save (insert or replace) a custom workflow.
