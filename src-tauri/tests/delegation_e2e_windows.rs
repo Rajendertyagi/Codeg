@@ -104,6 +104,27 @@ impl codeg_lib::acp::work_task_tools::WorkTaskToolAccess for NoTaskTools {
     }
 }
 
+/// Chat-authoring stub: the e2e delegation tests never exercise the authoring
+/// arms.
+struct NoAuthoring;
+#[async_trait]
+impl codeg_lib::acp::chat_authoring::ChatAuthoringAccess for NoAuthoring {
+    async fn create_automation(
+        &self,
+        _ctx: codeg_lib::acp::chat_authoring::AuthoringContext,
+        _spec: codeg_lib::acp::chat_authoring::NewAutomationSpec,
+    ) -> codeg_lib::acp::chat_authoring::AuthoringOutcome {
+        codeg_lib::acp::chat_authoring::AuthoringOutcome::rejected("automation", "no authoring")
+    }
+    async fn create_work_task(
+        &self,
+        _ctx: codeg_lib::acp::chat_authoring::AuthoringContext,
+        _spec: codeg_lib::acp::chat_authoring::NewWorkTaskSpec,
+    ) -> codeg_lib::acp::chat_authoring::AuthoringOutcome {
+        codeg_lib::acp::chat_authoring::AuthoringOutcome::rejected("work_task", "no authoring")
+    }
+}
+
 fn unique_pipe(tag: &str) -> String {
     format!(
         r"\\.\pipe\codeg-e2e-{}-{}-{}",
@@ -193,6 +214,7 @@ async fn end_to_end_named_pipe_happy_path() {
         Arc::new(NoQuestions) as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let pipe = unique_pipe("happy");
@@ -295,6 +317,7 @@ async fn end_to_end_named_pipe_back_to_back_requests() {
         Arc::new(NoQuestions) as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let pipe = unique_pipe("repeat");

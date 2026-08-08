@@ -264,6 +264,7 @@ async fn async_main() -> ExitCode {
         feedback_config,
         question_config,
         session_info_config,
+        chat_authoring_config,
     ) = codeg_lib::app_state::build_delegation_stack(
         &connection_manager,
         db.conn.clone(),
@@ -289,6 +290,7 @@ async fn async_main() -> ExitCode {
         feedback_config: feedback_config.clone(),
         question_config: question_config.clone(),
         session_info_config: session_info_config.clone(),
+        chat_authoring_config: chat_authoring_config.clone(),
         system_op_lock: codeg_lib::app_state::default_system_op_lock(),
         update_state: codeg_lib::app_state::default_update_state(),
     });
@@ -325,6 +327,13 @@ async fn async_main() -> ExitCode {
         &session_info_config,
     )
     .await;
+    // Same for the chat-authoring flags, so the first companion launch knows
+    // whether to advertise `create_automation` / `create_work_task`.
+    codeg_lib::commands::chat_authoring::apply_persisted_chat_authoring_config(
+        &state.db.conn,
+        &chat_authoring_config,
+    )
+    .await;
 
     // Spawn the delegation listener so companion processes can round-trip
     // through the broker. Path is PID-scoped, so the listener owns it for
@@ -348,6 +357,13 @@ async fn async_main() -> ExitCode {
                 }),
             )),
             Arc::new(codeg_lib::work_task::EngineWorkTaskTools),
+            Arc::new(codeg_lib::commands::chat_authoring::DbChatAuthoring::new(
+                Arc::new(codeg_lib::db::AppDatabase {
+                    conn: state.db.conn.clone(),
+                }),
+                state.emitter.clone(),
+                chat_authoring_config.clone(),
+            )),
         );
         let socket = delegation_socket_path.clone();
         tokio::spawn(async move {

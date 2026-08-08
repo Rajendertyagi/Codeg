@@ -14,6 +14,11 @@ import { useTranslations } from "next-intl"
 import { workTaskList } from "@/lib/api"
 import { sendSystemNotification } from "@/lib/notification"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
+import {
+  loadTasksViewMode,
+  saveTasksViewMode,
+  type TasksViewMode,
+} from "@/lib/tasks-board-filter-storage"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import type { WorkTask } from "@/lib/types"
 
@@ -26,7 +31,17 @@ interface TasksViewContextValue {
   tasks: WorkTask[]
   /** Count of tasks waiting on the user — the sidebar badge. */
   attentionCount: number
+  /** True until the first fetch settles (success OR failure). Lets the board
+   *  tell "still loading" from "genuinely empty" and show a skeleton instead of
+   *  flashing the empty state. Never flips back on later refetches — those
+   *  update an already-painted board. */
+  loading: boolean
   refetch: () => Promise<void>
+  /** Board ⇄ list. Lifted here rather than owned by TasksPage because the
+   *  switch renders in the window-chrome strip (TasksPageTitle) — a different
+   *  branch of the tree — while the layout it drives renders in the page. */
+  viewMode: TasksViewMode
+  setViewMode: (mode: TasksViewMode) => void
 }
 
 const TasksViewContext = createContext<TasksViewContextValue | null>(null)
@@ -57,6 +72,14 @@ export function TasksViewProvider({ children }: { children: ReactNode }) {
     tRef.current = t
   }, [t])
   const [tasks, setTasks] = useState<WorkTask[]>([])
+  const [loading, setLoading] = useState(true)
+  // Restored synchronously from localStorage: the Tasks route mounts only after
+  // a client-side route switch (never prerendered), so there is no SSR markup to
+  // mismatch — and the page paints in the remembered mode right away.
+  const [viewMode, setViewMode] = useState<TasksViewMode>(loadTasksViewMode)
+  useEffect(() => {
+    saveTasksViewMode(viewMode)
+  }, [viewMode])
   const reqRef = useRef(0)
   // Statuses as of the last successful fetch; null until then, so the first
   // load (pure history) never notifies.
@@ -74,8 +97,12 @@ export function TasksViewProvider({ children }: { children: ReactNode }) {
         list.map((task) => [task.id, task.status])
       )
       setTasks(list)
+      setLoading(false)
     } catch {
-      // ignore — a later event/refetch recovers
+      // ignore — a later event/refetch recovers. A failed FIRST fetch still
+      // ends the loading state (unless a newer one is already in flight): the
+      // board falls back to its empty state rather than pulsing forever.
+      if (id === reqRef.current) setLoading(false)
     }
   }, [])
 
@@ -115,8 +142,8 @@ export function TasksViewProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<TasksViewContextValue>(
-    () => ({ tasks, attentionCount, refetch }),
-    [tasks, attentionCount, refetch]
+    () => ({ tasks, attentionCount, loading, refetch, viewMode, setViewMode }),
+    [tasks, attentionCount, loading, refetch, viewMode]
   )
 
   return (

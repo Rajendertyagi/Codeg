@@ -98,6 +98,27 @@ impl codeg_lib::acp::work_task_tools::WorkTaskToolAccess for NoTaskTools {
     }
 }
 
+/// Chat-authoring stub: the e2e delegation tests never exercise the authoring
+/// arms.
+struct NoAuthoring;
+#[async_trait::async_trait]
+impl codeg_lib::acp::chat_authoring::ChatAuthoringAccess for NoAuthoring {
+    async fn create_automation(
+        &self,
+        _ctx: codeg_lib::acp::chat_authoring::AuthoringContext,
+        _spec: codeg_lib::acp::chat_authoring::NewAutomationSpec,
+    ) -> codeg_lib::acp::chat_authoring::AuthoringOutcome {
+        codeg_lib::acp::chat_authoring::AuthoringOutcome::rejected("automation", "no authoring")
+    }
+    async fn create_work_task(
+        &self,
+        _ctx: codeg_lib::acp::chat_authoring::AuthoringContext,
+        _spec: codeg_lib::acp::chat_authoring::NewWorkTaskSpec,
+    ) -> codeg_lib::acp::chat_authoring::AuthoringOutcome {
+        codeg_lib::acp::chat_authoring::AuthoringOutcome::rejected("work_task", "no authoring")
+    }
+}
+
 /// Controllable question access for the ask round-trip test: `register_question`
 /// parks a sender keyed by a freshly-minted id; the test pops it via
 /// `take_pending` and resolves it, exactly as a user answering the card would.
@@ -186,6 +207,7 @@ async fn end_to_end_uds_happy_path() {
         Arc::new(StubQuestions::default()) as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     // PID-scoped socket inside the OS temp dir — no clashes across test bins.
@@ -302,6 +324,7 @@ async fn end_to_end_uds_batch_status() {
         Arc::new(StubQuestions::default()) as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -389,6 +412,7 @@ async fn end_to_end_uds_invalid_token_rejected() {
         Arc::new(StubQuestions::default()) as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -455,6 +479,7 @@ async fn end_to_end_uds_ask_question_round_trip() {
         questions.clone() as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -595,6 +620,7 @@ async fn end_to_end_uds_ask_revoked_after_register_declines() {
         questions as Arc<dyn SessionQuestionAccess>,
         Arc::new(NoSessionInfo) as Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess>,
         Arc::new(NoTaskTools) as Arc<dyn codeg_lib::acp::work_task_tools::WorkTaskToolAccess>,
+        Arc::new(NoAuthoring) as Arc<dyn codeg_lib::acp::chat_authoring::ChatAuthoringAccess>,
     );
 
     let dir = tempfile::tempdir().unwrap();

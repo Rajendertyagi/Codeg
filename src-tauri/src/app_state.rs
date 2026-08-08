@@ -59,6 +59,12 @@ pub struct AppState {
     /// the session-info settings command on save. Populated at startup by
     /// `apply_persisted_session_info_config`.
     pub session_info_config: crate::acp::session_info::SessionInfoRuntimeConfig,
+    /// Hot-swappable chat-authoring flags (`create_automation` /
+    /// `create_work_task`). Shared with the `DelegationInjection` so MCP
+    /// injection reads it, re-read by the authoring write path at call time, and
+    /// updated by the chat-authoring settings command on save. Populated at
+    /// startup by `apply_persisted_chat_authoring_config`.
+    pub chat_authoring_config: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
     /// Serializes mutually-exclusive system operations — in-place
     /// self-update, restart, rollback — so a second click can't race a
     /// download/swap already in flight. Handlers `try_lock` and reject when
@@ -109,6 +115,7 @@ pub fn build_delegation_stack(
     crate::acp::feedback::FeedbackRuntimeConfig,
     crate::acp::question::QuestionRuntimeConfig,
     crate::acp::session_info::SessionInfoRuntimeConfig,
+    crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
 ) {
     use crate::acp::connection::DelegationInjection;
     use crate::acp::delegation::broker::{
@@ -159,6 +166,7 @@ pub fn build_delegation_stack(
     let feedback = crate::acp::feedback::FeedbackRuntimeConfig::new();
     let ask = crate::acp::question::QuestionRuntimeConfig::new();
     let sessions = crate::acp::session_info::SessionInfoRuntimeConfig::new();
+    let authoring = crate::acp::chat_authoring::ChatAuthoringRuntimeConfig::new();
 
     // Install the injection on the manager so spawn_agent picks it up
     // without an extra parameter at every call site.
@@ -170,6 +178,7 @@ pub fn build_delegation_stack(
         feedback: feedback.clone(),
         ask: ask.clone(),
         sessions: sessions.clone(),
+        authoring: authoring.clone(),
         // Same backing manager as the listener's question lookup; used only by
         // the run_connection teardown guard to reclaim a parked ask.
         questions: Arc::new(crate::acp::manager::ConnectionManagerQuestionLookup {
@@ -182,7 +191,7 @@ pub fn build_delegation_stack(
         }) as Arc<dyn crate::acp::plan_approval::SessionPlanApprovalAccess>,
     });
 
-    (broker, tokens, socket_path, feedback, ask, sessions)
+    (broker, tokens, socket_path, feedback, ask, sessions, authoring)
 }
 
 impl AppState {
@@ -210,6 +219,7 @@ impl AppState {
             feedback_config,
             question_config,
             session_info_config,
+            chat_authoring_config,
         ) = build_delegation_stack(&connection_manager, db.conn.clone(), data_dir.clone());
 
         Self {
@@ -234,6 +244,7 @@ impl AppState {
             feedback_config,
             question_config,
             session_info_config,
+            chat_authoring_config,
             system_op_lock: default_system_op_lock(),
             update_state: default_update_state(),
         }

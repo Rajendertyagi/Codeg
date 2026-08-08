@@ -12,6 +12,25 @@ export const BOARD_COLUMN_IDS: BoardColumnId[] = [
 ]
 
 /**
+ * The exact statuses behind each column, written out as a table.
+ * `columnForStatus` stays the single source of truth for the mapping; this is
+ * its spec copy, and board-columns.test.ts asserts the two agree and that every
+ * `WorkTaskStatus` appears here exactly once — which is what makes adding a
+ * status without filing it in a column a test failure rather than a silent
+ * disappearance from the board.
+ */
+export const STATUSES_BY_COLUMN: Record<BoardColumnId, WorkTaskStatus[]> = {
+  todo: ["todo", "queued"],
+  inProgress: ["preparing", "running"],
+  attention: ["awaiting_input", "review", "merging", "failed"],
+  done: ["done", "canceled"],
+}
+
+/** Every status, column order — the flattened spec table (see above). */
+export const ALL_WORK_TASK_STATUSES: WorkTaskStatus[] =
+  BOARD_COLUMN_IDS.flatMap((col) => STATUSES_BY_COLUMN[col])
+
+/**
  * DB status → board column. `canceled` lives in the Done column but is hidden
  * unless the "show canceled" toggle is on (filtered by `groupTasksByColumn`).
  */
@@ -70,9 +89,40 @@ export function groupTasksByColumn(
     grouped[columnForStatus(task.status)].push(task)
   }
   for (const column of BOARD_COLUMN_IDS) {
-    grouped[column].sort(
-      (a, b) => parseTimestamp(b.updated_at) - parseTimestamp(a.updated_at)
-    )
+    grouped[column].sort(byFreshest)
   }
   return grouped
+}
+
+/** Freshest-first, the order every board column and the list view read in. */
+function byFreshest(a: WorkTask, b: WorkTask): number {
+  return parseTimestamp(b.updated_at) - parseTimestamp(a.updated_at)
+}
+
+/**
+ * The list view's rows: one flat, freshest-first sequence instead of four
+ * columns. `group` is the list-only status filter — a whole board COLUMN rather
+ * than individual statuses (`null` = every status, which is the default), so
+ * the list narrows by the same four buckets the board sorts into and the two
+ * views can't describe the same tasks with different words.
+ *
+ * The visibility toggles apply exactly as they do on the board: `showCanceled`
+ * and `showArchived` are one pair of controls shared by both views. (They have
+ * to be: a column-wide filter cannot single out `canceled`, which lives inside
+ * the Done column.)
+ */
+export function filterTasksForList(
+  tasks: WorkTask[],
+  group: BoardColumnId | null,
+  showCanceled: boolean,
+  showArchived: boolean
+): WorkTask[] {
+  return tasks
+    .filter(
+      (task) =>
+        (task.status !== "canceled" || showCanceled) &&
+        (task.archived_at == null || showArchived) &&
+        (group == null || columnForStatus(task.status) === group)
+    )
+    .sort(byFreshest)
 }

@@ -9,6 +9,7 @@ import {
   AutomationsPage,
   AutomationsPageTitle,
 } from "@/components/automations/automations-page"
+import { TasksChromeActions } from "@/components/tasks/tasks-chrome-actions"
 import { TasksPage, TasksPageTitle } from "@/components/tasks/tasks-page"
 import {
   TokenUsagePage,
@@ -37,6 +38,24 @@ const WORKBENCH_ROUTE_STRIPS: Partial<Record<WorkbenchRouteId, ComponentType>> =
     tokenUsage: TokenUsagePageTitle,
   }
 
+/** What a chrome cluster hands its route's buttons: the host's own button
+ *  metrics, so one component fits both the desktop overlay (`h-6`) and the
+ *  mobile title bar (`h-8`) without knowing which it is in. */
+export interface WorkbenchChromeActionsProps {
+  buttonClassName: string
+  iconClassName: string
+}
+
+/** Optional per-route buttons for the window's top-right chrome cluster, drawn
+ *  to the LEFT of the settings gear. A full-page route hides the terminal and
+ *  aux toggles (they act on the workspace it covers), so its own page-level
+ *  controls take that space instead of crowding the page. */
+const WORKBENCH_ROUTE_CHROME_ACTIONS: Partial<
+  Record<WorkbenchRouteId, ComponentType<WorkbenchChromeActionsProps>>
+> = {
+  tasks: TasksChromeActions,
+}
+
 /**
  * Renders the active non-conversation route page, or nothing when the
  * conversation workspace is active. WorkspaceContent overlays this on top of the
@@ -53,6 +72,16 @@ export function WorkbenchRouteStrip() {
   const { routeId } = useWorkbenchRoute()
   const Strip = WORKBENCH_ROUTE_STRIPS[routeId]
   return Strip ? <Strip /> : null
+}
+
+/** The active route's chrome-cluster buttons, or nothing. Rendered by both
+ *  chrome hosts (RightEdgeChrome on desktop, FolderTitleBar on mobile). */
+export function WorkbenchRouteChromeActions(
+  props: WorkbenchChromeActionsProps
+) {
+  const { routeId } = useWorkbenchRoute()
+  const Actions = WORKBENCH_ROUTE_CHROME_ACTIONS[routeId]
+  return Actions ? <Actions {...props} /> : null
 }
 
 /** Whether the active route contributes chrome-strip content — lets the host

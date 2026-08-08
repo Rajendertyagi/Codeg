@@ -153,6 +153,75 @@
     }
   },
   {
+    "name": "create_automation",
+    "description": "Save a codeg Automation: a reusable job — a prompt plus a target project — that codeg runs on a cron schedule (or on demand) without anyone present. Use it when the user asks for work that should REPEAT or happen at a TIME rather than right now: 'every morning', 'each Monday', 'nightly', 'every 30 minutes', 'before standup', 'set up a recurring …'. Do NOT use it for work the user wants done in this conversation — just do that work. Each run starts a fresh headless session in its own worktree with no memory of this chat, so `prompt` must be completely self-contained: state the goal, the relevant paths, and what a finished run looks like. Creating an automation does not run it now; the tool returns the id and the next fire time so you can tell the user when it will first go off. The user can edit, disable, run, or delete it on the Automations page.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["name", "prompt"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Short label shown in the automations list, e.g. 'Nightly dependency audit'."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The self-contained instruction each run executes. The run cannot see this conversation, so spell out the goal, the paths, and the definition of done."
+        },
+        "cron": {
+          "type": "string",
+          "description": "5-field cron, and only 5 fields: `min hour day-of-month month day-of-week`, e.g. `0 9 * * 1-5` for weekdays at 09:00. Day-of-week is POSIX (0 and 7 are both Sunday). A seconds field is NOT supported and is rejected. Interpreted in `timezone`. OMIT this to create a manual automation the user runs on demand from the Automations page."
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA zone the cron is read in, e.g. 'Asia/Shanghai'. Defaults to the machine's own zone — omit it unless the user names a different one."
+        },
+        "action": {
+          "type": "string",
+          "enum": ["launch_session", "enqueue_task"],
+          "description": "What a fire does. 'launch_session' (default) runs the prompt immediately in a headless agent session. 'enqueue_task' instead drops a card on the user's to-dos for the board's queue to pick up — use it when the user wants scheduled work to land somewhere they review rather than run unattended."
+        },
+        "agent_type": {
+          "type": "string",
+          "description": "Which local agent runs it (e.g. 'claude_code', 'codex'). Defaults to the target project's configured agent — omit unless the user asks for a specific one."
+        },
+        "folder_path": {
+          "type": "string",
+          "description": "Absolute path of the target project. Defaults to the project this conversation is in; pass it only to target a different project already open in codeg."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the schedule is live right away. Defaults to true; pass false to save it switched off."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_work_task",
+    "description": "Queue a card on codeg's to-dos. A task is a unit of work an agent later executes on its own branch/worktree, then hands back for the user to review and merge. Use it when the user wants work PARKED rather than done now — 'add a task to…', 'put this on the board', 'we should also fix X later' — or when you are splitting a large request into reviewable pieces and the user asked for that. Do NOT use it to do the thing the user just asked you to do in this conversation, and do NOT queue a task per trivial step. The executing agent starts cold with no view of this chat, so `prompt` must carry the full briefing. The tool returns the task id; the user tracks it in their to-dos.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["title", "prompt"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short card title, e.g. 'Migrate auth middleware to the new session API'."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The self-contained instruction the executing agent receives: the goal, the relevant files/paths, constraints, and what done looks like."
+        },
+        "agent_type": {
+          "type": "string",
+          "description": "Which local agent should run this task (e.g. 'claude_code', 'codex'). Omit to inherit the board's configured default."
+        },
+        "folder_path": {
+          "type": "string",
+          "description": "Absolute path of the target project. Defaults to the project this conversation is in; pass it only to target a different project already open in codeg."
+        }
+      }
+    }
+  },
+  {
     "name": "task_progress",
     "description": "Report a short progress milestone for the work task you are executing. It shows up on the task's board card and timeline in real time, so the user can follow along without opening the session. Call it at meaningful checkpoints — finished exploring, tests passing, starting the refactor — not for every small step. Fire-and-forget: it never blocks your work and returns immediately.",
     "inputSchema": {

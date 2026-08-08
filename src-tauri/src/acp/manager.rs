@@ -1510,9 +1510,15 @@ impl ConnectionManager {
         }
     }
 
-    /// Persist the two-row fork layout: re-point the current row at S2 with a
-    /// `[Fork]` title prefix, and INSERT a sibling row preserving the pre-fork
-    /// (S1) history at `PendingReview`. Returns the sibling row id.
+    /// Persist the two-row fork layout: re-point the current row at S2 under a
+    /// locked `[Fork]` title prefix, and INSERT a sibling row preserving the
+    /// pre-fork (S1) history at `PendingReview`, which inherits the original's
+    /// title lock. Returns the sibling row id.
+    ///
+    /// Both titles outlive the per-turn auto-title backfill by design: neither
+    /// the user's own name nor codeg's `[Fork] ` marker exists in the session
+    /// file the backfill re-parses, so an unlocked row would silently revert to
+    /// the parsed title on its next detail load.
     ///
     /// Factored out of [`fork_session`] so the cancellation-shielded task body
     /// stays readable. Everything runs in one transaction so a mid-sequence
@@ -1607,6 +1613,16 @@ impl ConnectionManager {
                     let folder_id = current.folder_id;
                     let agent_type_str = current.agent_type.clone();
                     let git_branch = current.git_branch.clone();
+                    // The lock rides along with the title it protects: the
+                    // sibling holds the pre-fork history of the very row the
+                    // user renamed, so a hand-picked name has to stay locked
+                    // there too. Born unlocked, the sibling's first detail load
+                    // re-parses S1 and lets `refresh_auto_title` adopt the
+                    // session-file title — the rename silently reverting on the
+                    // conversation the fork was supposed to leave untouched.
+                    // Inheriting (not forcing) keeps an auto-titled sibling
+                    // eligible for later backfills.
+                    let title_locked = current.title_locked;
                     // The sibling keeps the original's sidebar routing (a forked
                     // chat conversation must stay in the Chat group). `Delegate`
                     // is unreachable here — children are never forked from the
@@ -1624,6 +1640,20 @@ impl ConnectionManager {
                     let mut active: conversation::ActiveModel = current.into();
                     if let Some(ref clean) = clean_title {
                         active.title = Set(Some(format!("[Fork] {clean}")));
+                        // ...and lock it. The `[Fork] ` marker is codeg's own —
+                        // no parser derives it from a transcript — so on an
+                        // unlocked row it survives only until the next detail
+                        // load, where the auto-title backfill adopts the
+                        // session-file title and the two rows this fork just
+                        // created end up wearing the SAME name. Forking is a
+                        // deliberate user action on a conversation the user
+                        // named (or accepted the name of), so treating the
+                        // result as user-set is honest; the cost is that the
+                        // forked row stops tracking the session file's title,
+                        // exactly as a rename would. A titleless row writes no
+                        // title here and stays unlocked, so the backfill can
+                        // still give it its first name.
+                        active.title_locked = Set(true);
                     }
                     active.external_id = Set(Some(forked_session_id));
                     active.updated_at = Set(now);
@@ -1635,7 +1665,7 @@ impl ConnectionManager {
                         id: NotSet,
                         folder_id: Set(folder_id),
                         title: Set(clean_title),
-                        title_locked: Set(false),
+                        title_locked: Set(title_locked),
                         agent_type: Set(agent_type_str),
                         status: Set(ConversationStatus::PendingReview),
                         kind: Set(sibling_kind),
@@ -5509,6 +5539,234 @@ mod tests {
             sibling.title.as_deref(),
             Some("Renamed By User"),
             "sibling must preserve the LATEST committed title, not a stale snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_sibling_inherits_the_manual_title_lock() {
+        // A rename locks the row (`update_title` sets `title_locked`) precisely
+        // so the per-turn auto-title backfill can never overwrite the user's
+        // name. The sibling the fork inserts IS that conversation's pre-fork
+        // history, so it must inherit the lock: without it the user's name
+        // survives only until the sibling's first detail load, which re-parses
+        // S1 and adopts the session-file title (rename → fork → the original
+        // conversation silently reverts to its pre-rename name).
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-lock").await;
+
+        // "XXX" stands in for the session-file (parser-derived) title.
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("XXX".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::update_title(&db.conn, pre.id, "YYY".into())
+            .await
+            .unwrap();
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-fork-lock", pre.id, "session-S2", "session-S1").await;
+        let result = mgr.fork_session(&db, "c-fork-lock", None, None).await.unwrap();
+        let _ = join.await;
+
+        let sibling_id = result.sibling_conversation_id;
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.title.as_deref(), Some("YYY"));
+        assert!(
+            sibling.title_locked,
+            "the sibling carries the renamed conversation's history, so it must \
+             inherit the manual title lock"
+        );
+        // The forked row keeps the lock it already had (it is the same row).
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title.as_deref(), Some("[Fork] YYY"));
+        assert!(current.title_locked);
+
+        // End-to-end guard: this is exactly what the next detail load does
+        // (`get_folder_conversation_with_live_core` → `refresh_auto_title` with
+        // the title parsed out of the S1 transcript). It must be a no-op on
+        // both rows.
+        assert!(
+            !conversation_service::refresh_auto_title(&db.conn, sibling_id, "XXX".into())
+                .await
+                .unwrap(),
+            "the auto-title backfill must not revert the sibling's user-set name"
+        );
+        assert!(
+            !conversation_service::refresh_auto_title(&db.conn, pre.id, "XXX".into())
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            conversation_service::get_by_id(&db.conn, sibling_id)
+                .await
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("YYY")
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_locks_the_prefixed_title_it_writes() {
+        // The `[Fork] ` marker exists nowhere in the transcript, so on an
+        // unlocked row the very next detail load erases it: the auto-title
+        // backfill adopts the parsed session-file title, leaving the forked row
+        // and its sibling wearing the same name with nothing to tell them
+        // apart. The fork therefore locks the title it writes.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-prefix-lock").await;
+
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Auto Title".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!pre.title_locked, "an auto-titled row starts unlocked");
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-fork-prefix", pre.id, "session-S2", "session-S1").await;
+        let result = mgr
+            .fork_session(&db, "c-fork-prefix", None, None)
+            .await
+            .unwrap();
+        let _ = join.await;
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title.as_deref(), Some("[Fork] Auto Title"));
+        assert!(
+            current.title_locked,
+            "the fork's own title must be protected from the auto-title backfill"
+        );
+        // The backfill the next detail load runs, with the title parsed out of
+        // the forked transcript (a copy of S1, so the pre-fork title).
+        assert!(
+            !conversation_service::refresh_auto_title(&db.conn, pre.id, "Auto Title".into())
+                .await
+                .unwrap(),
+            "the backfill must not strip the `[Fork] ` marker"
+        );
+        assert_eq!(
+            conversation_service::get_by_id(&db.conn, pre.id)
+                .await
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("[Fork] Auto Title")
+        );
+        // The sibling wears the parsed title itself, so it needs no such
+        // protection — see `fork_session_sibling_stays_unlocked_for_an_auto_title`.
+        assert!(
+            !conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
+                .await
+                .unwrap()
+                .title_locked
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_leaves_a_titleless_row_unlocked() {
+        // Nothing to prefix means nothing to protect: a row forked before it
+        // ever got a title must stay unlocked, or the auto-title backfill could
+        // never give it its first name and it would read "Untitled" forever.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-untitled").await;
+
+        let pre =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-fork-untitled", pre.id, "session-S2", "session-S1").await;
+        let result = mgr
+            .fork_session(&db, "c-fork-untitled", None, None)
+            .await
+            .unwrap();
+        let _ = join.await;
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title, None, "no title to prefix");
+        assert!(!current.title_locked, "an unwritten title must stay unlocked");
+        let sibling = conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.title, None);
+        assert!(!sibling.title_locked);
+        // Both rows can still be named by the backfill.
+        assert!(
+            conversation_service::refresh_auto_title(&db.conn, pre.id, "First Name".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            conversation_service::refresh_auto_title(&db.conn, sibling.id, "First Name".into())
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_sibling_stays_unlocked_for_an_auto_title() {
+        // Inheriting the lock must mean INHERITING it, not always setting it:
+        // an auto-titled conversation's sibling stays eligible for the
+        // auto-title backfill, so a title the agent regenerates later still
+        // lands on the preserved history.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-unlocked").await;
+
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Auto Title".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!pre.title_locked, "a fresh row starts unlocked");
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-fork-unlocked", pre.id, "session-S2", "session-S1").await;
+        let result = mgr
+            .fork_session(&db, "c-fork-unlocked", None, None)
+            .await
+            .unwrap();
+        let _ = join.await;
+
+        let sibling_id = result.sibling_conversation_id;
+        assert!(
+            !conversation_service::get_by_id(&db.conn, sibling_id)
+                .await
+                .unwrap()
+                .title_locked,
+            "an auto-derived title must not become locked by forking"
+        );
+        assert!(
+            conversation_service::refresh_auto_title(&db.conn, sibling_id, "Newer Title".into())
+                .await
+                .unwrap(),
+            "the backfill must still be able to update an unlocked sibling"
         );
     }
 

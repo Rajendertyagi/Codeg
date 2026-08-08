@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { columnForStatus, groupTasksByColumn } from "./board-columns"
+import {
+  ALL_WORK_TASK_STATUSES,
+  BOARD_COLUMN_IDS,
+  columnForStatus,
+  filterTasksForList,
+  groupTasksByColumn,
+  STATUSES_BY_COLUMN,
+  type BoardColumnId,
+} from "./board-columns"
+import { TASKS_STATUS_GROUPS } from "@/lib/tasks-board-filter-storage"
 import type { WorkTask, WorkTaskStatus } from "@/lib/types"
 
 function task(
@@ -32,6 +41,7 @@ function task(
     merge_commit: null,
     preflight: null,
     archived_at: null,
+    scheduled_at: null,
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     started_at: null,
@@ -59,6 +69,103 @@ describe("columnForStatus", () => {
     // 已完成 = done (+ canceled behind the toggle)
     expect(columnForStatus("done")).toBe("done")
     expect(columnForStatus("canceled")).toBe("done")
+  })
+})
+
+describe("STATUSES_BY_COLUMN", () => {
+  it("agrees with columnForStatus and lists every status exactly once", () => {
+    // The list view's status filter reads this table; the board reads
+    // columnForStatus. A drift between them would put a status in a column of
+    // the filter menu that the board files somewhere else.
+    for (const [col, statuses] of Object.entries(STATUSES_BY_COLUMN)) {
+      for (const status of statuses) {
+        expect(columnForStatus(status)).toBe(col as BoardColumnId)
+      }
+    }
+    // Exhaustive by construction: adding a WorkTaskStatus without adding it
+    // here fails this list's own type check, and duplicates fail the Set size.
+    const every: WorkTaskStatus[] = [
+      "todo",
+      "queued",
+      "preparing",
+      "running",
+      "awaiting_input",
+      "review",
+      "merging",
+      "done",
+      "failed",
+      "canceled",
+    ]
+    expect(new Set(ALL_WORK_TASK_STATUSES).size).toBe(
+      ALL_WORK_TASK_STATUSES.length
+    )
+    expect([...ALL_WORK_TASK_STATUSES].sort()).toEqual([...every].sort())
+  })
+
+  it("agrees with the storage layer's copy of the group ids", () => {
+    // tasks-board-filter-storage.ts duplicates these ids so it stays free of
+    // component imports; a drift would silently reject a stored selection.
+    expect([...TASKS_STATUS_GROUPS]).toEqual(BOARD_COLUMN_IDS)
+  })
+})
+
+describe("filterTasksForList", () => {
+  it("returns every non-archived task, freshest first, with no group filter", () => {
+    const tasks = [
+      task(1, "todo", { updated_at: "2026-08-01T01:00:00Z" }),
+      task(2, "running", { updated_at: "2026-08-01T03:00:00Z" }),
+      task(3, "canceled", { updated_at: "2026-08-01T02:00:00Z" }),
+      task(4, "done", {
+        updated_at: "2026-08-01T04:00:00Z",
+        archived_at: "2026-08-01T04:00:00Z",
+      }),
+    ]
+    expect(
+      filterTasksForList(tasks, null, true, false).map((t) => t.id)
+    ).toEqual([2, 3, 1])
+    // Archived joins the list — still freshest-first — once the toggle is on.
+    expect(
+      filterTasksForList(tasks, null, true, true).map((t) => t.id)
+    ).toEqual([4, 2, 3, 1])
+  })
+
+  it("keeps only the selected column's statuses", () => {
+    const tasks = [
+      task(1, "todo"),
+      task(2, "review"),
+      task(3, "failed"),
+      task(4, "canceled"),
+    ]
+    // 等你处理 aggregates review + failed (+ awaiting_input / merging).
+    expect(
+      filterTasksForList(tasks, "attention", true, false).map((t) => t.id)
+    ).toEqual([2, 3])
+    // 已完成 is done + canceled — the filter narrows to a whole column, so
+    // canceled comes along with it.
+    expect(
+      filterTasksForList(tasks, "done", true, false).map((t) => t.id)
+    ).toEqual([4])
+  })
+
+  it("hides canceled tasks unless the toggle is on, like the board", () => {
+    // The group filter cannot single `canceled` out (it lives inside Done), so
+    // this toggle is the only control that can — shared with the board.
+    const tasks = [task(1, "done"), task(2, "canceled")]
+    expect(
+      filterTasksForList(tasks, null, false, false).map((t) => t.id)
+    ).toEqual([1])
+    expect(
+      filterTasksForList(tasks, "done", false, false).map((t) => t.id)
+    ).toEqual([1])
+  })
+
+  it("does not mutate the list it was given", () => {
+    const tasks = [
+      task(1, "todo", { updated_at: "2026-08-01T01:00:00Z" }),
+      task(2, "todo", { updated_at: "2026-08-01T05:00:00Z" }),
+    ]
+    filterTasksForList(tasks, null, true, false)
+    expect(tasks.map((t) => t.id)).toEqual([1, 2])
   })
 })
 

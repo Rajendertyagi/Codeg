@@ -830,6 +830,12 @@ pub(crate) async fn do_start_web_server_tauri(
             .state::<crate::acp::session_info::SessionInfoRuntimeConfig>()
             .inner()
             .clone(),
+        // Reuse the same chat-authoring config handle desktop MCP injection and
+        // the authoring write path read, so HTTP-side saves target the same flags.
+        chat_authoring_config: app
+            .state::<crate::acp::chat_authoring::ChatAuthoringRuntimeConfig>()
+            .inner()
+            .clone(),
         system_op_lock: crate::app_state::default_system_op_lock(),
         // Reuse the same handle the desktop `app_update` commands write to so
         // HTTP and webview readers see the identical update snapshot.
