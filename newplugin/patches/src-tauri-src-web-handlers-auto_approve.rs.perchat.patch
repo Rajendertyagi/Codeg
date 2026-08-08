@@ -35,7 +35,7 @@ index cfacc233..27122cb0 100644
 +/// Read the EFFECTIVE auto-accept state for a conversation (explicit per-chat
 +/// override wins, else global) plus the raw override.
 +pub async fn auto_approve_conversation_get(
-+    Extension(state): Extension<Arc<AppState>>,
++    Extension(_state): Extension<Arc<AppState>>,
 +    Json(payload): Json<ConversationAutoApprovePayload>,
 +) -> Result<Json<AutoApproveConversationResult>, AppCommandError> {
 +    let result =
