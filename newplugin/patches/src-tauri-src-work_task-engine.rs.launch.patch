@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/work_task/engine.rs b/src-tauri/src/work_task/engine.rs
-index e7a50d0b..61dcd7ba 100644
+index e7a50d0b..7ef445bf 100644
 --- a/src-tauri/src/work_task/engine.rs
 +++ b/src-tauri/src/work_task/engine.rs
 @@ -41,6 +41,7 @@ use crate::db::entities::work_task::WorkTaskStatus;
@@ -70,7 +70,18 @@ index e7a50d0b..61dcd7ba 100644
              LaunchMode::Retry | LaunchMode::Return { .. } | LaunchMode::Merge { .. } => {
                  match task.conversation_id {
                      Some(conv_id) => conversation::Entity::find_by_id(conv_id)
-@@ -2271,6 +2299,43 @@ impl TaskEngine {
+@@ -956,7 +984,9 @@ impl TaskEngine {
+         // Conversation row: reuse when resuming the same session; otherwise a
+         // fresh row (fresh runs and resume fallbacks).
+         let conversation_id = if resumed {
+-            task.conversation_id.expect("resumed implies conversation")
++            task.conversation_id
++                .or(cfg.existing_conversation_id)
++                .ok_or_else(|| "resumed task has no conversation id".to_string())?
+         } else {
+             let title = first_chars(task.title.trim(), 80);
+             match create_conversation_core(&self.db.conn, wt.folder_id, agent_type, Some(title))
+@@ -2271,6 +2301,43 @@ impl TaskEngine {
              let launching: HashSet<i32> = self.launching.lock().await.keys().copied().collect();
              for task in preparing {
                  if launching.contains(&task.id) {
@@ -114,7 +125,7 @@ index e7a50d0b..61dcd7ba 100644
                      continue;
                  }
                  match work_task_service::abandon_setup(&self.db.conn, task.id, task.run_seq).await {
-@@ -2651,12 +2716,17 @@ async fn compose_prompt(
+@@ -2651,12 +2718,17 @@ async fn compose_prompt(
  
      // The standing worktree guard — a merge generation replaces it with its
      // own instructions (it exists to forbid exactly what a merge must do).
@@ -133,7 +144,7 @@ index e7a50d0b..61dcd7ba 100644
          let branch = task
              .work_branch
              .as_deref()
-@@ -2878,6 +2948,7 @@ impl LaunchSeq {
+@@ -2878,6 +2950,7 @@ impl LaunchSeq {
  
  /// Ownership of a task's in-flight launch slot: which folder it counts
  /// against, plus a token so only the launch that took the slot can release it.
