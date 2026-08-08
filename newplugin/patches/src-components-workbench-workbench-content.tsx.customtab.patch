@@ -1,8 +1,8 @@
 diff --git a/src/components/workbench/workbench-content.tsx b/src/components/workbench/workbench-content.tsx
-index 8cf29623..4215439c 100644
+index bb67243d..a909502e 100644
 --- a/src/components/workbench/workbench-content.tsx
 +++ b/src/components/workbench/workbench-content.tsx
-@@ -14,6 +14,10 @@ import {
+@@ -15,6 +15,10 @@ import {
    TokenUsagePage,
    TokenUsagePageTitle,
  } from "@/components/token-usage/token-usage-page"
@@ -13,7 +13,7 @@ index 8cf29623..4215439c 100644
  
  /**
   * Registry of full-page routes that take over the main content region. The
-@@ -26,6 +30,7 @@ const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
+@@ -27,6 +31,7 @@ const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
    automations: AutomationsPage,
    tasks: TasksPage,
    tokenUsage: TokenUsagePage,
@@ -21,11 +21,11 @@ index 8cf29623..4215439c 100644
  }
  
  /** Optional per-route content for the window-chrome strip above the page
-@@ -35,6 +40,7 @@ const WORKBENCH_ROUTE_STRIPS: Partial<Record<WorkbenchRouteId, ComponentType>> =
+@@ -36,6 +41,7 @@ const WORKBENCH_ROUTE_STRIPS: Partial<Record<WorkbenchRouteId, ComponentType>> =
      automations: AutomationsPageTitle,
      tasks: TasksPageTitle,
      tokenUsage: TokenUsagePageTitle,
 +    customWorkflows: CustomWorkflowsPageTitle,
    }
  
- /**
+ /** What a chrome cluster hands its route's buttons: the host's own button

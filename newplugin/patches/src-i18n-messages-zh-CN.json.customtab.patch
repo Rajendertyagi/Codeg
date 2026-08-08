@@ -1,11 +1,11 @@
 diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
-index a4bf787e..28d0cba8 100644
+index 17ed86a8..8b57b345 100644
 --- a/src/i18n/messages/zh-CN.json
 +++ b/src/i18n/messages/zh-CN.json
-@@ -1510,6 +1510,7 @@
+@@ -1511,6 +1511,7 @@
        "newChatAction": "新建聊天",
        "automations": "自动化",
-       "tasks": "任务看板",
+       "tasks": "待办任务",
 +      "customWorkflows": "自定义工作流",
        "loadingSubsessions": "正在加载子会话…"
      },

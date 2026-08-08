@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/pt.json b/src/i18n/messages/pt.json
-index f62ef52b..7ef869bd 100644
+index b119d161..cf932f42 100644
 --- a/src/i18n/messages/pt.json
 +++ b/src/i18n/messages/pt.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "Local",
      "branchRemote": "Remoto",
      "branchSearchPlaceholder": "Pesquisar branches…",
@@ -27,4 +27,4 @@ index f62ef52b..7ef869bd 100644
 +    "localFolderEmpty": "Nenhuma pasta disponível"
    },
    "Tasks": {
-     "title": "Quadro de tarefas",
+     "title": "Tarefas a fazer",

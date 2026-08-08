@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
-index 153eb74d..a813598c 100644
+index db20bc0e..6d37bfa1 100644
 --- a/src/i18n/messages/zh-TW.json
 +++ b/src/i18n/messages/zh-TW.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "本機",
      "branchRemote": "遠端",
      "branchSearchPlaceholder": "搜尋分支…",
@@ -27,4 +27,4 @@ index 153eb74d..a813598c 100644
 +    "localFolderEmpty": "沒有可用資料夾"
    },
    "Tasks": {
-     "title": "任務看板",
+     "title": "待辦任務",

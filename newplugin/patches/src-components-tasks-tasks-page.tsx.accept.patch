@@ -1,20 +1,20 @@
 diff --git a/src/components/tasks/tasks-page.tsx b/src/components/tasks/tasks-page.tsx
-index 18030f5..a9a9753 100644
+index 6e58a72a..7e8a735c 100644
 --- a/src/components/tasks/tasks-page.tsx
 +++ b/src/components/tasks/tasks-page.tsx
-@@ -17,6 +17,7 @@ import { useTasksView } from "@/contexts/tasks-view-context"
+@@ -16,6 +16,7 @@ import { Folder, Funnel, Play, Plus, ListTodo, Tag } from "lucide-react"
+ import { useTasksView } from "@/contexts/tasks-view-context"
  import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
  import {
-   workTaskArchive,
 +  workTaskAccept,
+   workTaskArchive,
    workTaskCreate,
    workTaskReorder,
-   workTaskStart,
-@@ -682,6 +683,7 @@ export function TasksPage() {
-                   onRequeue={() => openRestart(task, "requeue")}
-                   onViewSession={() => openSession(task)}
-                   onMerge={() => openMerge(task)}
-+                  onAccept={() => void act(() => workTaskAccept(task.id))}
-                   onComplete={() => openComplete(task)}
-                   onArchive={() =>
-                     void act(() =>
+@@ -381,6 +382,7 @@ export function TasksPage() {
+         setEditorOpen(true)
+       },
+       onSchedule: () => openSchedule(task),
++      onAccept: () => void act(() => workTaskAccept(task.id)),
+     }),
+     [
+       act,

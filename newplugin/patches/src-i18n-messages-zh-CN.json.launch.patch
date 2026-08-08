@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
-index a4bf787e..945ff418 100644
+index 17ed86a8..f6d236be 100644
 --- a/src/i18n/messages/zh-CN.json
 +++ b/src/i18n/messages/zh-CN.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "本地",
      "branchRemote": "远程",
      "branchSearchPlaceholder": "搜索分支…",
@@ -27,4 +27,4 @@ index a4bf787e..945ff418 100644
 +    "localFolderEmpty": "没有可用文件夹"
    },
    "Tasks": {
-     "title": "任务看板",
+     "title": "待办任务",

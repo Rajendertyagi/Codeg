@@ -1,11 +1,11 @@
 diff --git a/src/i18n/messages/ar.json b/src/i18n/messages/ar.json
-index 07037e89..57c7f233 100644
+index 39450e0c..1583e3f4 100644
 --- a/src/i18n/messages/ar.json
 +++ b/src/i18n/messages/ar.json
-@@ -1510,6 +1510,7 @@
+@@ -1511,6 +1511,7 @@
        "newChatAction": "محادثة جديدة",
        "automations": "الأتمتة",
-       "tasks": "لوحة المهام",
+       "tasks": "المهام قيد الانتظار",
 +      "customWorkflows": "سير العمل المخصصة",
        "loadingSubsessions": "جارٍ تحميل المحادثات الفرعية…"
      },

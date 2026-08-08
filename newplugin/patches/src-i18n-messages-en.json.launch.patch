@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
-index 8896456e..24d7bd5c 100644
+index b8a1434b..c66756e4 100644
 --- a/src/i18n/messages/en.json
 +++ b/src/i18n/messages/en.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "Local",
      "branchRemote": "Remote",
      "branchSearchPlaceholder": "Search branches…",
@@ -27,8 +27,8 @@ index 8896456e..24d7bd5c 100644
 +    "localFolderEmpty": "No folders available"
    },
    "Tasks": {
-     "title": "Task Board",
-@@ -4274,6 +4291,14 @@
+     "title": "To-dos",
+@@ -4323,6 +4340,14 @@
      "agentInheritedHint": "Inherited from task settings — change it to override for this task",
      "agentOverrideReset": "Reset to inherited",
      "sectionTarget": "Target",

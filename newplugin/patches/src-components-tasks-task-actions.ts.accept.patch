@@ -1,0 +1,70 @@
+diff --git a/src/components/tasks/task-actions.ts b/src/components/tasks/task-actions.ts
+index 92fa46ea..84f0e886 100644
+--- a/src/components/tasks/task-actions.ts
++++ b/src/components/tasks/task-actions.ts
+@@ -3,6 +3,7 @@ import {
+   ArchiveRestore,
+   Ban,
+   CalendarClock,
++  Check,
+   CircleCheck,
+   GitMerge,
+   MessageSquareText,
+@@ -32,6 +33,8 @@ export interface TaskActionHandlers {
+   /** Takes the merge slot when the task changed nothing (see
+    *  `hasNothingToMerge`) — accepts it outright instead. */
+   onComplete: () => void
++  /** Our custom feature: accepts the task outright when it has no worktree to merge. */
++  onAccept: () => void
+   /** Toggles by `task.archived_at` (archive ⇄ unarchive). */
+   onArchive: () => void
+   /** Opens the editor dialog — offered while editable (todo / failed). */
+@@ -41,6 +44,7 @@ export interface TaskActionHandlers {
+ }
+ 
+ type ActionLabelKey =
++  | "actionAccept"
+   | "actionStart"
+   | "actionCancel"
+   | "actionRetry"
+@@ -107,19 +111,27 @@ export function buildTaskActions(
+         }
+         break
+       case "review":
+-        // Nothing was changed ⟹ nothing to merge: offer the acceptance that
+-        // actually applies.
+-        primary = hasNothingToMerge(task)
+-          ? {
+-              icon: CircleCheck,
+-              label: t("actionComplete"),
+-              onClick: handlers.onComplete,
+-            }
+-          : {
+-              icon: GitMerge,
+-              label: t("actionMerge"),
+-              onClick: handlers.onMerge,
+-            }
++        // Our custom feature: a task with no worktree has nothing to merge — accept
++        // it outright. Otherwise defer to the upstream diff-based split (nothing
++        // changed ⟹ complete, else merge).
++        primary =
++          task.worktree_folder_id == null
++            ? {
++                icon: Check,
++                label: t("actionAccept"),
++                onClick: handlers.onAccept,
++              }
++            : hasNothingToMerge(task)
++              ? {
++                  icon: CircleCheck,
++                  label: t("actionComplete"),
++                  onClick: handlers.onComplete,
++                }
++              : {
++                  icon: GitMerge,
++                  label: t("actionMerge"),
++                  onClick: handlers.onMerge,
++                }
+         break
+       case "merging":
+         break

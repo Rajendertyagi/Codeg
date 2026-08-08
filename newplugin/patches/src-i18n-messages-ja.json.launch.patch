@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
-index c800d1be..33950760 100644
+index 2330c338..4cba4817 100644
 --- a/src/i18n/messages/ja.json
 +++ b/src/i18n/messages/ja.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "ローカル",
      "branchRemote": "リモート",
      "branchSearchPlaceholder": "ブランチを検索…",
@@ -27,4 +27,4 @@ index c800d1be..33950760 100644
 +    "localFolderEmpty": "利用可能なフォルダはありません"
    },
    "Tasks": {
-     "title": "タスクボード",
+     "title": "ToDo タスク",

@@ -1,8 +1,8 @@
 diff --git a/src/i18n/messages/ko.json b/src/i18n/messages/ko.json
-index 710a6cd0..9a223a8b 100644
+index 83649cb2..780034f3 100644
 --- a/src/i18n/messages/ko.json
 +++ b/src/i18n/messages/ko.json
-@@ -4175,7 +4175,24 @@
+@@ -4203,7 +4203,24 @@
      "branchLocal": "로컬",
      "branchRemote": "원격",
      "branchSearchPlaceholder": "브랜치 검색…",
@@ -27,4 +27,4 @@ index 710a6cd0..9a223a8b 100644
 +    "localFolderEmpty": "사용 가능한 폴더 없음"
    },
    "Tasks": {
-     "title": "작업 보드",
+     "title": "할 일",

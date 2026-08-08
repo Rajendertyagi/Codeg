@@ -1,11 +1,11 @@
 diff --git a/src/i18n/messages/pt.json b/src/i18n/messages/pt.json
-index f62ef52b..fd325bac 100644
+index b119d161..35c090dd 100644
 --- a/src/i18n/messages/pt.json
 +++ b/src/i18n/messages/pt.json
-@@ -1510,6 +1510,7 @@
+@@ -1511,6 +1511,7 @@
        "newChatAction": "Novo chat",
        "automations": "Automações",
-       "tasks": "Quadro de tarefas",
+       "tasks": "Tarefas a fazer",
 +      "customWorkflows": "Fluxos de trabalho personalizados",
        "loadingSubsessions": "Carregando subconversas…"
      },
