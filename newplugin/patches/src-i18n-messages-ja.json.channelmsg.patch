@@ -1,0 +1,22 @@
+diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
+index 2330c338..ad53f2ee 100644
+--- a/src/i18n/messages/ja.json
++++ b/src/i18n/messages/ja.json
+@@ -4009,6 +4009,17 @@
+     "saveFailed": "チャットから作成の設定の保存に失敗しました",
+     "loadFailed": "読み込みに失敗しました: {detail}"
+   },
++  "ChannelMessagingSettings": {
++    "title": "AI チャネルメッセージ",
++    "description": "AIが接続済みのチャットチャネル（Telegram、Lark、Weixin）にメッセージを送信できるようにします。メッセージは有効なすべてのチャネルに送信されます——チャネルIDを指定する必要はありません。デフォルトはオフです。AIが外部チャネルに書き込むためです。",
++    "enable": "AI チャネルメッセージ",
++    "enableHint": "オンにすると、起動されるAIにsend_channel_messageツールが追加されます。",
++    "save": "保存",
++    "saving": "保存中…",
++    "saved": "AIチャネルメッセージ設定を保存しました",
++    "saveFailed": "AIチャネルメッセージ設定の保存に失敗しました",
++    "loadFailed": "読み込みに失敗しました: {detail}"
++  },
+   "AskQuestionSettings": {
+     "title": "ユーザーに質問",
+     "description": "エージェントが処理を一時停止し、会話の入力欄の上に表示される選択式の質問をできるようにします。回答（またはスキップ）するまでエージェントは待機します。",

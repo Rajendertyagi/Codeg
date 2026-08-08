@@ -1,0 +1,26 @@
+diff --git a/src-tauri/src/acp/delegation/tool_schema.json b/src-tauri/src/acp/delegation/tool_schema.json
+index 512d7281..fec4388c 100644
+--- a/src-tauri/src/acp/delegation/tool_schema.json
++++ b/src-tauri/src/acp/delegation/tool_schema.json
+@@ -253,5 +253,21 @@
+         }
+       }
+     }
++  },
++  {
++    "name": "send_channel_message",
++    "description": "Send a text message through the user's connected chat channels (e.g. their Telegram). The destination is chosen for you — just provide the message. This does NOT search, generate, or schedule anything; use it only to deliver a final message the user asked to receive. Do not mention channel ids, bot tokens, or Telegram internals.",
++    "inputSchema": {
++      "type": "object",
++      "required": ["message"],
++      "properties": {
++        "message": {
++          "type": "string",
++          "minLength": 1,
++          "maxLength": 4096,
++          "description": "The plain text to send through the user's connected channel."
++        }
++      }
++    }
+   }
+ ]

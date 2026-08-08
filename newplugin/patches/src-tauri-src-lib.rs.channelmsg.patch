@@ -1,0 +1,59 @@
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 2a75c083..3b0f265c 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -527,6 +527,7 @@ mod tauri_app {
+                         question_config,
+                         session_info_config,
+                         chat_authoring_config,
++                        channel_messaging_config,
+                     ) = crate::app_state::build_delegation_stack(
+                         &cm_state,
+                         db_conn.clone(),
+@@ -538,6 +539,7 @@ mod tauri_app {
+                     app.manage(question_config.clone());
+                     app.manage(session_info_config.clone());
+                     app.manage(chat_authoring_config.clone());
++                    app.manage(channel_messaging_config.clone());
+                     app.manage(crate::commands::delegation::DelegationSocketPath(
+                         socket_path.clone(),
+                     ));
+@@ -550,6 +552,7 @@ mod tauri_app {
+                     let question_for_init = question_config.clone();
+                     let session_info_for_init = session_info_config.clone();
+                     let chat_authoring_for_init = chat_authoring_config.clone();
++                    let channel_messaging_for_init = channel_messaging_config.clone();
+                     tauri::async_runtime::block_on(async move {
+                         delegation_commands::apply_persisted_config(
+                             &db_for_init,
+@@ -576,6 +579,11 @@ mod tauri_app {
+                             &chat_authoring_for_init,
+                         )
+                         .await;
++                        crate::commands::chat_channel_messaging::apply_persisted_channel_messaging_config(
++                            &db_for_init,
++                            &channel_messaging_for_init,
++                        )
++                        .await;
+                     });
+ 
+                     let listener_broker = broker.clone();
+@@ -616,6 +624,18 @@ mod tauri_app {
+                                 chat_authoring_config.clone(),
+                             ),
+                         ),
++                        std::sync::Arc::new(
++                            crate::commands::chat_channel_messaging::DbChannelMessaging::new(
++                                std::sync::Arc::new(db::AppDatabase {
++                                    conn: db_conn.clone(),
++                                }),
++                                crate::web::event_bridge::EventEmitter::Tauri(
++                                    app.handle().clone(),
++                                ),
++                                channel_messaging_config.clone(),
++                                cm_state.chat_channel_manager.clone_ref(),
++                            ),
++                        ),
+                     );
+                     tauri::async_runtime::spawn(async move {
+                         if let Err(e) = listener.run(socket_path).await {

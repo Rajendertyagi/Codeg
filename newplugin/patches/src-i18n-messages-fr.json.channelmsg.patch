@@ -1,0 +1,22 @@
+diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
+index e87f36e9..94f78912 100644
+--- a/src/i18n/messages/fr.json
++++ b/src/i18n/messages/fr.json
+@@ -4009,6 +4009,17 @@
+     "saveFailed": "Échec de l'enregistrement des paramètres de création depuis le chat",
+     "loadFailed": "Échec du chargement : {detail}"
+   },
++  "ChannelMessagingSettings": {
++    "title": "Messagerie de canal IA",
++    "description": "Permet aux agents d'envoyer des messages vers vos canaux de chat connectés (Telegram, Lark, Weixin). Le message est envoyé à tous les canaux activés — aucun ID de canal n'est requis. Désactivé par défaut car l'agent écrit dans vos canaux externes.",
++    "enable": "Messagerie de canal IA",
++    "enableHint": "Ajoute l'outil send_channel_message aux agents démarrés après activation.",
++    "save": "Enregistrer",
++    "saving": "Enregistrement…",
++    "saved": "Paramètres de messagerie de canal IA enregistrés",
++    "saveFailed": "Échec de l'enregistrement des paramètres de messagerie de canal IA",
++    "loadFailed": "Échec du chargement : {detail}"
++  },
+   "AskQuestionSettings": {
+     "title": "Poser une question à l'utilisateur",
+     "description": "Permet aux agents de s'interrompre et de vous poser une question à choix multiples affichée au-dessus de la zone de saisie de la conversation. L'agent attend votre réponse (ou que vous ignoriez).",

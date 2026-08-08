@@ -1,0 +1,17 @@
+diff --git a/src-tauri/src/web/mod.rs b/src-tauri/src/web/mod.rs
+index 659c1b2f..48a62d48 100644
+--- a/src-tauri/src/web/mod.rs
++++ b/src-tauri/src/web/mod.rs
+@@ -836,6 +836,12 @@ pub(crate) async fn do_start_web_server_tauri(
+             .state::<crate::acp::chat_authoring::ChatAuthoringRuntimeConfig>()
+             .inner()
+             .clone(),
++        // Same channel-messaging config handle the desktop MCP injection reads,
++        // so HTTP-side saves target the same flag.
++        chat_channel_messaging_config: app
++            .state::<crate::acp::channel_messaging::ChannelMessagingRuntimeConfig>()
++            .inner()
++            .clone(),
+         system_op_lock: crate::app_state::default_system_op_lock(),
+         // Reuse the same handle the desktop `app_update` commands write to so
+         // HTTP and webview readers see the identical update snapshot.

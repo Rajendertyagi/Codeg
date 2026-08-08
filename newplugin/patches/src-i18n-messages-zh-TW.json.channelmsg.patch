@@ -1,0 +1,22 @@
+diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
+index db20bc0e..a57362ba 100644
+--- a/src/i18n/messages/zh-TW.json
++++ b/src/i18n/messages/zh-TW.json
+@@ -4009,6 +4009,17 @@
+     "saveFailed": "儲存從聊天中建立的設定失敗",
+     "loadFailed": "載入失敗：{detail}"
+   },
++  "ChannelMessagingSettings": {
++    "title": "AI 頻道訊息",
++    "description": "讓 AI 向你的已連接聊天頻道（Telegram、Lark、Weixin）發送訊息。訊息會發送到每個啟用的頻道——無需指定頻道 ID。預設關閉，因為 AI 會寫入你的外部頻道。",
++    "enable": "AI 頻道訊息",
++    "enableHint": "開啟後，為啟動的 AI 加入 send_channel_message 工具。",
++    "save": "儲存",
++    "saving": "儲存中…",
++    "saved": "AI 頻道訊息設定已儲存",
++    "saveFailed": "儲存 AI 頻道訊息設定失敗",
++    "loadFailed": "載入失敗：{detail}"
++  },
+   "AskQuestionSettings": {
+     "title": "向使用者提問",
+     "description": "允許智能體暫停並向你提出多選問題，問題會顯示在對話輸入框上方。智能體會一直等待，直到你作答（或略過）。",
