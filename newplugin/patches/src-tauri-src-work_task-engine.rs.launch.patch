@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/work_task/engine.rs b/src-tauri/src/work_task/engine.rs
-index 8b52649b..ad764fdf 100644
+index e7a50d0b..61dcd7ba 100644
 --- a/src-tauri/src/work_task/engine.rs
 +++ b/src-tauri/src/work_task/engine.rs
 @@ -41,6 +41,7 @@ use crate::db::entities::work_task::WorkTaskStatus;
@@ -10,7 +10,21 @@ index 8b52649b..ad764fdf 100644
  use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
  use crate::models::{
      AgentType, FollowUpIntent, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
-@@ -779,7 +780,7 @@ impl TaskEngine {
+@@ -54,6 +55,13 @@ use crate::work_task::git as task_git;
+ /// Reconcile sweep cadence.
+ const RECONCILE_INTERVAL_SECS: u64 = 30;
+ 
++/// Safety net for an owned launch stuck in `preparing` — a hung init command
++/// has no timeout of its own, so without this an owned launch can sit in
++/// `preparing` forever. Not a setup deadline: the audit proved Git checkout
++/// and init commands can legitimately exceed 10 minutes while `updated_at`
++/// stays frozen, so this is deliberately far beyond any legitimate setup.
++const LAUNCH_SETUP_TIMEOUT_SECS: i64 = 3600;
++
+ /// How often planned starts are checked. Its own (tighter) tick rather than a
+ /// step of the reconcile sweep: this one is a cheap indexed-ish scan, and it
+ /// bounds how late a task the user planned for a given minute actually starts.
+@@ -835,7 +843,7 @@ impl TaskEngine {
          // "land" as a no-op tree match.
          let wt = if matches!(mode, LaunchMode::Merge { .. }) {
              self.existing_worktree(&task).await?
@@ -19,7 +33,7 @@ index 8b52649b..ad764fdf 100644
              let wt = self.ensure_worktree(&task, &root).await?;
              // Run the folder's init command (deps install etc.) before the
              // agent ever sees the tree. Gated on the setup marker, NOT on "the
-@@ -800,6 +801,14 @@ impl TaskEngine {
+@@ -856,6 +864,14 @@ impl TaskEngine {
                  }
              }
              wt
@@ -34,7 +48,7 @@ index 8b52649b..ad764fdf 100644
          };
  
          let _ = work_task_service::record_event(
-@@ -822,8 +831,20 @@ impl TaskEngine {
+@@ -878,8 +894,20 @@ impl TaskEngine {
          }
  
          // Resume the previous session for retry/return/merge when we have one.
@@ -56,7 +70,51 @@ index 8b52649b..ad764fdf 100644
              LaunchMode::Retry | LaunchMode::Return { .. } | LaunchMode::Merge { .. } => {
                  match task.conversation_id {
                      Some(conv_id) => conversation::Entity::find_by_id(conv_id)
-@@ -2595,12 +2616,17 @@ async fn compose_prompt(
+@@ -2271,6 +2299,43 @@ impl TaskEngine {
+             let launching: HashSet<i32> = self.launching.lock().await.keys().copied().collect();
+             for task in preparing {
+                 if launching.contains(&task.id) {
++                    // Owned by a live launch. Setup is normally bounded, but a
++                    // hung init command has no timeout of its own, so an owned
++                    // launch can sit in `preparing` forever. Safety net, not a
++                    // setup deadline: only a launch with no row progress for
++                    // the generous LAUNCH_SETUP_TIMEOUT_SECS window is treated
++                    // as stuck. The failure CAS decides which generation won;
++                    // only then is the setup child killed so the stale launch
++                    // unwinds through its normal cleanup and releases the lock.
++                    if chrono::Utc::now().signed_duration_since(task.updated_at)
++                        > chrono::Duration::seconds(LAUNCH_SETUP_TIMEOUT_SECS)
++                    {
++                        let token = self.launching.lock().await.get(&task.id).map(|o| o.token);
++                        match work_task_service::fail(
++                            &self.db.conn,
++                            task.id,
++                            &[WorkTaskStatus::Preparing],
++                            Some(task.run_seq),
++                            "launch_timeout",
++                            Some("Task launch timed out while preparing.".to_string()),
++                        )
++                        .await
++                        {
++                            Ok(true) => {
++                                tracing::info!(
++                                    "[work_task] timed out stuck setup of task {}",
++                                    task.id
++                                );
++                                self.kill_setup_child(task.id, task.run_seq).await;
++                                self.emit_upsert(task.id);
++                                if let Some(token) = token {
++                                    self.release_launch_slot(task.id, token).await;
++                                }
++                            }
++                            Ok(false) => {}
++                            Err(e) => tracing::warn!("[work_task] launch timeout fail error: {e}"),
++                        }
++                    }
+                     continue;
+                 }
+                 match work_task_service::abandon_setup(&self.db.conn, task.id, task.run_seq).await {
+@@ -2651,12 +2716,17 @@ async fn compose_prompt(
  
      // The standing worktree guard — a merge generation replaces it with its
      // own instructions (it exists to forbid exactly what a merge must do).
@@ -75,3 +133,11 @@ index 8b52649b..ad764fdf 100644
          let branch = task
              .work_branch
              .as_deref()
+@@ -2878,6 +2948,7 @@ impl LaunchSeq {
+ 
+ /// Ownership of a task's in-flight launch slot: which folder it counts
+ /// against, plus a token so only the launch that took the slot can release it.
++#[derive(Debug, Clone, Copy)]
+ struct LaunchOwner {
+     folder_id: i32,
+     token: u64,
