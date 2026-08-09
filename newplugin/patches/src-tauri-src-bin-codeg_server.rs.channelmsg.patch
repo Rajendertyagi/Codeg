@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/bin/codeg_server.rs b/src-tauri/src/bin/codeg_server.rs
-index 715aacab..15f2f32e 100644
+index 715aacab..31a445bb 100644
 --- a/src-tauri/src/bin/codeg_server.rs
 +++ b/src-tauri/src/bin/codeg_server.rs
 @@ -265,6 +265,7 @@ async fn async_main() -> ExitCode {
@@ -14,7 +14,7 @@ index 715aacab..15f2f32e 100644
          question_config: question_config.clone(),
          session_info_config: session_info_config.clone(),
          chat_authoring_config: chat_authoring_config.clone(),
-+        channel_messaging_config: channel_messaging_config.clone(),
++        chat_channel_messaging_config: channel_messaging_config.clone(),
          system_op_lock: codeg_lib::app_state::default_system_op_lock(),
          update_state: codeg_lib::app_state::default_update_state(),
      });
