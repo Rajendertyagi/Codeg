@@ -1,8 +1,16 @@
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
-index 2a75c083..3b0f265c 100644
+index 2a75c083..69ead912 100644
 --- a/src-tauri/src/lib.rs
 +++ b/src-tauri/src/lib.rs
-@@ -527,6 +527,7 @@ mod tauri_app {
+@@ -64,6 +64,7 @@ mod tauri_app {
+         acp as acp_commands, app_update as app_update_commands,
+         automation as automation_commands, background as background_commands, backup,
+         chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
++        chat_channel_messaging,
+         conversations,
+         custom_skills as custom_skills_commands, delegation as delegation_commands,
+         experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
+@@ -527,6 +528,7 @@ mod tauri_app {
                          question_config,
                          session_info_config,
                          chat_authoring_config,
@@ -10,7 +18,7 @@ index 2a75c083..3b0f265c 100644
                      ) = crate::app_state::build_delegation_stack(
                          &cm_state,
                          db_conn.clone(),
-@@ -538,6 +539,7 @@ mod tauri_app {
+@@ -538,6 +540,7 @@ mod tauri_app {
                      app.manage(question_config.clone());
                      app.manage(session_info_config.clone());
                      app.manage(chat_authoring_config.clone());
@@ -18,7 +26,7 @@ index 2a75c083..3b0f265c 100644
                      app.manage(crate::commands::delegation::DelegationSocketPath(
                          socket_path.clone(),
                      ));
-@@ -550,6 +552,7 @@ mod tauri_app {
+@@ -550,6 +553,7 @@ mod tauri_app {
                      let question_for_init = question_config.clone();
                      let session_info_for_init = session_info_config.clone();
                      let chat_authoring_for_init = chat_authoring_config.clone();
@@ -26,7 +34,7 @@ index 2a75c083..3b0f265c 100644
                      tauri::async_runtime::block_on(async move {
                          delegation_commands::apply_persisted_config(
                              &db_for_init,
-@@ -576,6 +579,11 @@ mod tauri_app {
+@@ -576,6 +580,11 @@ mod tauri_app {
                              &chat_authoring_for_init,
                          )
                          .await;
@@ -38,7 +46,7 @@ index 2a75c083..3b0f265c 100644
                      });
  
                      let listener_broker = broker.clone();
-@@ -616,6 +624,18 @@ mod tauri_app {
+@@ -616,6 +625,18 @@ mod tauri_app {
                                  chat_authoring_config.clone(),
                              ),
                          ),
@@ -57,3 +65,12 @@ index 2a75c083..3b0f265c 100644
                      );
                      tauri::async_runtime::spawn(async move {
                          if let Err(e) = listener.run(socket_path).await {
+@@ -1134,6 +1155,8 @@ mod tauri_app {
+                 session_info_commands::set_session_info_settings,
+                 chat_authoring_commands::get_chat_authoring_settings,
+                 chat_authoring_commands::set_chat_authoring_settings,
++                chat_channel_messaging::get_chat_channel_messaging_settings,
++                chat_channel_messaging::set_chat_channel_messaging_settings,
+                 version_control::detect_git,
+                 version_control::test_git_path,
+                 version_control::get_git_settings,
