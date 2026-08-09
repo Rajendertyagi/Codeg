@@ -47,11 +47,12 @@ use crate::acp::chat_authoring::{
 use crate::acp::delegation::transport::{
     client_ask_round_trip, client_cancel, client_cancel_task_round_trip, client_commit_feedback,
     client_create_automation_round_trip, client_create_work_task_round_trip,
-    client_feedback_round_trip, client_round_trip, client_session_round_trip,
-    client_status_round_trip, client_task_complete_round_trip, client_task_progress_round_trip,
-    BrokerAskRequest, BrokerCancelRequest, BrokerCancelTaskRequest, BrokerCommitFeedbackRequest,
-    BrokerCreateAutomationRequest, BrokerCreateWorkTaskRequest, BrokerFeedbackRequest,
-    BrokerRequest, BrokerResponse, BrokerSessionRequest, BrokerStatusRequest,
+    client_feedback_round_trip, client_round_trip, client_send_channel_message_round_trip,
+    client_session_round_trip, client_status_round_trip, client_task_complete_round_trip,
+    client_task_progress_round_trip, BrokerAskRequest, BrokerCancelRequest,
+    BrokerCancelTaskRequest, BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest,
+    BrokerCreateWorkTaskRequest, BrokerFeedbackRequest, BrokerRequest, BrokerResponse,
+    BrokerSendChannelMessageRequest, BrokerSessionRequest, BrokerStatusRequest,
     BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
 };
 use crate::acp::question::parse_questions;
@@ -152,6 +153,11 @@ pub struct CompanionFeatures {
     pub automations: bool,
     /// `create_work_task` — queue a card on the work-task board from chat.
     pub taskboard: bool,
+    /// `send_channel_message` — let the AI push a message into the user's
+    /// enabled chat channels (Telegram, Lark, Weixin). Gated separately so
+    /// the authoring tools and the channel-send tool can be toggled
+    /// independently.
+    pub channels: bool,
 }
 
 impl CompanionFeatures {
@@ -171,6 +177,7 @@ impl CompanionFeatures {
                 tasks: false,
                 automations: false,
                 taskboard: false,
+                channels: false,
             };
         };
         let mut f = Self {
@@ -181,6 +188,7 @@ impl CompanionFeatures {
             tasks: false,
             automations: false,
             taskboard: false,
+            channels: false,
         };
         for tok in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
             match tok {
@@ -191,6 +199,7 @@ impl CompanionFeatures {
                 "tasks" => f.tasks = true,
                 "automations" => f.automations = true,
                 "taskboard" => f.taskboard = true,
+                "channels" => f.channels = true,
                 _ => {}
             }
         }
@@ -206,6 +215,7 @@ impl CompanionFeatures {
             "task_progress" | "task_complete" => self.tasks,
             "create_automation" => self.automations,
             "create_work_task" => self.taskboard,
+            "send_channel_message" => self.channels,
             "delegate_to_agent" | "get_delegation_status" | "cancel_delegation" => self.delegation,
             _ => false,
         }
@@ -725,6 +735,22 @@ async fn build_tools_call_spawn(
             let round_trip =
                 Box::pin(async move { client_create_work_task_round_trip(&socket, &req).await });
             register_and_spawn(inflight, id, None, round_trip, render_authoring_result).await
+        }
+        "send_channel_message" => {
+            let msg = match serde_json::from_value::<SendChannelMessageArgs>(arguments) {
+                Ok(a) => a,
+                Err(e) => return LineAction::Respond(err(id, -32602, format!("invalid args: {e}"))),
+            };
+            if msg.message.is_empty() {
+                return LineAction::Respond(err(id, -32602, "message must not be empty"));
+            }
+            let req = BrokerSendChannelMessageRequest {
+                token: ctx.token.clone(),
+                message: msg.message,
+            };
+            let round_trip =
+                Box::pin(async move { client_send_channel_message_round_trip(&socket, &req).await });
+            register_and_spawn(inflight, id, None, round_trip, render_channel_message_result).await
         }
         other => LineAction::Respond(err(id, -32602, format!("unknown tool: {other}"))),
     }
@@ -1399,6 +1425,60 @@ pub fn render_authoring_result(outcome: &Value) -> Value {
     } else {
         s("note")
             .unwrap_or("Could not create it; no reason was reported.")
+            .to_string()
+    };
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": false,
+        "structuredContent": outcome.clone(),
+    })
+}
+
+/// Arguments parsed from a `send_channel_message` `tools/call` request.
+#[derive(Debug, Clone, Deserialize)]
+struct SendChannelMessageArgs {
+    message: String,
+}
+
+/// Render a [`crate::acp::channel_messaging::ChannelMessageOutcome`] back into
+/// an MCP `tools/call` result.
+/// Mirrors [`render_authoring_result`] but formats per-channel delivery
+/// summaries so the LLM knows exactly which channels received the message.
+pub fn render_channel_message_result(outcome: &Value) -> Value {
+    let total_sent = outcome.get("total_sent").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let total_targets = outcome.get("total_targets").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let note = outcome.get("note").and_then(|v| v.as_str());
+    let per_channel = outcome.get("per_channel").and_then(|v| v.as_array());
+
+    let text = if total_sent > 0 {
+        let mut parts = vec![format!("Sent to {total_sent} of {total_targets} channel(s)")];
+        if let Some(arr) = per_channel {
+            for item in arr {
+                let ch_id = item.get("channel_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let success = item.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+                let msg_id = item
+                    .get("sent_message_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if success {
+                    if !msg_id.is_empty() {
+                        parts.push(format!("#{ch_id} → {msg_id}"));
+                    } else {
+                        parts.push(format!("#{ch_id} ✓"));
+                    }
+                } else {
+                    let err = item
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("failed");
+                    parts.push(format!("#{ch_id} ✗ {err}"));
+                }
+            }
+        }
+        parts.join("\n")
+    } else {
+        note
+            .unwrap_or("Message was not sent; no reason was reported.")
             .to_string()
     };
     json!({

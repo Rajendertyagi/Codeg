@@ -265,6 +265,7 @@ async fn async_main() -> ExitCode {
         question_config,
         session_info_config,
         chat_authoring_config,
+        channel_messaging_config,
     ) = codeg_lib::app_state::build_delegation_stack(
         &connection_manager,
         db.conn.clone(),
@@ -291,6 +292,7 @@ async fn async_main() -> ExitCode {
         question_config: question_config.clone(),
         session_info_config: session_info_config.clone(),
         chat_authoring_config: chat_authoring_config.clone(),
+        chat_channel_messaging_config: channel_messaging_config.clone(),
         system_op_lock: codeg_lib::app_state::default_system_op_lock(),
         update_state: codeg_lib::app_state::default_update_state(),
     });
@@ -334,6 +336,13 @@ async fn async_main() -> ExitCode {
         &chat_authoring_config,
     )
     .await;
+    // Same for the channel-messaging flag, so the first companion launch knows
+    // whether to advertise `send_channel_message`.
+    codeg_lib::commands::chat_channel_messaging::apply_persisted_channel_messaging_config(
+        &state.db.conn,
+        &channel_messaging_config,
+    )
+    .await;
 
     // Spawn the delegation listener so companion processes can round-trip
     // through the broker. Path is PID-scoped, so the listener owns it for
@@ -363,6 +372,14 @@ async fn async_main() -> ExitCode {
                 }),
                 state.emitter.clone(),
                 chat_authoring_config.clone(),
+            )),
+            Arc::new(codeg_lib::commands::chat_channel_messaging::DbChannelMessaging::new(
+                Arc::new(codeg_lib::db::AppDatabase {
+                    conn: state.db.conn.clone(),
+                }),
+                state.emitter.clone(),
+                channel_messaging_config.clone(),
+                state.chat_channel_manager.clone_ref(),
             )),
         );
         let socket = delegation_socket_path.clone();

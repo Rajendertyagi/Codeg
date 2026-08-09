@@ -237,6 +237,8 @@ impl ChatAuthoringAccess for DbChatAuthoring {
             mode_id: None,
             config_values: BTreeMap::new(),
             label_snapshot: None,
+            existing_conversation_id: None,
+            local_folder_path: None,
         };
         let config = match serde_json::to_value(&config) {
             Ok(v) => v,
@@ -328,6 +330,7 @@ impl ChatAuthoringAccess for DbChatAuthoring {
             mode_id: None,
             config_values: BTreeMap::new(),
             label_snapshot: None,
+            existing_conversation_id: None,
         };
         let config = match serde_json::to_value(&config) {
             Ok(v) => v,

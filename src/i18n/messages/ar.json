@@ -1511,6 +1511,7 @@
       "newChatAction": "محادثة جديدة",
       "automations": "الأتمتة",
       "tasks": "المهام قيد الانتظار",
+      "customWorkflows": "سير العمل المخصصة",
       "loadingSubsessions": "جارٍ تحميل المحادثات الفرعية…"
     },
     "conversation": {
@@ -4009,6 +4010,17 @@
     "saveFailed": "فشل حفظ إعدادات الإنشاء من المحادثة",
     "loadFailed": "فشل التحميل: {detail}"
   },
+  "ChannelMessagingSettings": {
+    "title": "مراسلة قنوات الذكاء الاصطناعي",
+    "description": "يسمح للوكلاء بإرسال رسائل إلى قنوات الدردشة المتصلة الخاصة بك (تيليجرام، لارك، ويكسين). يتم إرسال الرسالة إلى جميع القنوات المفعلة — لا يحتاج معرف قناة. معطّل افتراضيًا لأن الوكيل يكتب في قنواتك الخارجية.",
+    "enable": "مراسلة قنوات الذكاء الاصطناعي",
+    "enableHint": "يضيف أداة send_channel_message إلى الوكلاء الذين يبدأون بعد التفعيل.",
+    "save": "حفظ",
+    "saving": "جار الحفظ…",
+    "saved": "تم حفظ إعدادات مراسلة قنوات الذكاء الاصطناعي",
+    "saveFailed": "فشل حفظ إعدادات مراسلة قنوات الذكاء الاصطناعي",
+    "loadFailed": "فشل التحميل: {detail}"
+  },
   "AskQuestionSettings": {
     "title": "سؤال المستخدم",
     "description": "يسمح للوكلاء بالتوقّف وطرح سؤال متعدّد الخيارات يظهر فوق مربّع إدخال المحادثة. ينتظر الوكيل حتى تجيب (أو تتخطّى).",
@@ -4203,7 +4215,24 @@
     "branchLocal": "محلي",
     "branchRemote": "بعيد",
     "branchSearchPlaceholder": "بحث في الفروع…",
-    "branchNone": "لا توجد فروع"
+    "branchNone": "لا توجد فروع",
+    "launchTarget": "هدف التشغيل",
+    "targetNewConversation": "محادثة جديدة",
+    "targetExistingConversation": "محادثة موجودة",
+    "conversationSearchPlaceholder": "البحث في المحادثات…",
+    "conversationNone": "لا توجد محادثات",
+    "existingConversationHint": "كل تشغيل يستأنف هذه المحادثة ويضيف دورًا جديدًا إليها بدلاً من بدء جلسة جديدة.",
+    "errorTargetConversation": "اختر محادثة لاستئنافها",
+    "targetKind": "الجذر المستهدف",
+    "targetGitWorkspace": "مساحة عمل Git",
+    "targetLocalFolder": "مجلد محلي",
+    "localFolderBrowse": "استعراض…",
+    "localFolderPathPlaceholder": "أدخل مسار مجلد مطلقًا",
+    "localFolderHint": "يعمل كل تشغيل مباشرة في هذا المجلد — دون مستودع git أو فرع أو شجرة عمل.",
+    "errorLocalFolder": "أدخل مسار المجلد",
+    "untitledConversation": "محادثة بدون عنوان",
+    "addFolder": "إضافة مجلد…",
+    "localFolderEmpty": "لا توجد مجلدات متاحة"
   },
   "Tasks": {
     "title": "المهام قيد الانتظار",
@@ -4256,6 +4285,7 @@
     "actionDelete": "حذف",
     "actionRetryCleanup": "إعادة محاولة التنظيف",
     "actionMerge": "دمج",
+    "actionAccept": "قبول",
     "actionComplete": "إنهاء",
     "actionAbandon": "تخلٍّ",
     "cancelTitle": "إلغاء المهمة؟",

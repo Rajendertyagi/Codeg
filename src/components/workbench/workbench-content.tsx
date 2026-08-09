@@ -15,6 +15,10 @@ import {
   TokenUsagePage,
   TokenUsagePageTitle,
 } from "@/components/token-usage/token-usage-page"
+import {
+  CustomWorkflowsPage,
+  CustomWorkflowsPageTitle,
+} from "../../../newplugin/frontend/custom-workflows-page"
 
 /**
  * Registry of full-page routes that take over the main content region. The
@@ -27,6 +31,7 @@ const WORKBENCH_ROUTES: Partial<Record<WorkbenchRouteId, ComponentType>> = {
   automations: AutomationsPage,
   tasks: TasksPage,
   tokenUsage: TokenUsagePage,
+  customWorkflows: CustomWorkflowsPage,
 }
 
 /** Optional per-route content for the window-chrome strip above the page
@@ -36,6 +41,7 @@ const WORKBENCH_ROUTE_STRIPS: Partial<Record<WorkbenchRouteId, ComponentType>> =
     automations: AutomationsPageTitle,
     tasks: TasksPageTitle,
     tokenUsage: TokenUsagePageTitle,
+    customWorkflows: CustomWorkflowsPageTitle,
   }
 
 /** What a chrome cluster hands its route's buttons: the host's own button

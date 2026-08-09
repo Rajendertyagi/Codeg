@@ -1200,6 +1200,16 @@ export interface AutomationConfig {
   mode_id?: string | null
   config_values: Record<string, string>
   label_snapshot?: AutomationLabelSnapshot | null
+  /** When set (launch_session), each fire resumes this existing conversation
+   *  instead of creating a fresh one; absent/null keeps the legacy always-fresh
+   *  behavior. Mirrors `existing_conversation_id` in the Rust `AutomationConfig`
+   *  (stored inside the opaque config blob, so old rows default to null). */
+  existing_conversation_id?: number | null
+  /** When set (launch_session), the run's working root is this plain absolute
+   *  folder path on disk (no git) instead of a workspace folder. Mutually
+   *  exclusive with `root_folder_id` on the automation row; the editor saves
+   *  exactly one. Mirrors `local_folder_path` in the Rust `AutomationConfig`. */
+  local_folder_path?: string | null
 }
 
 export interface Automation {
@@ -1284,6 +1294,7 @@ export interface WorkTaskConfig {
   mode_id?: string | null
   config_values: Record<string, string>
   label_snapshot?: AutomationLabelSnapshot | null
+  existing_conversation_id?: number | null
 }
 
 export interface WorkTask {

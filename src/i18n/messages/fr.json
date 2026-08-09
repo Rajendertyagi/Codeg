@@ -1511,6 +1511,7 @@
       "newChatAction": "Nouvelle discussion",
       "automations": "Automatisations",
       "tasks": "Tâches à faire",
+      "customWorkflows": "Workflows personnalisés",
       "loadingSubsessions": "Chargement des sous-conversations…"
     },
     "conversation": {
@@ -4009,6 +4010,17 @@
     "saveFailed": "Échec de l'enregistrement des paramètres de création depuis le chat",
     "loadFailed": "Échec du chargement : {detail}"
   },
+  "ChannelMessagingSettings": {
+    "title": "Messagerie de canal IA",
+    "description": "Permet aux agents d'envoyer des messages vers vos canaux de chat connectés (Telegram, Lark, Weixin). Le message est envoyé à tous les canaux activés — aucun ID de canal n'est requis. Désactivé par défaut car l'agent écrit dans vos canaux externes.",
+    "enable": "Messagerie de canal IA",
+    "enableHint": "Ajoute l'outil send_channel_message aux agents démarrés après activation.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Paramètres de messagerie de canal IA enregistrés",
+    "saveFailed": "Échec de l'enregistrement des paramètres de messagerie de canal IA",
+    "loadFailed": "Échec du chargement : {detail}"
+  },
   "AskQuestionSettings": {
     "title": "Poser une question à l'utilisateur",
     "description": "Permet aux agents de s'interrompre et de vous poser une question à choix multiples affichée au-dessus de la zone de saisie de la conversation. L'agent attend votre réponse (ou que vous ignoriez).",
@@ -4203,7 +4215,24 @@
     "branchLocal": "Locale",
     "branchRemote": "Distante",
     "branchSearchPlaceholder": "Rechercher des branches…",
-    "branchNone": "Aucune branche"
+    "branchNone": "Aucune branche",
+    "launchTarget": "Cible de lancement",
+    "targetNewConversation": "Nouvelle conversation",
+    "targetExistingConversation": "Conversation existante",
+    "conversationSearchPlaceholder": "Rechercher des conversations…",
+    "conversationNone": "Aucune conversation",
+    "existingConversationHint": "Chaque exécution reprend cette conversation en ajoutant un nouveau tour, au lieu de démarrer une nouvelle session.",
+    "errorTargetConversation": "Sélectionnez une conversation à reprendre",
+    "targetKind": "Racine cible",
+    "targetGitWorkspace": "Espace de travail Git",
+    "targetLocalFolder": "Dossier local",
+    "localFolderBrowse": "Parcourir…",
+    "localFolderPathPlaceholder": "Saisissez un chemin absolu",
+    "localFolderHint": "Chaque exécution travaille directement dans ce dossier, sans dépôt git, branche ni worktree.",
+    "errorLocalFolder": "Saisissez un chemin de dossier",
+    "untitledConversation": "Conversation sans titre",
+    "addFolder": "Ajouter un dossier…",
+    "localFolderEmpty": "Aucun dossier disponible"
   },
   "Tasks": {
     "title": "Tâches à faire",
@@ -4256,6 +4285,7 @@
     "actionDelete": "Supprimer",
     "actionRetryCleanup": "Réessayer le nettoyage",
     "actionMerge": "Fusionner",
+    "actionAccept": "Accepter",
     "actionComplete": "Terminer",
     "actionAbandon": "Abandonner",
     "cancelTitle": "Annuler la tâche ?",

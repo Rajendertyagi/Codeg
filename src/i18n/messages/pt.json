@@ -1511,6 +1511,7 @@
       "newChatAction": "Novo chat",
       "automations": "Automações",
       "tasks": "Tarefas a fazer",
+      "customWorkflows": "Fluxos de trabalho personalizados",
       "loadingSubsessions": "Carregando subconversas…"
     },
     "conversation": {
@@ -4009,6 +4010,17 @@
     "saveFailed": "Falha ao salvar as configurações de criar a partir do chat",
     "loadFailed": "Falha ao carregar: {detail}"
   },
+  "ChannelMessagingSettings": {
+    "title": "Mensagens de canal IA",
+    "description": "Permite que agentes enviem mensagens para seus canais de chat conectados (Telegram, Lark, Weixin). A mensagem é enviada para todos os canais habilitados — nenhum ID de canal é necessário. Desativado por padrão porque o agente grava em seus canais externos.",
+    "enable": "Mensagens de canal IA",
+    "enableHint": "Adiciona a ferramenta send_channel_message aos agentes iniciados após ativá-la.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Configurações de mensagens de canal IA salvas",
+    "saveFailed": "Falha ao salvar as configurações de mensagens de canal IA",
+    "loadFailed": "Falha ao carregar: {detail}"
+  },
   "AskQuestionSettings": {
     "title": "Perguntar ao usuário",
     "description": "Permite que os agentes pausem e façam uma pergunta de múltipla escolha que aparece acima da caixa de entrada da conversa. O agente aguarda até você responder (ou pular).",
@@ -4203,7 +4215,24 @@
     "branchLocal": "Local",
     "branchRemote": "Remoto",
     "branchSearchPlaceholder": "Pesquisar branches…",
-    "branchNone": "Sem branches"
+    "branchNone": "Sem branches",
+    "launchTarget": "Destino de execução",
+    "targetNewConversation": "Nova conversa",
+    "targetExistingConversation": "Conversa existente",
+    "conversationSearchPlaceholder": "Pesquisar conversas…",
+    "conversationNone": "Nenhuma conversa",
+    "existingConversationHint": "Cada execução retoma esta conversa adicionando uma nova rodada, em vez de iniciar uma nova sessão.",
+    "errorTargetConversation": "Selecione uma conversa para retomar",
+    "targetKind": "Diretório de destino",
+    "targetGitWorkspace": "Espaço de trabalho Git",
+    "targetLocalFolder": "Pasta local",
+    "localFolderBrowse": "Procurar…",
+    "localFolderPathPlaceholder": "Insira um caminho absoluto",
+    "localFolderHint": "Cada execução trabalha diretamente nesta pasta, sem repositório git, branch ou worktree.",
+    "errorLocalFolder": "Insira um caminho de pasta",
+    "untitledConversation": "Conversa sem título",
+    "addFolder": "Adicionar pasta…",
+    "localFolderEmpty": "Nenhuma pasta disponível"
   },
   "Tasks": {
     "title": "Tarefas a fazer",
@@ -4256,6 +4285,7 @@
     "actionDelete": "Excluir",
     "actionRetryCleanup": "Repetir limpeza",
     "actionMerge": "Merge",
+    "actionAccept": "Aceitar",
     "actionComplete": "Concluir",
     "actionAbandon": "Abandonar",
     "cancelTitle": "Cancelar tarefa?",

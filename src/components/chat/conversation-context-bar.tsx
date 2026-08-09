@@ -392,11 +392,11 @@ interface FolderPickerProps {
   labelEmpty: string
   labelSearch: string
   /** Label for the pinned "no-folder (chat) mode" item at the bottom. */
-  labelChatMode: string
+  labelChatMode?: string
   /** Whether the draft is currently in chat mode (shows the check mark). */
-  isChatMode: boolean
+  isChatMode?: boolean
   /** Select folderless chat mode. */
-  onSelectChatMode: () => void
+  onSelectChatMode?: () => void
   /** Trigger appearance. `"chip"` (default) = folder icon + name + chevron, the
    *  compact below-input row (mobile). `"header"` = bare text sized to the
    *  conversation title, alias-aware, themed while editable — the desktop
@@ -405,9 +405,12 @@ interface FolderPickerProps {
   /** Folder alias for the `"header"` variant's `alias [ name ]` label (rendered
    *  via {@link FolderAliasLabel}). Ignored by the chip variant. */
   alias?: string | null
+  /** When true, hide the pinned "chat mode" (folderless) entry. Used by
+   *  selectors that pick a real folder rather than a conversation target. */
+  hideChatMode?: boolean
 }
 
-const FolderPicker = memo(function FolderPicker({
+export const FolderPicker = memo(function FolderPicker({
   folders,
   currentFolderId,
   currentFolderName,
@@ -416,11 +419,12 @@ const FolderPicker = memo(function FolderPicker({
   onSelect,
   labelEmpty,
   labelSearch,
-  labelChatMode,
-  isChatMode,
-  onSelectChatMode,
+  labelChatMode = "",
+  isChatMode = false,
+  onSelectChatMode = () => {},
   variant = "chip",
   alias = null,
+  hideChatMode = false,
 }: FolderPickerProps) {
   const [open, setOpen] = useState(false)
 
@@ -524,25 +528,27 @@ const FolderPicker = memo(function FolderPicker({
                 through as they scroll underneath; `forceMount` + a stable,
                 plain `value` (no folder name/path) keep it mounted and
                 reachable under any search filter. */}
-            <div className="sticky bottom-0 bg-popover">
-              <CommandSeparator />
-              <CommandGroup forceMount>
-                <CommandItem
-                  value="__chat_mode__ no folder chat mode"
-                  forceMount
-                  onSelect={() => {
-                    setOpen(false)
-                    onSelectChatMode()
-                  }}
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  <span className="flex-1 truncate font-medium">
-                    {labelChatMode}
-                  </span>
-                  {isChatMode && <Check className="h-4 w-4 shrink-0" />}
-                </CommandItem>
-              </CommandGroup>
-            </div>
+            {!hideChatMode && (
+              <div className="sticky bottom-0 bg-popover">
+                <CommandSeparator />
+                <CommandGroup forceMount>
+                  <CommandItem
+                    value="__chat_mode__ no folder chat mode"
+                    forceMount
+                    onSelect={() => {
+                      setOpen(false)
+                      onSelectChatMode()
+                    }}
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    <span className="flex-1 truncate font-medium">
+                      {labelChatMode}
+                    </span>
+                    {isChatMode && <Check className="h-4 w-4 shrink-0" />}
+                  </CommandItem>
+                </CommandGroup>
+              </div>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

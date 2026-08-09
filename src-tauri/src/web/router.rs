@@ -102,6 +102,14 @@ pub fn build_router(
             post(handlers::chat_authoring::set_chat_authoring_settings),
         )
         .route(
+            "/get_chat_channel_messaging_settings",
+            post(handlers::chat_channel_messaging::get_chat_channel_messaging_settings),
+        )
+        .route(
+            "/set_chat_channel_messaging_settings",
+            post(handlers::chat_channel_messaging::set_chat_channel_messaging_settings),
+        )
+        .route(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
@@ -1182,6 +1190,23 @@ pub fn build_router(
             "/quick_messages_reorder",
             post(handlers::quick_messages::quick_messages_reorder),
         )
+        // ─── Global auto-accept (custom hooks) ───
+        .route(
+            "/get_auto_approve_global",
+            post(handlers::auto_approve::auto_approve_global_get),
+        )
+        .route(
+            "/toggle_auto_approve_global",
+            post(handlers::auto_approve::auto_approve_global_toggle),
+        )
+        .route(
+            "/get_auto_approve_conversation",
+            post(handlers::auto_approve::auto_approve_conversation_get),
+        )
+        .route(
+            "/toggle_auto_approve_conversation",
+            post(handlers::auto_approve::auto_approve_conversation_toggle),
+        )
         // ─── Automations ───
         .route(
             "/automation_list",
@@ -1299,6 +1324,11 @@ pub fn build_router(
         .route(
             "/work_task_merge",
             post(handlers::work_task::work_task_merge),
+        )
+        // --- Non-git accept (custom hooks) ---
+        .route(
+            "/work_task_accept",
+            post(crate::custom_hooks::web_workflows::work_task_accept),
         )
         .route(
             "/work_task_complete",

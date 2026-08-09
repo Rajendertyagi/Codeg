@@ -1,10 +1,12 @@
 pub mod acp;
 pub mod app_update;
+pub mod auto_approve;
 pub mod automation;
 pub mod background;
 pub mod backup;
 pub mod chat_authoring;
 pub mod chat_channel;
+pub mod chat_channel_messaging;
 pub mod conversations;
 pub mod custom_skills;
 pub mod delegation;

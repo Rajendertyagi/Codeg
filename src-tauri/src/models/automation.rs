@@ -99,4 +99,16 @@ pub struct AutomationConfig {
     pub config_values: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub label_snapshot: Option<serde_json::Value>,
+    /// When set, `LaunchSession` fires into this existing conversation row
+    /// (resuming its external session) instead of creating a fresh conversation.
+    /// `None` (the legacy default) keeps the always-fresh behavior.
+    #[serde(default)]
+    pub existing_conversation_id: Option<i32>,
+    /// When set, the run's working root is this plain absolute folder path on
+    /// disk (no git involvement) instead of a codeg workspace folder (whose id
+    /// lives in `AutomationDraft.root_folder_id`). Mutually exclusive with the
+    /// workspace: the editor saves exactly one. `None` (the legacy default)
+    /// keeps workspace-targeted behavior.
+    #[serde(default)]
+    pub local_folder_path: Option<String>,
 }

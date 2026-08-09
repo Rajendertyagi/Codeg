@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useState } from "react"
+import { memo, useCallback, useEffect, useState } from "react"
 import {
   ChevronRight,
   Circle,
@@ -9,17 +9,22 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Shield,
+  ShieldCheck,
   SquarePen,
   Trash2,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import {
   deleteConversation,
+  getConversationAutoApprove,
+  toggleConversationAutoApprove,
   updateConversationPinned,
   updateConversationStatus,
   updateConversationTitle,
 } from "@/lib/api"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import { cn } from "@/lib/utils"
 import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-context-bar"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions } from "@/contexts/tab-context"
@@ -234,6 +239,42 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
     setDetails(resolved)
   }, [conversationId, runtimeConversationId, runtimeId])
 
+  // Per-conversation auto-accept shield (custom hooks): runtime-only, in
+  // memory. Reloads when the active conversation changes — this header is a
+  // single instance reused across tabs.
+  const [autoApprove, setAutoApprove] = useState(false)
+  useEffect(() => {
+    if (conversationId == null) {
+      setAutoApprove(false)
+      return
+    }
+    let cancelled = false
+    getConversationAutoApprove(conversationId)
+      .then((result) => {
+        if (!cancelled) setAutoApprove(result.enabled)
+      })
+      .catch((err) => {
+        console.error("[ConversationDetailHeader] load auto-approve failed:", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId])
+
+  const handleToggleAutoApprove = useCallback(async () => {
+    if (conversationId == null) return
+    try {
+      const result = await toggleConversationAutoApprove(conversationId)
+      setAutoApprove(result.enabled)
+    } catch (err) {
+      console.error("[ConversationDetailHeader] toggle auto-approve failed:", err)
+    }
+  }, [conversationId])
+
+  const tAuto = useTranslations("Folder.chat.messageInput")
+  const autoApproveOnLabel = tAuto.has("autoApproveOn") ? tAuto("autoApproveOn") : "Auto-accept: on"
+  const autoApproveOffLabel = tAuto.has("autoApproveOff") ? tAuto("autoApproveOff") : "Auto-accept: off"
+
   return (
     // Transparent (no surface class): the title header reads as part of the
     // message canvas below it rather than as a frosted chrome band. With a
@@ -258,6 +299,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         </span>
       </div>
       <div className="flex shrink-0 items-center">
+        <Button
+          onClick={handleToggleAutoApprove}
+          variant="ghost"
+          size="icon"
+          disabled={!persisted}
+          className={cn("h-7 w-7", autoApprove ? "text-emerald-500" : "text-red-500")}
+          title={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
+          aria-label={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
+          aria-pressed={autoApprove}
+        >
+          {autoApprove ? <ShieldCheck className="size-4" /> : <Shield className="size-4" />}
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

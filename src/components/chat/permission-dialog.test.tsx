@@ -27,7 +27,9 @@ function renderWithIntl(ui: React.ReactElement) {
 
 const baseOptions = [
   { option_id: "allow", name: "Allow once", kind: "allow_once" },
+  { option_id: "always", name: "Always Allow", kind: "allow_always" },
   { option_id: "reject", name: "Reject", kind: "reject_once" },
+  { option_id: "rejectAlways", name: "Reject Always", kind: "reject_always" },
 ]
 
 describe("PermissionDialog", () => {
@@ -75,7 +77,7 @@ describe("PermissionDialog", () => {
     expect(screen.queryByText("git diff")).toBeInTheDocument()
   })
 
-  it("renders every option as a button", () => {
+  it("renders standardized Allow once / Always allow / Deny buttons", () => {
     const permission: PendingPermission = {
       request_id: "req-2",
       tool_call: null,
@@ -87,7 +89,33 @@ describe("PermissionDialog", () => {
     expect(
       screen.getByRole("button", { name: "Allow once" })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Always allow" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument()
+    // reject_always is consumed by the single Deny button; its agent-named
+    // label must not leak as an extra button.
+    expect(
+      screen.queryByRole("button", { name: "Reject Always" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders agent-named buttons for kinds outside the standard set", () => {
+    const permission: PendingPermission = {
+      request_id: "req-extras",
+      tool_call: null,
+      options: [
+        { option_id: "accept", name: "Accept plan", kind: "accept_plan" },
+        { option_id: "other", name: "Continue", kind: "other" },
+      ],
+    }
+    renderWithIntl(
+      <PermissionDialog permission={permission} onRespond={() => {}} />
+    )
+    expect(
+      screen.getByRole("button", { name: "Accept plan" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
   })
 
   it("invokes onRespond with the request_id + chosen option_id when clicked", () => {

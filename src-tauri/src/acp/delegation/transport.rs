@@ -223,6 +223,16 @@ pub struct BrokerCreateWorkTaskRequest {
     pub spec: NewWorkTaskSpec,
 }
 
+/// Send a plain-text message into the user's connected chat channels. Backs the
+/// `send_channel_message` MCP tool; authenticated by the per-launch `token`. The
+/// host resolves enabled-channel destinations and delivers; the AI never sees
+/// channel ids or tokens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerSendChannelMessageRequest {
+    pub token: String,
+    pub message: String,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -241,6 +251,7 @@ pub enum BrokerMessage {
     TaskComplete(BrokerTaskCompleteRequest),
     CreateAutomation(BrokerCreateAutomationRequest),
     CreateWorkTask(BrokerCreateWorkTaskRequest),
+    SendChannelMessage(BrokerSendChannelMessageRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
@@ -422,6 +433,15 @@ pub async fn client_create_work_task_round_trip(
     req: &BrokerCreateWorkTaskRequest,
 ) -> io::Result<BrokerResponse> {
     message_round_trip(socket_path, &BrokerMessage::CreateWorkTask(req.clone())).await
+}
+
+/// Dispatch a `send_channel_message` request and read back a
+/// [`crate::acp::channel_messaging::ChannelMessageOutcome`].
+pub async fn client_send_channel_message_round_trip(
+    socket_path: &str,
+    req: &BrokerSendChannelMessageRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::SendChannelMessage(req.clone())).await
 }
 
 /// Total budget for `open()` retries on Windows named pipes. Has to be

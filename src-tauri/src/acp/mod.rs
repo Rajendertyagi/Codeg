@@ -1,6 +1,7 @@
 pub mod background_watch;
 pub mod binary_cache;
 pub mod chat_authoring;
+pub mod channel_messaging;
 pub mod codex_catalog_source;
 pub mod codex_goal;
 pub mod codex_model_catalog;
