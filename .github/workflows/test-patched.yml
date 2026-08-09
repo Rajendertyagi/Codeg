@@ -1,0 +1,182 @@
+name: Test (patched tree)
+
+# Mirrors the upstream gates in test.yml (eslint + vitest + build,
+# cargo clippy -D warnings, cargo test) but runs them against the tree
+# WITH the newplugin custom-feature patches applied.
+#
+# test.yml itself never applies patches, so the patched tree has no test
+# coverage anywhere else. This workflow exists to close that gap before
+# anything is proposed upstream.
+#
+# Patch-apply logic is copied verbatim from codeg-portable-win64-custom.yml
+# (the authoritative apply order). Do NOT let this file drift from it.
+
+on:
+  push:
+    branches:
+      - plugin-dev
+  workflow_dispatch:
+
+env:
+  RUST_BACKTRACE: short
+  # Refuse to silently regenerate snapshots in CI — any drift must be
+  # accepted locally with `cargo insta review` and committed.
+  INSTA_UPDATE: "no"
+
+concurrency:
+  group: test-patched-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint + vitest + build)
+    # Frontend tests are OS-independent (jsdom + pure TS), keep on Linux
+    # to save CI minutes (same choice as test.yml).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply custom feature patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patchDir = "newplugin/patches"
+          $groups = @(
+            @{ Name = "auto-approve"; Pattern = '\.(accept|launch|customtab)\.patch$'; Exclude = $true },
+            @{ Name = "task-accept";  Pattern = '\.accept\.patch$' },
+            @{ Name = "launch-target"; Pattern = '\.launch\.patch$' },
+            @{ Name = "custom-tab";   Pattern = '\.customtab\.patch$' }
+          )
+          foreach ($group in $groups) {
+            $files = Get-ChildItem -Path $patchDir -File -Filter "*.patch" |
+              Where-Object {
+                if ($group.Exclude) {
+                  $_.Name -notmatch $group.Pattern
+                } else {
+                  $_.Name -match $group.Pattern
+                }
+              } |
+              Sort-Object Name
+            if ($files.Count -eq 0) {
+              throw "No patches matched group $($group.Name)"
+            }
+            Write-Output "=== Applying $($group.Name) ($($files.Count) patches) ==="
+            foreach ($file in $files) {
+              Write-Output "Applying $($file.Name)"
+              git apply "$($file.FullName)"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Patch $($file.Name) failed to apply (see output above). Aborting so the failure is not silent."
+              }
+            }
+          }
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm eslint .
+
+      - name: Unit tests (vitest)
+        run: pnpm test
+
+      - name: Static export build
+        run: pnpm build
+
+  rust:
+    name: Rust ${{ matrix.mode }} on windows-latest
+    # Only Windows here (the shipped platform). test.yml covers the full
+    # OS matrix for pristine main; this workflow only needs to prove the
+    # patches stay compile/lint-clean where they actually ship.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [desktop, server]
+        include:
+          - mode: desktop
+            # Same flags as test.yml desktop cell: `test-utils` exposes test
+            # scaffolding for integration tests, and Windows desktop keeps
+            # compile coverage (`--no-run`) because test binaries can fail at
+            # process load on GitHub runners before tests start.
+            cargo_args: "--features test-utils"
+            clippy_args: "--all-targets --features test-utils"
+          - mode: server
+            cargo_args: "--no-default-features --bin codeg-server --lib"
+            clippy_args: "--no-default-features --bin codeg-server --lib"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply custom feature patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patchDir = "newplugin/patches"
+          $groups = @(
+            @{ Name = "auto-approve"; Pattern = '\.(accept|launch|customtab)\.patch$'; Exclude = $true },
+            @{ Name = "task-accept";  Pattern = '\.accept\.patch$' },
+            @{ Name = "launch-target"; Pattern = '\.launch\.patch$' },
+            @{ Name = "custom-tab";   Pattern = '\.customtab\.patch$' }
+          )
+          foreach ($group in $groups) {
+            $files = Get-ChildItem -Path $patchDir -File -Filter "*.patch" |
+              Where-Object {
+                if ($group.Exclude) {
+                  $_.Name -notmatch $group.Pattern
+                } else {
+                  $_.Name -match $group.Pattern
+                }
+              } |
+              Sort-Object Name
+            if ($files.Count -eq 0) {
+              throw "No patches matched group $($group.Name)"
+            }
+            Write-Output "=== Applying $($group.Name) ($($files.Count) patches) ==="
+            foreach ($file in $files) {
+              Write-Output "Applying $($file.Name)"
+              git apply "$($file.FullName)"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Patch $($file.Name) failed to apply (see output above). Aborting so the failure is not silent."
+              }
+            }
+          }
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: test-patched-${{ matrix.mode }}
+
+      - name: Prepare Tauri frontendDist placeholder
+        # Tauri's build script validates `frontendDist` and bundled resource
+        # paths during Rust compilation, so the path must exist even though
+        # this job does not build the frontend (same step as test.yml).
+        if: matrix.mode == 'desktop'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Set-Content -Path out/index.html -Value '<!doctype html><html><body></body></html>' -NoNewline
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test ${{ matrix.cargo_args }} ${{ matrix.mode == 'desktop' && '--no-run' || '' }}
+
+      - name: cargo clippy
+        # Treat warnings as errors — the same bar upstream test.yml enforces.
+        working-directory: src-tauri
+        run: cargo clippy ${{ matrix.clippy_args }} -- -D warnings
