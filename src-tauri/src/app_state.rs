@@ -65,12 +65,6 @@ pub struct AppState {
     /// updated by the chat-authoring settings command on save. Populated at
     /// startup by `apply_persisted_chat_authoring_config`.
     pub chat_authoring_config: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
-    /// Hot-swappable channel-messaging (`send_channel_message`) enable flag.
-    /// Shared with the `DelegationInjection` so MCP injection reads it,
-    /// re-read by the messaging write path at call time, and updated by the
-    /// channel-messaging settings command on save. Populated at startup by
-    /// `apply_persisted_channel_messaging_config`.
-    pub chat_channel_messaging_config: crate::acp::channel_messaging::ChannelMessagingRuntimeConfig,
     /// Serializes mutually-exclusive system operations — in-place
     /// self-update, restart, rollback — so a second click can't race a
     /// download/swap already in flight. Handlers `try_lock` and reject when
@@ -122,7 +116,6 @@ pub fn build_delegation_stack(
     crate::acp::question::QuestionRuntimeConfig,
     crate::acp::session_info::SessionInfoRuntimeConfig,
     crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
-    crate::acp::channel_messaging::ChannelMessagingRuntimeConfig,
 ) {
     use crate::acp::connection::DelegationInjection;
     use crate::acp::delegation::broker::{
@@ -174,7 +167,6 @@ pub fn build_delegation_stack(
     let ask = crate::acp::question::QuestionRuntimeConfig::new();
     let sessions = crate::acp::session_info::SessionInfoRuntimeConfig::new();
     let authoring = crate::acp::chat_authoring::ChatAuthoringRuntimeConfig::new();
-    let channel_messaging = crate::acp::channel_messaging::ChannelMessagingRuntimeConfig::new();
 
     // Install the injection on the manager so spawn_agent picks it up
     // without an extra parameter at every call site.
@@ -187,7 +179,6 @@ pub fn build_delegation_stack(
         ask: ask.clone(),
         sessions: sessions.clone(),
         authoring: authoring.clone(),
-        channel_messaging: channel_messaging.clone(),
         // Same backing manager as the listener's question lookup; used only by
         // the run_connection teardown guard to reclaim a parked ask.
         questions: Arc::new(crate::acp::manager::ConnectionManagerQuestionLookup {
@@ -200,7 +191,7 @@ pub fn build_delegation_stack(
         }) as Arc<dyn crate::acp::plan_approval::SessionPlanApprovalAccess>,
     });
 
-    (broker, tokens, socket_path, feedback, ask, sessions, authoring, channel_messaging)
+    (broker, tokens, socket_path, feedback, ask, sessions, authoring)
 }
 
 impl AppState {

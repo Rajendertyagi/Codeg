@@ -527,7 +527,6 @@ mod tauri_app {
                         question_config,
                         session_info_config,
                         chat_authoring_config,
-                        channel_messaging_config,
                     ) = crate::app_state::build_delegation_stack(
                         &cm_state,
                         db_conn.clone(),
@@ -539,7 +538,6 @@ mod tauri_app {
                     app.manage(question_config.clone());
                     app.manage(session_info_config.clone());
                     app.manage(chat_authoring_config.clone());
-                    app.manage(channel_messaging_config.clone());
                     app.manage(crate::commands::delegation::DelegationSocketPath(
                         socket_path.clone(),
                     ));
@@ -552,7 +550,6 @@ mod tauri_app {
                     let question_for_init = question_config.clone();
                     let session_info_for_init = session_info_config.clone();
                     let chat_authoring_for_init = chat_authoring_config.clone();
-                    let channel_messaging_for_init = channel_messaging_config.clone();
                     tauri::async_runtime::block_on(async move {
                         delegation_commands::apply_persisted_config(
                             &db_for_init,
@@ -577,11 +574,6 @@ mod tauri_app {
                         crate::commands::chat_authoring::apply_persisted_chat_authoring_config(
                             &db_for_init,
                             &chat_authoring_for_init,
-                        )
-                        .await;
-                        crate::commands::chat_channel_messaging::apply_persisted_channel_messaging_config(
-                            &db_for_init,
-                            &channel_messaging_for_init,
                         )
                         .await;
                     });
@@ -622,18 +614,6 @@ mod tauri_app {
                                     app.handle().clone(),
                                 ),
                                 chat_authoring_config.clone(),
-                            ),
-                        ),
-                        std::sync::Arc::new(
-                            crate::commands::chat_channel_messaging::DbChannelMessaging::new(
-                                std::sync::Arc::new(db::AppDatabase {
-                                    conn: db_conn.clone(),
-                                }),
-                                crate::web::event_bridge::EventEmitter::Tauri(
-                                    app.handle().clone(),
-                                ),
-                                channel_messaging_config.clone(),
-                                cm_state.chat_channel_manager.clone_ref(),
                             ),
                         ),
                     );
