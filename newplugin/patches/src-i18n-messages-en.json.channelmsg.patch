@@ -1,0 +1,22 @@
+diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
+index b8a1434b..699c4d5b 100644
+--- a/src/i18n/messages/en.json
++++ b/src/i18n/messages/en.json
+@@ -4009,6 +4009,17 @@
+     "saveFailed": "Failed to save create-from-chat settings",
+     "loadFailed": "Failed to load: {detail}"
+   },
++  "ChannelMessagingSettings": {
++    "title": "AI Channel Messaging",
++    "description": "Let agents send messages into your connected chat channels (Telegram, Lark, Weixin). The message is sent to every enabled channel — no channel ID is required. Off by default because the agent writes into your external channels.",
++    "enable": "AI Channel Messaging",
++    "enableHint": "Adds the send_channel_message tool to agents started after this is turned on.",
++    "save": "Save",
++    "saving": "Saving…",
++    "saved": "AI Channel Messaging settings saved",
++    "saveFailed": "Failed to save AI Channel Messaging settings",
++    "loadFailed": "Failed to load: {detail}"
++  },
+   "AskQuestionSettings": {
+     "title": "Ask user question",
+     "description": "Let agents pause and ask you a multiple-choice question that appears above the conversation input box. The agent waits until you answer (or skip).",

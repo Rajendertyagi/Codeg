@@ -1,0 +1,19 @@
+diff --git a/src-tauri/src/web/router.rs b/src-tauri/src/web/router.rs
+index f36dd99b..6a0d88ce 100644
+--- a/src-tauri/src/web/router.rs
++++ b/src-tauri/src/web/router.rs
+@@ -101,6 +101,14 @@ pub fn build_router(
+             "/set_chat_authoring_settings",
+             post(handlers::chat_authoring::set_chat_authoring_settings),
+         )
++        .route(
++            "/get_chat_channel_messaging_settings",
++            post(handlers::chat_channel_messaging::get_chat_channel_messaging_settings),
++        )
++        .route(
++            "/set_chat_channel_messaging_settings",
++            post(handlers::chat_channel_messaging::set_chat_channel_messaging_settings),
++        )
+         .route(
+             "/get_folder_conversation",
+             post(handlers::conversations::get_folder_conversation),

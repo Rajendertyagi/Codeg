@@ -1,0 +1,12 @@
+diff --git a/src-tauri/src/commands/mod.rs b/src-tauri/src/commands/mod.rs
+index e0b23bbd..e54d4389 100644
+--- a/src-tauri/src/commands/mod.rs
++++ b/src-tauri/src/commands/mod.rs
+@@ -5,6 +5,7 @@ pub mod automation;
+ pub mod background;
+ pub mod backup;
+ pub mod chat_authoring;
++pub mod chat_channel_messaging;
+ pub mod chat_channel;
+ pub mod conversations;
+ pub mod custom_agents;
