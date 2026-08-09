@@ -1,4 +1,4 @@
-# agent.md - Agent Operating Rules
+# agent.md — Agent Operating Rules
 
 Working guidance for Code Agent when working in this repository (Codeg).
 
@@ -6,7 +6,20 @@ Working guidance for Code Agent when working in this repository (Codeg).
 > conventions, not the user's personal instructions. Directives given by the user in
 > conversation always take precedence over this file.
 
-## DO NOT follow CLAUDE.md — verification runs via GitHub workflow (user-declared 2026-08-09)
+## 🛑 HARD BAN — No Local Tooling, Ever (user-declared 2026-08-09)
+
+- **NO toolchain installs, NO local Rust builds, NO local npm/pnpm installs** — under any
+  circumstances. See also "No installations under any circumstances" in **Our Workflow**.
+- **The ONLY Rust/TypeScript verification is the GitHub Actions workflow; CI logs are the
+  only evidence.**
+- **Proposing, suggesting, or asking the user about local toolchains, `cargo`, `rustup`, or
+  running build commands is itself a rule violation.** Never raise it in any session, ever.
+- To obtain a build error: read it from the GitHub Actions log (the user pastes it, or
+  provides log access). Never from a local toolchain.
+- If a dependency or tool is missing, flag it as open debt with `file:line` citation — do
+  not install it.
+
+## Verification — GitHub Workflow Only (replaces CLAUDE.md)
 
 - **`CLAUDE.md` is NOT authoritative and must not be followed.** A `CLAUDE.md` previously
   existed in this repo (now deleted) whose build/verification commands (`cargo test
@@ -25,25 +38,31 @@ Working guidance for Code Agent when working in this repository (Codeg).
 
 ## Core System Profile
 
-- **ROLE:** Building a custom platform **on top of** Codeg — all custom work lives in `newplugin/`, never in engine files.
+- **ROLE:** Building a custom platform **on top of** Codeg — all custom work lives in
+  `newplugin/`, never in engine files.
 - **POLICY:** Never edit Codeg native engine files. Manage custom files/hooks only.
 
 ## Immutable Architect Rules
 
 1. **Codeg = base platform/engine.** The custom platform is layered on top of it.
-2. **Never edit Codeg native engine files** - this covers the Rust engine (`src-tauri/src/**`), the core TypeScript engine, and vendored native components.
-3. **Custom work lives in `newplugin/` only** — `newplugin/patches/` (apply-on-demand engine/frontend patches), `newplugin/hooks/` (out-of-tree Rust hooks), `newplugin/backend/`, `newplugin/frontend/`. New features are delivered as patches in `newplugin/patches/` and/or `newplugin/` hooks — never as edits to engine files.
-4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged as open debt with `file:line` citations, never silently fixed.
+2. **Never edit Codeg native engine files** — this covers the Rust engine
+   (`src-tauri/src/**`), the core TypeScript engine, and vendored native components.
+3. **Custom work lives in `newplugin/` only** — `newplugin/patches/` (apply-on-demand
+   engine/frontend patches), `newplugin/hooks/` (out-of-tree Rust hooks),
+   `newplugin/backend/`, `newplugin/frontend/`. New features are delivered as patches in
+   `newplugin/patches/` and/or `newplugin/` hooks — never as edits to engine files.
+4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged
+   as open debt with `file:line` citations, never silently fixed.
 
 ## Carried State (repo invariants)
 
 - **PATCH-ARCHIVE MODEL** (2026-08-07): engine + frontend tree = 100% pure `origin/main`
-   (0.23.x) — zero custom seams in Codeg-owned files. Every custom feature lives ONLY as an
-   apply-on-demand patch under `newplugin/patches/` (66 files: 17 auto-approve +
-   16 task-accept + 20 launch-target + 13 custom-workflows-tab) and is OFF by default in a
-   plain checkout. Apply with `git apply newplugin/patches/<file>.patch` from the repo root
-   on a clean `origin/main` checkout; all 66 pass `git apply --check` and compose cleanly in
-   dependency order (verified 2026-08-07).
+  (0.23.x) — zero custom seams in Codeg-owned files. Every custom feature lives ONLY as an
+  apply-on-demand patch under `newplugin/patches/` (66 files: 17 auto-approve +
+  16 task-accept + 20 launch-target + 13 custom-workflows-tab) and is OFF by default in a
+  plain checkout. Apply with `git apply newplugin/patches/<file>.patch` from the repo root
+  on a clean `origin/main` checkout; all 66 pass `git apply --check` and compose cleanly in
+  dependency order (verified 2026-08-07).
 - **Archived features:** auto-approval (`web/handlers/auto_approve.rs` + `custom_hooks`
   hydration in `lib.rs`), task-accept (`workTaskAccept` command + route + review UI),
   launch-target (`local_folder_path` + `existing_conversation_id` resume for work-task and
@@ -64,7 +83,8 @@ Working guidance for Code Agent when working in this repository (Codeg).
   the portable win64 app. Build errors surface only in GitHub Actions logs.
 - Untracked, leave alone: `.qartez/`. (`codeg-portable-win64.yml` was removed; the custom
   workflow is `codeg-portable-win64-custom.yml` and is tracked.)
-- Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP leak at `chat_channel.rs:78-90`.
+- Open debt (read-only awareness, engine-side - flagged, not fixed): delete-channel ACP
+  leak at `chat_channel.rs:78-90`.
 
 ## Extension Surface for the Custom Platform
 
@@ -72,7 +92,9 @@ Working guidance for Code Agent when working in this repository (Codeg).
 - `ConnectionSpawner` trait (`acp/delegation/spawner.rs:86`)
 - DB-persisted custom agents (`db/service/custom_agent_service.rs:160-162`)
 - Sole event emission path: `emit_with_state_gated` (`web/event_bridge.rs:402-425`)
-- Five prompt surfaces route through ConnectionManager (architectural center): `commands/acp.rs:8495-8507`, `web/handlers/acp.rs:165-188`, `automation/engine.rs:551-562`, `work_task/engine.rs:782-793`, `chat_channel/session_commands.rs:1563-1593`
+- Five prompt surfaces route through ConnectionManager (architectural center):
+  `commands/acp.rs:8495-8507`, `web/handlers/acp.rs:165-188`, `automation/engine.rs:551-562`,
+  `work_task/engine.rs:782-793`, `chat_channel/session_commands.rs:1563-1593`
 
 ## Project
 
@@ -91,11 +113,12 @@ server/Docker deployment.
 - **Database**: SeaORM + SQLite
 - **Package manager**: pnpm
 
-## Our Workflow (hard rules)
+## Our Workflow (Hard Rules)
 
 1. **Branch discipline**
    - `main` is a clean upstream mirror. NEVER commit to, modify, or merge into it.
-   - All work happens on `plugin-dev` (legacy branch name; the custom layer is `newplugin/`), or a task branch off it.
+   - All work happens on `plugin-dev` (legacy branch name; the custom layer is
+     `newplugin/`), or a task branch off it.
 2. **Audit-first development**
    - Architecture understanding is done as phased audits; each phase produces a report
      under `audit/` (e.g. `audit/<phase>.md`) committed to `plugin-dev`.
@@ -109,7 +132,7 @@ server/Docker deployment.
    lock, GitHub Actions, GitHub-hosted MCP servers). Do NOT propose or run `npm install`,
    `pip install`, `cargo install`, `brew install`, or any other package manager install.
    If a dependency is missing, flag it as open debt with `file:line` citation — do not
-   silently add it. Vendored/built-in tooling only.
+   silently add it. Vendored/built-in tooling only. (See **HARD BAN** at top of file.)
 
 ## Working Rules (Implementation Discipline)
 
@@ -157,7 +180,8 @@ before writing custom code.
 - Don't modify pristine upstream files when the newplugin/patches architecture is being used.
 - Prefer thin patches around native Codeg behavior.
 - Before implementing something substantial, audit the upstream 0.23.5 implementation first.
-- If an agent proposes custom infrastructure, make it prove that the native Codeg equivalent cannot be reused.
+- If an agent proposes custom infrastructure, make it prove that the native Codeg
+  equivalent cannot be reused.
 
 ## Tooling (available via mcpproxy MCP)
 
@@ -177,10 +201,6 @@ abbreviations.
 - **ICM** — session memory, facts, transcripts.
 
 ### MCP Tool Mandate (hard rules)
-
-Indexed MCP tools MUST be used before any direct file read. They are faster,
-graph-aware, and surface relationships that grep/Read cannot. Falling back to
-manual reads when an indexed tool is available is a protocol violation.
 
 Indexed MCP tools MUST be used before any direct file read. They are faster,
 graph-aware, and surface relationships that grep/Read cannot. Falling back to
