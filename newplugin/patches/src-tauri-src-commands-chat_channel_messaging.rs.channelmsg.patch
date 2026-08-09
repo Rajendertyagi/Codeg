@@ -1,9 +1,9 @@
 diff --git a/src-tauri/src/commands/chat_channel_messaging.rs b/src-tauri/src/commands/chat_channel_messaging.rs
 new file mode 100644
-index 00000000..f28d9e9a
+index 00000000..2a169160
 --- /dev/null
 +++ b/src-tauri/src/commands/chat_channel_messaging.rs
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,258 @@
 +//! `send_channel_message` backing logic + settings persistence.
 +//!
 +//! Two surfaces live here, mirroring `crate::commands::chat_authoring`:
@@ -33,7 +33,6 @@ index 00000000..f28d9e9a
 +use crate::app_error::AppCommandError;
 +use crate::chat_channel::manager::ChatChannelManager;
 +use crate::chat_channel::types::RichMessage;
-+use crate::commands::chat_authoring::load_flag;
 +use crate::db::service::{
 +    app_metadata_service, chat_channel_message_log_service, chat_channel_service,
 +};
@@ -172,6 +171,13 @@ index 00000000..f28d9e9a
 +        ChannelMessagingConfig {
 +            enabled: self.enabled,
 +        }
++    }
++}
++
++async fn load_flag(conn: &DatabaseConnection, key: &str) -> bool {
++    match app_metadata_service::get_value(conn, key).await {
++        Ok(Some(raw)) => raw.parse::<bool>().unwrap_or(false),
++        _ => false,
 +    }
 +}
 +

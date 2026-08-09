@@ -51,7 +51,7 @@ index 2a75c083..3b0f265c 100644
 +                                    app.handle().clone(),
 +                                ),
 +                                channel_messaging_config.clone(),
-+                                cm_state.chat_channel_manager.clone_ref(),
++                                app.state::<ChatChannelManager>().clone_ref(),
 +                            ),
 +                        ),
                      );

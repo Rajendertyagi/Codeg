@@ -1,9 +1,9 @@
 diff --git a/src-tauri/src/acp/channel_messaging.rs b/src-tauri/src/acp/channel_messaging.rs
 new file mode 100644
-index 00000000..267789e4
+index 00000000..35f466da
 --- /dev/null
 +++ b/src-tauri/src/acp/channel_messaging.rs
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,154 @@
 +//! Channel-messaging domain types — backing the `send_channel_message` MCP tool.
 +//!
 +//! An AI agent (interactive or automation) can explicitly send a plain-text
@@ -27,8 +27,6 @@ index 00000000..267789e4
 +use async_trait::async_trait;
 +use serde::{Deserialize, Serialize};
 +use tokio::sync::RwLock;
-+
-+use crate::acp::chat_authoring::truncate_chars;
 +
 +/// Cap on an outbound channel message. Mirrors Telegram's 4096-char limit;
 +/// truncated silently (no error to the LLM) — the LLM sees whatever was

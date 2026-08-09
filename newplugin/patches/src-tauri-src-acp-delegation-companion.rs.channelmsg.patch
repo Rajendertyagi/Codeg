@@ -1,12 +1,8 @@
 diff --git a/src-tauri/src/acp/delegation/companion.rs b/src-tauri/src/acp/delegation/companion.rs
-index dad5fc59..1e7c9897 100644
+index dad5fc59..68e7f1e4 100644
 --- a/src-tauri/src/acp/delegation/companion.rs
 +++ b/src-tauri/src/acp/delegation/companion.rs
-@@ -44,14 +44,16 @@ use tokio::sync::{oneshot, Mutex};
- use crate::acp::chat_authoring::{
-     NewAutomationSpec, NewWorkTaskSpec, MAX_PROMPT_CHARS, MAX_TITLE_CHARS,
- };
-+use crate::acp::channel_messaging::ChannelMessageOutcome;
+@@ -47,11 +47,12 @@ use crate::acp::chat_authoring::{
  use crate::acp::delegation::transport::{
      client_ask_round_trip, client_cancel, client_cancel_task_round_trip, client_commit_feedback,
      client_create_automation_round_trip, client_create_work_task_round_trip,
@@ -24,7 +20,7 @@ index dad5fc59..1e7c9897 100644
      BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
  };
  use crate::acp::question::parse_questions;
-@@ -152,6 +154,11 @@ pub struct CompanionFeatures {
+@@ -152,6 +153,11 @@ pub struct CompanionFeatures {
      pub automations: bool,
      /// `create_work_task` — queue a card on the work-task board from chat.
      pub taskboard: bool,
@@ -36,7 +32,7 @@ index dad5fc59..1e7c9897 100644
  }
  
  impl CompanionFeatures {
-@@ -171,6 +178,7 @@ impl CompanionFeatures {
+@@ -171,6 +177,7 @@ impl CompanionFeatures {
                  tasks: false,
                  automations: false,
                  taskboard: false,
@@ -44,7 +40,7 @@ index dad5fc59..1e7c9897 100644
              };
          };
          let mut f = Self {
-@@ -181,6 +189,7 @@ impl CompanionFeatures {
+@@ -181,6 +188,7 @@ impl CompanionFeatures {
              tasks: false,
              automations: false,
              taskboard: false,
@@ -52,7 +48,7 @@ index dad5fc59..1e7c9897 100644
          };
          for tok in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
              match tok {
-@@ -191,6 +200,7 @@ impl CompanionFeatures {
+@@ -191,6 +199,7 @@ impl CompanionFeatures {
                  "tasks" => f.tasks = true,
                  "automations" => f.automations = true,
                  "taskboard" => f.taskboard = true,
@@ -60,7 +56,7 @@ index dad5fc59..1e7c9897 100644
                  _ => {}
              }
          }
-@@ -206,6 +216,7 @@ impl CompanionFeatures {
+@@ -206,6 +215,7 @@ impl CompanionFeatures {
              "task_progress" | "task_complete" => self.tasks,
              "create_automation" => self.automations,
              "create_work_task" => self.taskboard,
@@ -68,7 +64,7 @@ index dad5fc59..1e7c9897 100644
              "delegate_to_agent" | "get_delegation_status" | "cancel_delegation" => self.delegation,
              _ => false,
          }
-@@ -726,6 +737,22 @@ async fn build_tools_call_spawn(
+@@ -726,6 +736,22 @@ async fn build_tools_call_spawn(
                  Box::pin(async move { client_create_work_task_round_trip(&socket, &req).await });
              register_and_spawn(inflight, id, None, round_trip, render_authoring_result).await
          }
@@ -91,7 +87,7 @@ index dad5fc59..1e7c9897 100644
          other => LineAction::Respond(err(id, -32602, format!("unknown tool: {other}"))),
      }
  }
-@@ -1408,6 +1435,59 @@ pub fn render_authoring_result(outcome: &Value) -> Value {
+@@ -1408,6 +1434,60 @@ pub fn render_authoring_result(outcome: &Value) -> Value {
      })
  }
  
@@ -101,7 +97,8 @@ index dad5fc59..1e7c9897 100644
 +    message: String,
 +}
 +
-+/// Render a [`ChannelMessageOutcome`] back into an MCP `tools/call` result.
++/// Render a [`crate::acp::channel_messaging::ChannelMessageOutcome`] back into
++/// an MCP `tools/call` result.
 +/// Mirrors [`render_authoring_result`] but formats per-channel delivery
 +/// summaries so the LLM knows exactly which channels received the message.
 +pub fn render_channel_message_result(outcome: &Value) -> Value {
