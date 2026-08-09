@@ -60,9 +60,6 @@ export interface UseConnectionReturn {
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
   pendingPermission: PendingPermission | null
-  /** The full queue of unanswered tool-call permissions (multi-card rendering).
-   *  `pendingPermission` is the back-compat head-of-queue view (`queue[0]`). */
-  pendingPermissions: PendingPermission[] | undefined
   pendingUserMessage: PendingUserMessage | null
   pendingQuestion: PendingQuestion | null
   pendingAskQuestion: PendingQuestionState | null
@@ -220,7 +217,6 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     connection?.configOptions ?? cached?.configOptions ?? null
   const availableCommands = connection?.availableCommands ?? null
   const pendingPermission = connection?.pendingPermission ?? null
-  const pendingPermissions = connection?.pendingPermissions
   const pendingUserMessage = connection?.pendingUserMessage ?? null
   const pendingQuestion = connection?.pendingQuestion ?? null
   const pendingAskQuestion = connection?.pendingAskQuestion ?? null
@@ -324,7 +320,6 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       configOptions,
       availableCommands,
       pendingPermission,
-      pendingPermissions,
       pendingUserMessage,
       pendingQuestion,
       pendingAskQuestion,
@@ -364,7 +359,6 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       configOptions,
       availableCommands,
       pendingPermission,
-      pendingPermissions,
       pendingUserMessage,
       pendingQuestion,
       pendingAskQuestion,

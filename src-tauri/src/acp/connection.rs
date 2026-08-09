@@ -272,10 +272,6 @@ pub enum ConnectionCommand {
         request_id: String,
         option_id: String,
     },
-    /// Auto-approve reconcile: answer every parked `Acp` card that has an
-    /// allow option (sent by the manager when a per-chat or global toggle
-    /// flips ON).
-    ReconcileAutoApprove,
     Fork {
         reply:
             tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
@@ -1372,10 +1368,7 @@ pub async fn spawn_agent_connection(
 /// before codeg advertised `elicitation.form` — its chosen option answers the
 /// blocked elicitation request instead (see `handle_elicitation_request`).
 enum PendingPermission {
-    Acp {
-        responder: Responder<RequestPermissionResponse>,
-        allow_option_id: Option<String>,
-    },
+    Acp(Responder<RequestPermissionResponse>),
     CodexElicitation {
         responder: Responder<serde_json::Value>,
         approval: crate::acp::question::ElicitationApproval,
@@ -1386,7 +1379,7 @@ impl PendingPermission {
     /// Resolve with the user's chosen option id.
     fn respond_selected(self, option_id: String) {
         match self {
-            PendingPermission::Acp { responder, .. } => {
+            PendingPermission::Acp(responder) => {
                 let outcome =
                     RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id));
                 let _ = responder.respond(RequestPermissionResponse::new(outcome));
@@ -1407,7 +1400,7 @@ impl PendingPermission {
     /// user chose.
     fn respond_cancelled(self) {
         match self {
-            PendingPermission::Acp { responder, .. } => {
+            PendingPermission::Acp(responder) => {
                 let _ = responder.respond(RequestPermissionResponse::new(
                     RequestPermissionOutcome::Cancelled,
                 ));
@@ -2638,11 +2631,6 @@ pub struct DelegationInjection {
     /// read-only groups these are ALSO re-read at call time by the authoring
     /// access impl — see [`crate::acp::chat_authoring::ChatAuthoringRuntimeConfig`].
     pub authoring: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
-    /// Hot-swappable channel-messaging flag (`send_channel_message`). Read at
-    /// injection time so the companion's `--features` lists `channels` when the
-    /// user has enabled the setting. Like `authoring`, this is ALSO re-checked
-    /// at call time by the messaging access impl.
-    pub channel_messaging: crate::acp::channel_messaging::ChannelMessagingRuntimeConfig,
     /// Question registry handle for the teardown cascade. The `run_connection`
     /// cleanup guard calls `cancel_questions_by_parent` through this so a pending
     /// `ask_user_question` is reclaimed synchronously on disconnect, mirroring
@@ -2756,8 +2744,6 @@ struct CompanionFeatureFlags {
     automations: bool,
     /// `create_work_task`, gated by the chat-authoring setting.
     taskboard: bool,
-    /// `send_channel_message`, gated by the channel-messaging setting.
-    channels: bool,
 }
 
 /// The `--features` value for a companion launch, or `None` when no group is
@@ -2787,9 +2773,6 @@ fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
     }
     if flags.taskboard {
         features.push("taskboard");
-    }
-    if flags.channels {
-        features.push("channels");
     }
     if features.is_empty() {
         return None;
@@ -2828,7 +2811,6 @@ async fn inject_codeg_mcp(
         tasks: tasks_enabled,
         automations: authoring.automations_enabled,
         taskboard: authoring.work_tasks_enabled,
-        channels: injection.channel_messaging.snapshot().await.enabled,
     };
     // `None` (no feature enabled) short-circuits the whole injection.
     let features_arg = companion_features_arg(flags)?;
@@ -4647,51 +4629,10 @@ async fn handle_permission_request(
         }
     }
 
-    // Auto-accept gate (custom hooks): when the GLOBAL auto-accept toggle is
-    // on, answer the request with the first "allow" option the agent offered ΓÇö
-    // BEFORE it is parked or broadcast, so no subscriber (permission dialog,
-    // chat-channel relay, webhook) ever sees a stuck card. Resolves exactly
-    // like the `ConnectionCommand::RespondPermission` path (respond_selected ->
-    // `PermissionResolved`) so the agent sees an ordinary selected outcome.
-    // The toggle is app-wide (persisted in `app_metadata`); it deliberately
-    // consults no conversation/folder/sender context. When the toggle is off ΓÇö
-    // or the request offers no allow option ΓÇö fall through to the existing
-    // flow unchanged (never manufacture an approval the agent didn't offer).
-    let conversation_id = state
-        .read()
-        .await
-        .conversation_id
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let approved =
-        crate::custom_hooks::custom_auto_approve::is_auto_approved_for(&conversation_id).await;
-    tracing::warn!(
-        "auto-approve gate: approved={} conversation_id={} option_kinds={:?}",
-        approved,
-        conversation_id,
-        options.iter().map(|o| &o.kind).collect::<Vec<_>>()
-    );
-    if approved {
-        if let Some(allow_option) = options
-            .iter()
-            .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
-        {
-            PendingPermission::Acp { responder, allow_option_id: None }
-                .respond_selected(allow_option.option_id.clone());
-            emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id })
-                .await;
-            return;
-        }
-    }
-
-    let allow_option_id = options
-        .iter()
-        .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
-        .map(|opt| opt.option_id.clone());
     perms
         .lock()
         .await
-        .insert(request_id.clone(), PendingPermission::Acp { responder, allow_option_id });
+        .insert(request_id.clone(), PendingPermission::Acp(responder));
 
     emit_with_state(
         state,
@@ -4703,46 +4644,6 @@ async fn handle_permission_request(
         },
     )
     .await;
-}
-
-/// Reconcile: answer every parked `Acp` card that carries an allow option,
-/// resolving each exactly like `ConnectionCommand::RespondPermission`
-/// (respond_selected -> `PermissionResolved`). No-op when the conversation's
-/// effective auto-approve is OFF. Skips `CodexElicitation` cards and cards
-/// without an allow option (never manufacture an approval the agent didn't
-/// offer).
-async fn reconcile_auto_approve_perms(
-    state: &Arc<RwLock<SessionState>>,
-    emitter: &EventEmitter,
-    perms: &PendingPermissions,
-) {
-    let conversation_id = state
-        .read()
-        .await
-        .conversation_id
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    if !crate::custom_hooks::custom_auto_approve::is_auto_approved_for(&conversation_id).await {
-        return;
-    }
-    let pending: Vec<(String, String)> = {
-        let locked = perms.lock().await;
-        locked
-            .iter()
-            .filter_map(|(request_id, p)| match p {
-                PendingPermission::Acp { allow_option_id: Some(id), .. } => {
-                    Some((request_id.clone(), id.clone()))
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    for (request_id, option_id) in pending {
-        if let Some(pending) = perms.lock().await.remove(&request_id) {
-            pending.respond_selected(option_id);
-            emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id }).await;
-        }
-    }
 }
 
 fn respond_terminal_request<T: sacp::JsonRpcResponse>(
@@ -6601,9 +6502,6 @@ async fn run_conversation_loop<'a>(
                                         .await;
                                     }
                                 }
-                                Some(ConnectionCommand::ReconcileAutoApprove) => {
-                                    reconcile_auto_approve_perms(state, emitter, &perms).await;
-                                }
                                 Some(ConnectionCommand::SetMode { mode_id }) => {
                                     let req = SetSessionModeRequest::new(sid.clone(), mode_id.clone());
                                     match cx.send_request_to(Agent, req).block_task().await {
@@ -6877,9 +6775,6 @@ async fn run_conversation_loop<'a>(
                     emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id })
                         .await;
                 }
-            }
-            Some(ConnectionCommand::ReconcileAutoApprove) => {
-                reconcile_auto_approve_perms(state, emitter, &perms).await;
             }
             Some(ConnectionCommand::SetMode { mode_id }) => {
                 if let Err(e) = set_session_mode(session, state, emitter, mode_id).await {

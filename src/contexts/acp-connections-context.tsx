@@ -180,11 +180,6 @@ export interface ConnectionState {
   usage: SessionUsageUpdateInfo | null
   liveMessage: LiveMessage | null
   pendingPermission: PendingPermission | null
-  /** All awaiting-decision permissions for this connection, oldest first.
-   *  Multiple requests can pile up in one turn when the shield is off; each
-   *  is rendered as its own card and answered individually. `pendingPermission`
-   *  above is a back-compat view of `pendingPermissions[0]`. */
-  pendingPermissions?: PendingPermission[]
   /** In-flight user prompt for the current turn — set from a `user_message`
    *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
    *  the runtime as a synthesized user turn; `null` outside an active turn. */
@@ -812,63 +807,6 @@ function mergePendingPermissionWithLiveMessage(
   return mergePendingPermissionWithLiveInfo(pendingPermission, liveInfo)
 }
 
-/** Rewrites the permission fields so `pendingPermission` is always
- *  `pendingPermissions[0]` (or null when the queue is empty). Spread this
- *  alongside any other connection field changes. */
-function pendingPermissionSlot(
-  pendingPermissions: PendingPermission[] | undefined
-): Pick<ConnectionState, "pendingPermission" | "pendingPermissions"> {
-  const queue = pendingPermissions ?? []
-  return {
-    pendingPermissions: queue,
-    pendingPermission: queue.length > 0 ? queue[0] : null,
-  }
-}
-
-/** Upsert into the queue: replace the entry with the same request_id, else
- *  append (oldest first). */
-function upsertPendingPermission(
-  queue: PendingPermission[] | undefined,
-  permission: PendingPermission
-): PendingPermission[] {
-  const existing = (queue ?? []).findIndex(
-    (p) => p.request_id === permission.request_id
-  )
-  if (existing === -1) return [...(queue ?? []), permission]
-  const next = (queue ?? []).slice()
-  next[existing] = permission
-  return next
-}
-
-/** Remove by request_id; `undefined` clears the whole queue (unconditional
- *  clears, e.g. cancel paths). */
-function removePendingPermission(
-  queue: PendingPermission[] | undefined,
-  requestId: string | undefined
-): PendingPermission[] {
-  if (requestId === undefined) return []
-  return (queue ?? []).filter((p) => p.request_id !== requestId)
-}
-
-/** Merge live tool-call info into every queued permission (the single-slot
- *  helper above only touches one entry). Returns the same array reference
- *  when nothing changed. */
-function mergePermissionsWithLiveInfo(
-  pendingPermissions: PendingPermission[] | undefined,
-  liveInfo: ToolCallInfo | null
-): PendingPermission[] {
-  if (!liveInfo || pendingPermissions === undefined) {
-    return pendingPermissions ?? []
-  }
-  let changed = false
-  const next = pendingPermissions.map((pending) => {
-    const merged = mergePendingPermissionWithLiveInfo(pending, liveInfo)
-    if (merged !== pending) changed = true
-    return merged ?? pending
-  })
-  return changed ? next : pendingPermissions
-}
-
 function extractPermissionToolTitle(toolCall: unknown): string | null {
   const record = asRecord(toolCall)
   if (!record) return null
@@ -1454,11 +1392,7 @@ function connectionsReducer(
         availableCommands: action.patch.availableCommands,
         usage: action.patch.usage,
         liveMessage: hydratedLiveMessage,
-        ...pendingPermissionSlot(
-          hydratedPendingPermission !== null
-            ? [hydratedPendingPermission]
-            : current.pendingPermissions
-        ),
+        pendingPermission: hydratedPendingPermission,
         pendingAskQuestion: action.patch.pendingAskQuestion,
         pendingPlanApproval: action.patch.pendingPlanApproval,
         pendingUserMessage: action.patch.pendingUserMessage,
@@ -1725,8 +1659,9 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         liveMessage: nextLiveMessage,
-        ...pendingPermissionSlot(
-          mergePermissionsWithLiveInfo(conn.pendingPermissions, nextInfo)
+        pendingPermission: mergePendingPermissionWithLiveInfo(
+          conn.pendingPermission,
+          nextInfo
         ),
         claudeApiRetry: null,
       })
@@ -1774,8 +1709,9 @@ function connectionsReducer(
             conn.outOfTurnToolCalls,
             merged
           ),
-          ...pendingPermissionSlot(
-            mergePermissionsWithLiveInfo(conn.pendingPermissions, merged)
+          pendingPermission: mergePendingPermissionWithLiveInfo(
+            conn.pendingPermission,
+            merged
           ),
         })
         return next
@@ -1880,8 +1816,9 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         liveMessage: nextLiveMessage,
-        ...pendingPermissionSlot(
-          mergePermissionsWithLiveInfo(conn.pendingPermissions, nextInfo)
+        pendingPermission: mergePendingPermissionWithLiveInfo(
+          conn.pendingPermission,
+          nextInfo
         ),
         claudeApiRetry: null,
       })
@@ -1985,13 +1922,11 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         liveMessage: updatedLiveMessage,
-        ...pendingPermissionSlot(
-          upsertPendingPermission(conn.pendingPermissions, {
-            request_id: action.request_id,
-            tool_call: permissionToolCall,
-            options: action.options,
-          })
-        ),
+        pendingPermission: {
+          request_id: action.request_id,
+          tool_call: permissionToolCall,
+          options: action.options,
+        },
       })
       return next
     }
@@ -1999,29 +1934,16 @@ function connectionsReducer(
     case "PERMISSION_CLEARED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      const queue = conn.pendingPermissions
-      if (queue === undefined || queue.length === 0) {
-        // Legacy single-slot state (hydrated or test-constructed): keep the
-        // stale-event guard, then clear the slot directly.
-        if (
-          action.requestId !== undefined &&
-          conn.pendingPermission?.request_id !== action.requestId
-        ) {
-          return state
-        }
-        const next = new Map(state)
-        next.set(action.contextKey, {
-          ...conn,
-          pendingPermission: null,
-        })
-        return next
+      if (
+        action.requestId !== undefined &&
+        conn.pendingPermission?.request_id !== action.requestId
+      ) {
+        return state
       }
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
-        ...pendingPermissionSlot(
-          removePendingPermission(queue, action.requestId)
-        ),
+        pendingPermission: null,
       })
       return next
     }

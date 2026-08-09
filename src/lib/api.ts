@@ -2811,34 +2811,6 @@ export async function automationCancelRun(runId: number): Promise<void> {
   return getTransport().call("automation_cancel_run", { runId })
 }
 
-// Global auto-accept (custom hooks)
-
-/** Read whether global auto-accept (the shield) is on. */
-export async function getGlobalAutoApprove(): Promise<{ enabled: boolean }> {
-  return getTransport().call("get_auto_approve_global")
-}
-
-/** Toggle global auto-accept; resolves with the new state. */
-export async function toggleGlobalAutoApprove(): Promise<{ enabled: boolean }> {
-  return getTransport().call("toggle_auto_approve_global")
-}
-
-// Per-conversation auto-accept (custom hooks)
-
-/** Read the EFFECTIVE auto-accept state + raw override for a conversation. */
-export async function getConversationAutoApprove(
-  conversationId: number
-): Promise<{ enabled: boolean; overrideState: boolean | null }> {
-  return getTransport().call("get_auto_approve_conversation", { conversationId })
-}
-
-/** Toggle per-conversation auto-accept (runtime only); resolves new state. */
-export async function toggleConversationAutoApprove(
-  conversationId: number
-): Promise<{ enabled: boolean; overrideState: boolean | null }> {
-  return getTransport().call("toggle_auto_approve_conversation", { conversationId })
-}
-
 // Work tasks
 
 export async function workTaskList(
@@ -2945,13 +2917,6 @@ export async function workTaskCancel(
   reason?: string | null
 ): Promise<void> {
   return getTransport().call("work_task_cancel", { id, reason: reason ?? null })
-}
-
-/** Accept a reviewed task with no worktree (review -> done, no git merge).
- *  Refused by the backend when the task still owns a worktree. Outcome rides
- *  `task://changed` events. */
-export async function workTaskAccept(id: number): Promise<void> {
-  return getTransport().call("work_task_accept", { id })
 }
 
 /** Dispatch the agent-driven merge (`message: null` = the agent writes the
@@ -4270,24 +4235,6 @@ export async function setChatAuthoringSettings(
   settings: ChatAuthoringSettings
 ): Promise<ChatAuthoringSettings> {
   return getTransport().call("set_chat_authoring_settings", { settings })
-}
-
-// ─── AI Channel Messaging settings ───────────────────────────────────────
-
-/** Mirror of Rust `ChannelMessagingSettings`. Default OFF — the tool sends
- * messages into external channels, so the user opts in explicitly. */
-export interface ChannelMessagingSettings {
-  enabled: boolean
-}
-
-export async function getChannelMessagingSettings(): Promise<ChannelMessagingSettings> {
-  return getTransport().call("get_chat_channel_messaging_settings")
-}
-
-export async function setChannelMessagingSettings(
-  settings: ChannelMessagingSettings
-): Promise<ChannelMessagingSettings> {
-  return getTransport().call("set_chat_channel_messaging_settings", { settings })
 }
 
 /** Live probe — opens a transient ACP connection to `agent_type`, reads what

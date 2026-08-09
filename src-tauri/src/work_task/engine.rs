@@ -41,7 +41,6 @@ use crate::db::entities::work_task::WorkTaskStatus;
 use crate::db::entities::{folder, folder_command};
 use crate::db::service::{conversation_service, tab_service, work_task_service};
 use crate::db::AppDatabase;
-use crate::git_repo::is_git_repo;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
     AgentType, FollowUpIntent, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
@@ -54,13 +53,6 @@ use crate::work_task::git as task_git;
 
 /// Reconcile sweep cadence.
 const RECONCILE_INTERVAL_SECS: u64 = 30;
-
-/// Safety net for an owned launch stuck in `preparing` — a hung init command
-/// has no timeout of its own, so without this an owned launch can sit in
-/// `preparing` forever. Not a setup deadline: the audit proved Git checkout
-/// and init commands can legitimately exceed 10 minutes while `updated_at`
-/// stays frozen, so this is deliberately far beyond any legitimate setup.
-const LAUNCH_SETUP_TIMEOUT_SECS: i64 = 3600;
 
 /// How often planned starts are checked. Its own (tighter) tick rather than a
 /// step of the reconcile sweep: this one is a cheap indexed-ish scan, and it
@@ -843,7 +835,7 @@ impl TaskEngine {
         // "land" as a no-op tree match.
         let wt = if matches!(mode, LaunchMode::Merge { .. }) {
             self.existing_worktree(&task).await?
-        } else if is_git_repo(Path::new(&root.path)) {
+        } else {
             let wt = self.ensure_worktree(&task, &root).await?;
             // Run the folder's init command (deps install etc.) before the
             // agent ever sees the tree. Gated on the setup marker, NOT on "the
@@ -864,14 +856,6 @@ impl TaskEngine {
                 }
             }
             wt
-        } else {
-            // Non-Git folder (Local Folder): run directly in the selected
-            // directory with no worktree isolation. Git detection is a runtime
-            // property of the path, not a label on the row.
-            WorktreeRef {
-                folder_id: root.id,
-                path: root.path,
-            }
         };
 
         let _ = work_task_service::record_event(
@@ -894,20 +878,8 @@ impl TaskEngine {
         }
 
         // Resume the previous session for retry/return/merge when we have one.
-        // For Fresh tasks, resume an existing conversation if one is pinned.
         let resume_session_id = match mode {
-            LaunchMode::Fresh => {
-                if let Some(conv_id) = cfg.existing_conversation_id {
-                    conversation::Entity::find_by_id(conv_id)
-                        .one(&self.db.conn)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|c| c.external_id)
-                } else {
-                    None
-                }
-            }
+            LaunchMode::Fresh => None,
             LaunchMode::Retry | LaunchMode::Return { .. } | LaunchMode::Merge { .. } => {
                 match task.conversation_id {
                     Some(conv_id) => conversation::Entity::find_by_id(conv_id)
@@ -984,9 +956,7 @@ impl TaskEngine {
         // Conversation row: reuse when resuming the same session; otherwise a
         // fresh row (fresh runs and resume fallbacks).
         let conversation_id = if resumed {
-            task.conversation_id
-                .or(cfg.existing_conversation_id)
-                .ok_or_else(|| "resumed task has no conversation id".to_string())?
+            task.conversation_id.expect("resumed implies conversation")
         } else {
             let title = first_chars(task.title.trim(), 80);
             match create_conversation_core(&self.db.conn, wt.folder_id, agent_type, Some(title))
@@ -2301,43 +2271,6 @@ impl TaskEngine {
             let launching: HashSet<i32> = self.launching.lock().await.keys().copied().collect();
             for task in preparing {
                 if launching.contains(&task.id) {
-                    // Owned by a live launch. Setup is normally bounded, but a
-                    // hung init command has no timeout of its own, so an owned
-                    // launch can sit in `preparing` forever. Safety net, not a
-                    // setup deadline: only a launch with no row progress for
-                    // the generous LAUNCH_SETUP_TIMEOUT_SECS window is treated
-                    // as stuck. The failure CAS decides which generation won;
-                    // only then is the setup child killed so the stale launch
-                    // unwinds through its normal cleanup and releases the lock.
-                    if chrono::Utc::now().signed_duration_since(task.updated_at)
-                        > chrono::Duration::seconds(LAUNCH_SETUP_TIMEOUT_SECS)
-                    {
-                        let token = self.launching.lock().await.get(&task.id).map(|o| o.token);
-                        match work_task_service::fail(
-                            &self.db.conn,
-                            task.id,
-                            &[WorkTaskStatus::Preparing],
-                            Some(task.run_seq),
-                            "launch_timeout",
-                            Some("Task launch timed out while preparing.".to_string()),
-                        )
-                        .await
-                        {
-                            Ok(true) => {
-                                tracing::info!(
-                                    "[work_task] timed out stuck setup of task {}",
-                                    task.id
-                                );
-                                self.kill_setup_child(task.id, task.run_seq).await;
-                                self.emit_upsert(task.id);
-                                if let Some(token) = token {
-                                    self.release_launch_slot(task.id, token).await;
-                                }
-                            }
-                            Ok(false) => {}
-                            Err(e) => tracing::warn!("[work_task] launch timeout fail error: {e}"),
-                        }
-                    }
                     continue;
                 }
                 match work_task_service::abandon_setup(&self.db.conn, task.id, task.run_seq).await {
@@ -2718,17 +2651,12 @@ async fn compose_prompt(
 
     // The standing worktree guard — a merge generation replaces it with its
     // own instructions (it exists to forbid exactly what a merge must do).
-    // Skipped for non-Git tasks (no worktree, no branch to protect), except
-    // on read-only turns where the licence clause below is the last thing the
-    // agent reads and must hold even without a worktree.
     //
     // It is the LAST built-in block, so its licence clause is the last thing
     // the agent reads: a read-only turn has to swap that clause out, or "commit
     // to the current branch as you like" would quietly undo the intent's own
     // "don't touch any file" instruction several blocks earlier.
-    if !matches!(mode, LaunchMode::Merge { .. })
-        && (task.work_branch.is_some() || mode.is_read_only())
-    {
+    if !matches!(mode, LaunchMode::Merge { .. }) {
         let branch = task
             .work_branch
             .as_deref()
@@ -2950,7 +2878,6 @@ impl LaunchSeq {
 
 /// Ownership of a task's in-flight launch slot: which folder it counts
 /// against, plus a token so only the launch that took the slot can release it.
-#[derive(Debug, Clone, Copy)]
 struct LaunchOwner {
     folder_id: i32,
     token: u64,

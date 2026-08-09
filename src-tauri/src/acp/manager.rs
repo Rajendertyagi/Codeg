@@ -1323,31 +1323,6 @@ impl ConnectionManager {
             .map_err(|_| AcpError::ProcessExited)
     }
 
-    /// Reconcile parked permission cards after auto-approve flips ON.
-    /// `Some(conversation_id)` targets only connections bound to that
-    /// conversation; `None` targets all (global toggle). Thin broadcast — the
-    /// connection loop performs the answer via `ReconcileAutoApprove`.
-    pub async fn reconcile_auto_approve(&self, conversation_id: Option<i32>) {
-        let targets: Vec<tokio::sync::mpsc::Sender<ConnectionCommand>> = {
-            let connections = self.connections.lock().await;
-            connections
-                .values()
-                .filter(|c| match conversation_id {
-                    Some(id) => c
-                        .state
-                        .try_read()
-                        .map(|s| s.conversation_id == Some(id))
-                        .unwrap_or(false),
-                    None => true,
-                })
-                .map(|c| c.cmd_tx.clone())
-                .collect()
-        };
-        for tx in targets {
-            let _ = tx.send(ConnectionCommand::ReconcileAutoApprove).await;
-        }
-    }
-
     /// Fork the agent's session and persist the resulting two-row layout in
     /// one backend call: the current row gets re-pointed at S2 (the forked
     /// session) with a `[Fork]` title prefix, and a freshly-created sibling

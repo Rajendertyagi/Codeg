@@ -1511,7 +1511,6 @@
       "newChatAction": "Neuer Chat",
       "automations": "Automatisierungen",
       "tasks": "To-dos",
-      "customWorkflows": "Benutzerdefinierte Workflows",
       "loadingSubsessions": "Unterkonversationen werden geladen…"
     },
     "conversation": {
@@ -4010,17 +4009,6 @@
     "saveFailed": "Einstellungen für Aus dem Chat erstellen konnten nicht gespeichert werden",
     "loadFailed": "Laden fehlgeschlagen: {detail}"
   },
-  "ChannelMessagingSettings": {
-    "title": "KI-Kanalnachrichten",
-    "description": "Ermöglicht Agents, Nachrichten an deine verbundenen Chat-Kanäle (Telegram, Lark, Weixin) zu senden. Die Nachricht wird an alle aktivierten Kanäle gesendet – keine Kanal-ID erforderlich. Standardmäßig ausgeschaltet, da der Agent in deine externen Kanäle schreibt.",
-    "enable": "KI-Kanalnachrichten",
-    "enableHint": "Fügt startenden Agents das send_channel_message-Tool hinzu.",
-    "save": "Speichern",
-    "saving": "Speichern…",
-    "saved": "Einstellungen für KI-Kanalnachrichten gespeichert",
-    "saveFailed": "Einstellungen für KI-Kanalnachrichten konnten nicht gespeichert werden",
-    "loadFailed": "Laden fehlgeschlagen: {detail}"
-  },
   "AskQuestionSettings": {
     "title": "Benutzer fragen",
     "description": "Erlaubt Agenten, anzuhalten und dir eine Multiple-Choice-Frage zu stellen, die über dem Eingabefeld der Unterhaltung erscheint. Der Agent wartet, bis du antwortest (oder überspringst).",
@@ -4215,24 +4203,7 @@
     "branchLocal": "Lokal",
     "branchRemote": "Remote",
     "branchSearchPlaceholder": "Branches suchen…",
-    "branchNone": "Keine Branches",
-    "launchTarget": "Startziel",
-    "targetNewConversation": "Neue Unterhaltung",
-    "targetExistingConversation": "Vorhandene Unterhaltung",
-    "conversationSearchPlaceholder": "Unterhaltungen durchsuchen…",
-    "conversationNone": "Keine Unterhaltungen",
-    "existingConversationHint": "Jede Ausführung setzt diese Unterhaltung fort und fügt eine neue Runde hinzu, statt eine neue Sitzung zu starten.",
-    "errorTargetConversation": "Wähle eine Unterhaltung zum Fortsetzen",
-    "targetKind": "Zielverzeichnis",
-    "targetGitWorkspace": "Git-Arbeitsbereich",
-    "targetLocalFolder": "Lokaler Ordner",
-    "localFolderBrowse": "Durchsuchen…",
-    "localFolderPathPlaceholder": "Absoluten Ordnerpfad eingeben",
-    "localFolderHint": "Jede Ausführung arbeitet direkt in diesem Ordner — ohne Git-Repository, Branch oder Worktree.",
-    "errorLocalFolder": "Ordnerpfad eingeben",
-    "untitledConversation": "Unbenannte Unterhaltung",
-    "addFolder": "Ordner hinzufügen…",
-    "localFolderEmpty": "Keine Ordner verfügbar"
+    "branchNone": "Keine Branches"
   },
   "Tasks": {
     "title": "To-dos",
@@ -4285,7 +4256,6 @@
     "actionDelete": "Löschen",
     "actionRetryCleanup": "Aufräumen wiederholen",
     "actionMerge": "Mergen",
-    "actionAccept": "Akzeptieren",
     "actionComplete": "Abschließen",
     "actionAbandon": "Verwerfen",
     "cancelTitle": "Aufgabe abbrechen?",

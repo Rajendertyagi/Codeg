@@ -20,7 +20,6 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
-  Check,
   Coins,
   FileDiff,
   FolderX,
@@ -38,7 +37,6 @@ import {
 } from "lucide-react"
 import {
   workTaskArchive,
-  workTaskAccept,
   getFolderConversation,
   workTaskChangedFiles,
   workTaskCleanup,
@@ -375,31 +373,22 @@ export function TaskDetailSheet({
     return (composerRef.current?.getText() ?? composerText).trim() || null
   }
   if (isReview) {
-    // No worktree → accept directly to done (no git merge); with a worktree
-    // the merge dialog stays the path (or the complete swap when the task
-    // changed nothing).
-    const canAccept = task.worktree_folder_id == null
+    // A task that changed nothing has no merge to offer — accepting it IS the
+    // primary action (same swap the board card makes).
     zoneActions.push(
-      canAccept
+      hasNothingToMerge(task)
         ? {
-            icon: Check,
-            label: t("actionAccept"),
+            icon: CircleCheck,
+            label: t("actionComplete"),
             filled: true,
-            onClick: () => run(() => workTaskAccept(task.id)),
+            onClick: () => onComplete(task),
           }
-        : hasNothingToMerge(task)
-          ? {
-              icon: CircleCheck,
-              label: t("actionComplete"),
-              filled: true,
-              onClick: () => onComplete(task),
-            }
-          : {
-              icon: GitMerge,
-              label: t("actionMerge"),
-              filled: true,
-              onClick: () => onMerge(task),
-            }
+        : {
+            icon: GitMerge,
+            label: t("actionMerge"),
+            filled: true,
+            onClick: () => onMerge(task),
+          }
     )
     zoneActions.push({
       icon: Undo2,

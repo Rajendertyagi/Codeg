@@ -9,10 +9,6 @@
 
 pub mod acp;
 pub mod acp_transcript;
-// Custom Codeg hooks live outside the upstream crate tree (`newplugin/hooks/`)
-// so they survive upstream merges; see `newplugin/hooks/mod.rs`.
-#[path = "../../newplugin/hooks/mod.rs"]
-pub mod custom_hooks;
 pub use acp::{
     idle_sweep_task, idle_timeout_from_env, lifecycle_subscriber_task, SWEEP_INTERVAL_SECS,
 };
@@ -85,7 +81,6 @@ mod tauri_app {
     };
     use crate::terminal::manager::TerminalManager;
     use crate::{db, git_credential, network, paths, process, web};
-    use crate::custom_hooks;
     use tauri::Manager;
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
@@ -532,7 +527,6 @@ mod tauri_app {
                         question_config,
                         session_info_config,
                         chat_authoring_config,
-                        channel_messaging_config,
                     ) = crate::app_state::build_delegation_stack(
                         &cm_state,
                         db_conn.clone(),
@@ -544,7 +538,6 @@ mod tauri_app {
                     app.manage(question_config.clone());
                     app.manage(session_info_config.clone());
                     app.manage(chat_authoring_config.clone());
-                    app.manage(channel_messaging_config.clone());
                     app.manage(crate::commands::delegation::DelegationSocketPath(
                         socket_path.clone(),
                     ));
@@ -557,7 +550,6 @@ mod tauri_app {
                     let question_for_init = question_config.clone();
                     let session_info_for_init = session_info_config.clone();
                     let chat_authoring_for_init = chat_authoring_config.clone();
-                    let channel_messaging_for_init = channel_messaging_config.clone();
                     tauri::async_runtime::block_on(async move {
                         delegation_commands::apply_persisted_config(
                             &db_for_init,
@@ -582,11 +574,6 @@ mod tauri_app {
                         crate::commands::chat_authoring::apply_persisted_chat_authoring_config(
                             &db_for_init,
                             &chat_authoring_for_init,
-                        )
-                        .await;
-                        crate::commands::chat_channel_messaging::apply_persisted_channel_messaging_config(
-                            &db_for_init,
-                            &channel_messaging_for_init,
                         )
                         .await;
                     });
@@ -627,18 +614,6 @@ mod tauri_app {
                                     app.handle().clone(),
                                 ),
                                 chat_authoring_config.clone(),
-                            ),
-                        ),
-                        std::sync::Arc::new(
-                            crate::commands::chat_channel_messaging::DbChannelMessaging::new(
-                                std::sync::Arc::new(db::AppDatabase {
-                                    conn: db_conn.clone(),
-                                }),
-                                crate::web::event_bridge::EventEmitter::Tauri(
-                                    app.handle().clone(),
-                                ),
-                                channel_messaging_config.clone(),
-                                app.state::<ChatChannelManager>().clone_ref(),
                             ),
                         ),
                     );
@@ -749,24 +724,6 @@ mod tauri_app {
                 ) {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
-
-                // Global auto-accept flag (custom hooks): hydrate the in-process
-                // cache from `app_metadata` before any permission request can
-                // reach the gate (fail-closed OFF until loaded; the web handlers
-                // and toggles re-load lazily, so this is only a warm-up).
-                let auto_approve_db = crate::db::AppDatabase {
-                    conn: app.state::<crate::db::AppDatabase>().conn.clone(),
-                };
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) =
-                        custom_hooks::custom_auto_approve::init_global_auto_approve(
-                            &auto_approve_db,
-                        )
-                        .await
-                    {
-                        tracing::warn!("init_global_auto_approve failed: {e}");
-                    }
-                });
 
                 // Single-window workspace: ensure the main window exists.
                 // Workspace state (open folders, opened tabs, active tab) is
@@ -1309,10 +1266,6 @@ mod tauri_app {
                 automation_commands::automation_compute_next_run,
                 automation_commands::automation_run_now,
                 automation_commands::automation_cancel_run,
-                custom_hooks::toggle_auto_approve_global,
-                custom_hooks::get_auto_approve_global,
-                custom_hooks::toggle_auto_approve_conversation,
-                custom_hooks::get_auto_approve_conversation,
                 token_usage_commands::token_usage_report,
                 token_usage_commands::token_usage_facets,
                 token_usage_commands::token_usage_status,
@@ -1333,9 +1286,6 @@ mod tauri_app {
                 work_task_commands::work_task_return,
                 work_task_commands::work_task_cancel,
                 work_task_commands::work_task_merge,
-                // Non-git accept (custom hooks): review → done without a
-                // merge, for tasks without a worktree.
-                custom_hooks::work_task_accept,
                 work_task_commands::work_task_complete,
                 work_task_commands::work_task_archive,
                 work_task_commands::work_task_cleanup,

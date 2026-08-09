@@ -1511,7 +1511,6 @@
       "newChatAction": "新しいチャット",
       "automations": "オートメーション",
       "tasks": "ToDo タスク",
-      "customWorkflows": "カスタムワークフロー",
       "loadingSubsessions": "サブ会話を読み込み中…"
     },
     "conversation": {
@@ -4010,17 +4009,6 @@
     "saveFailed": "チャットから作成の設定の保存に失敗しました",
     "loadFailed": "読み込みに失敗しました: {detail}"
   },
-  "ChannelMessagingSettings": {
-    "title": "AI チャネルメッセージ",
-    "description": "AIが接続済みのチャットチャネル（Telegram、Lark、Weixin）にメッセージを送信できるようにします。メッセージは有効なすべてのチャネルに送信されます——チャネルIDを指定する必要はありません。デフォルトはオフです。AIが外部チャネルに書き込むためです。",
-    "enable": "AI チャネルメッセージ",
-    "enableHint": "オンにすると、起動されるAIにsend_channel_messageツールが追加されます。",
-    "save": "保存",
-    "saving": "保存中…",
-    "saved": "AIチャネルメッセージ設定を保存しました",
-    "saveFailed": "AIチャネルメッセージ設定の保存に失敗しました",
-    "loadFailed": "読み込みに失敗しました: {detail}"
-  },
   "AskQuestionSettings": {
     "title": "ユーザーに質問",
     "description": "エージェントが処理を一時停止し、会話の入力欄の上に表示される選択式の質問をできるようにします。回答（またはスキップ）するまでエージェントは待機します。",
@@ -4215,24 +4203,7 @@
     "branchLocal": "ローカル",
     "branchRemote": "リモート",
     "branchSearchPlaceholder": "ブランチを検索…",
-    "branchNone": "ブランチがありません",
-    "launchTarget": "起動先",
-    "targetNewConversation": "新しい会話",
-    "targetExistingConversation": "既存の会話",
-    "conversationSearchPlaceholder": "会話を検索…",
-    "conversationNone": "会話がありません",
-    "existingConversationHint": "実行のたびにこの会話を再開し、新しいターンを追加します（新しいセッションは開始しません）。",
-    "errorTargetConversation": "再開する会話を選択してください",
-    "targetKind": "実行先",
-    "targetGitWorkspace": "Git ワークスペース",
-    "targetLocalFolder": "ローカルフォルダー",
-    "localFolderBrowse": "参照…",
-    "localFolderPathPlaceholder": "絶対パスを入力",
-    "localFolderHint": "各実行はこのフォルダー内で直接行われます（git リポジトリ・ブランチ・ワークツリーは関与しません）。",
-    "errorLocalFolder": "フォルダーのパスを入力してください",
-    "untitledConversation": "名前のない会話",
-    "addFolder": "フォルダを追加…",
-    "localFolderEmpty": "利用可能なフォルダはありません"
+    "branchNone": "ブランチがありません"
   },
   "Tasks": {
     "title": "ToDo タスク",
@@ -4285,7 +4256,6 @@
     "actionDelete": "削除",
     "actionRetryCleanup": "クリーンアップを再試行",
     "actionMerge": "マージ",
-    "actionAccept": "承認",
     "actionComplete": "完了",
     "actionAbandon": "破棄",
     "cancelTitle": "タスクをキャンセルしますか？",

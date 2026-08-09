@@ -193,35 +193,6 @@ pub async fn add_chat_folder(
     Ok(to_detail(model))
 }
 
-/// Get-or-create the folder row a local-folder automation run anchors to.
-///
-/// The conversation row a fresh launch creates has a NOT-NULL `folder_id` FK,
-/// and the run must execute in the user's configured directory, so the folder
-/// row is anchored at that exact path. An existing non-deleted row for the path
-/// (a user-opened workspace, or a prior run's row) is reused as-is — the run
-/// then renders as a normal folder conversation. Otherwise a Regular folder is
-/// minted via [`add_folder`] so the target surfaces in the sidebar like any
-/// other user folder. Git detection is a runtime property of the path, not a
-/// label on the row, so a Regular folder may or may not be a repository — the
-/// Git chrome auto-hides for non-repos.
-pub async fn get_or_create_automation_folder(
-    conn: &DatabaseConnection,
-    path: &str,
-) -> Result<FolderDetail, DbError> {
-    if let Some(row) = folder::Entity::find()
-        .filter(folder::Column::Path.eq(path))
-        .filter(folder::Column::DeletedAt.is_null())
-        .one(conn)
-        .await?
-    {
-        return Ok(to_detail(row));
-    }
-    let entry = add_folder(conn, path).await?;
-    get_folder_by_id(conn, entry.id)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("Folder not found after add: {path}")))
-}
-
 pub async fn update_folder_color(
     conn: &DatabaseConnection,
     folder_id: i32,

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
-  CalendarCog,
   Crosshair,
   Funnel,
   ListChevronsDownUp,
@@ -447,12 +446,6 @@ export function Sidebar() {
               </span>
             ) : null
           }
-        />
-        <SidebarNavButton
-          icon={CalendarCog}
-          label={t("customWorkflows")}
-          active={routeId === "customWorkflows"}
-          onClick={() => setRoute("customWorkflows")}
         />
       </div>
 

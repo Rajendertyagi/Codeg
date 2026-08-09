@@ -16,7 +16,6 @@ import { Folder, Funnel, Play, Plus, ListTodo, Tag } from "lucide-react"
 import { useTasksView } from "@/contexts/tasks-view-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
-  workTaskAccept,
   workTaskArchive,
   workTaskCreate,
   workTaskReorder,
@@ -382,7 +381,6 @@ export function TasksPage() {
         setEditorOpen(true)
       },
       onSchedule: () => openSchedule(task),
-      onAccept: () => void act(() => workTaskAccept(task.id)),
     }),
     [
       act,

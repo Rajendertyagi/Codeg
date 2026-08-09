@@ -301,68 +301,19 @@ export function PermissionDialog({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {/* Standardized OpenChamber-style buttons mapped from the ACP option
-            kinds. Kinds outside allow_once / allow_always / reject_* (e.g.
-            accept labels from the question bridge) render as their own
-            agent-named buttons so no option is ever lost. */}
-        {(() => {
-          const allowOnce = permission.options.find(
-            (opt) => opt.kind === "allow_once"
-          )
-          const allowAlways = permission.options.find(
-            (opt) => opt.kind === "allow_always"
-          )
-          const deny = permission.options.find(
-            (opt) =>
-              opt.kind === "reject_once" || opt.kind === "reject_always"
-          )
-          const extras = permission.options.filter(
-            (opt) => opt !== allowOnce && opt !== allowAlways && opt !== deny
-          )
-          const buttons: {
-            optionId: string
-            label: string
-            variant: "default" | "outline" | "destructive"
-          }[] = []
-          if (allowOnce) {
-            buttons.push({
-              optionId: allowOnce.option_id,
-              label: t("allowOnce"),
-              variant: "default",
-            })
-          }
-          if (allowAlways) {
-            buttons.push({
-              optionId: allowAlways.option_id,
-              label: t("allowAlways"),
-              variant: "default",
-            })
-          }
-          if (deny) {
-            buttons.push({
-              optionId: deny.option_id,
-              label: t("deny"),
-              variant: "destructive",
-            })
-          }
-          for (const opt of extras) {
-            buttons.push({
-              optionId: opt.option_id,
-              label: opt.name,
-              variant: opt.kind.startsWith("reject") ? "outline" : "default",
-            })
-          }
-          return buttons.map((btn) => (
+        {permission.options.map((opt) => {
+          const isReject = opt.kind.startsWith("reject")
+          return (
             <Button
-              key={btn.optionId}
-              variant={btn.variant}
+              key={opt.option_id}
+              variant={isReject ? "outline" : "default"}
               className="h-auto min-h-9 whitespace-normal break-words text-left"
-              onClick={() => onRespond(permission.request_id, btn.optionId)}
+              onClick={() => onRespond(permission.request_id, opt.option_id)}
             >
-              {btn.label}
+              {opt.name}
             </Button>
-          ))
-        })()}
+          )
+        })}
       </div>
     </div>
   )

@@ -1643,7 +1643,6 @@ const ConversationTabView = memo(function ConversationTabView({
       error={conn.error}
       claudeApiRetry={conn.claudeApiRetry}
       pendingPermission={conn.pendingPermission}
-      pendingPermissions={conn.pendingPermissions}
       pendingQuestion={conn.pendingQuestion}
       pendingAskQuestion={conn.pendingAskQuestion}
       pendingPlanApproval={conn.pendingPlanApproval}
