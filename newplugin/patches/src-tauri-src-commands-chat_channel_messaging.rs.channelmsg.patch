@@ -1,9 +1,9 @@
 diff --git a/src-tauri/src/commands/chat_channel_messaging.rs b/src-tauri/src/commands/chat_channel_messaging.rs
 new file mode 100644
-index 00000000..2a169160
+index 00000000..b844037d
 --- /dev/null
 +++ b/src-tauri/src/commands/chat_channel_messaging.rs
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,669 @@
 +//! `send_channel_message` backing logic + settings persistence.
 +//!
 +//! Two surfaces live here, mirroring `crate::commands::chat_authoring`:
@@ -109,7 +109,7 @@ index 00000000..2a169160
 +            match self.chat_channel_manager.send_to_channel(ch.id, &rich_msg).await {
 +                Ok(sent_id) => {
 +                    let id_str = sent_id.0;
-+                    let preview = &message[..message.len().min(200)];
++                    let preview = truncate_chars(&message, 200);
 +                    let _ = chat_channel_message_log_service::create_log(
 +                        conn,
 +                        ch.id,
@@ -132,7 +132,7 @@ index 00000000..2a169160
 +                        "[channel_messaging] send_to_channel(ch={}) failed: {e}",
 +                        ch.id
 +                    );
-+                    let preview = &message[..message.len().min(200)];
++                    let preview = truncate_chars(&message, 200);
 +                    let _ = chat_channel_message_log_service::create_log(
 +                        conn,
 +                        ch.id,
@@ -252,7 +252,131 @@ index 00000000..2a169160
 +
 +#[cfg(test)]
 +mod tests {
++    use async_trait::async_trait;
++    use sea_orm::EntityTrait;
++    use tokio::sync::mpsc;
++
 +    use super::*;
++    use crate::chat_channel::error::ChatChannelError;
++    use crate::chat_channel::traits::ChatChannelBackend;
++    use crate::chat_channel::types::{
++        ChannelConnectionStatus, ChannelType, IncomingCommand, SentMessageId,
++    };
++    use crate::db::entities::chat_channel_message_log;
++    use crate::db::test_helpers;
++    use crate::web::event_bridge::WebEventBroadcaster;
++
++    /// Records the rendered plain text of every delivered message so tests can
++    /// assert exactly what was pushed (and that nothing was). Mirrors the
++    /// `RecordingBackend` pattern used by the chat_channel event_subscriber
++    /// tests, re-implemented here so the feature's tests never touch that
++    /// module.
++    #[derive(Clone, Default)]
++    struct Recorder {
++        msgs: Arc<tokio::sync::Mutex<Vec<String>>>,
++    }
++
++    struct RecordingBackend {
++        rec: Recorder,
++    }
++
++    #[async_trait]
++    impl ChatChannelBackend for RecordingBackend {
++        fn channel_type(&self) -> ChannelType {
++            ChannelType::Telegram
++        }
++
++        async fn start(&self, _tx: mpsc::Sender<IncomingCommand>) -> Result<(), ChatChannelError> {
++            Ok(())
++        }
++
++        async fn stop(&self) -> Result<(), ChatChannelError> {
++            Ok(())
++        }
++
++        async fn status(&self) -> ChannelConnectionStatus {
++            ChannelConnectionStatus::Connected
++        }
++
++        async fn send_message(&self, text: &str) -> Result<SentMessageId, ChatChannelError> {
++            self.rec.msgs.lock().await.push(text.to_string());
++            Ok(SentMessageId("1".into()))
++        }
++
++        async fn send_rich_message(
++            &self,
++            message: &RichMessage,
++        ) -> Result<SentMessageId, ChatChannelError> {
++            self.rec.msgs.lock().await.push(message.to_plain_text());
++            Ok(SentMessageId("1".into()))
++        }
++
++        async fn test_connection(&self) -> Result<(), ChatChannelError> {
++            Ok(())
++        }
++    }
++
++    /// Seed one ENABLED `chat_channel` row; returns its id.
++    async fn seed_enabled_channel(db: &crate::db::AppDatabase) -> i32 {
++        let model = chat_channel_service::create(
++            &db.conn,
++            "test-channel".to_string(),
++            "telegram".to_string(),
++            "{}".to_string(),
++            true,
++            false,
++            None,
++        )
++        .await
++        .expect("seed enabled channel");
++        model.id
++    }
++
++    /// Wire `id` into the manager as an ACTIVE (connected) recording backend.
++    async fn connect_recording_channel(manager: &ChatChannelManager, id: i32, rec: &Recorder) {
++        manager
++            .add_channel(
++                id,
++                format!("test-channel-{id}"),
++                ChannelType::Telegram,
++                Box::new(RecordingBackend { rec: rec.clone() }),
++            )
++            .await
++            .expect("wire connected backend");
++    }
++
++    /// Production impl wired to `db`'s connection, the given runtime flag, and
++    /// the given manager (whose ACTIVE channel set the caller controls).
++    async fn messaging_with(
++        db: &crate::db::AppDatabase,
++        enabled: bool,
++        manager: ChatChannelManager,
++    ) -> DbChannelMessaging {
++        let config = ChannelMessagingRuntimeConfig::new();
++        config.set(ChannelMessagingConfig { enabled }).await;
++        DbChannelMessaging::new(
++            Arc::new(crate::db::AppDatabase {
++                conn: db.conn.clone(),
++            }),
++            EventEmitter::test_web_only(Arc::new(WebEventBroadcaster::new())),
++            config,
++            manager,
++        )
++    }
++
++    fn request(message: &str) -> crate::acp::channel_messaging::SendChannelMessageRequest {
++        crate::acp::channel_messaging::SendChannelMessageRequest {
++            token: "test-token".to_string(),
++            message: message.to_string(),
++        }
++    }
++
++    async fn log_rows(db: &crate::db::AppDatabase) -> Vec<chat_channel_message_log::Model> {
++        chat_channel_message_log::Entity::find()
++            .all(&db.conn)
++            .await
++            .expect("read outbound message log")
++    }
 +
 +    #[test]
 +    fn settings_into_runtime_config_flips_enabled() {
@@ -260,5 +384,292 @@ index 00000000..2a169160
 +        assert!(!off.into_runtime_config().enabled);
 +        let on = ChannelMessagingSettings { enabled: true };
 +        assert!(on.into_runtime_config().enabled);
++    }
++
++    /// ASCII body longer than the 200-char preview cap: the full message is
++    /// delivered exactly once, and the log preview is the first 200 chars.
++    #[tokio::test]
++    async fn ascii_message_delivers_full_and_logs_200_char_preview() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let message = "a".repeat(250);
++        let outcome = messaging.send_message(request(&message)).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(outcome.total_targets, 1);
++        assert!(outcome.note.is_none());
++        assert_eq!(
++            rec.msgs.lock().await.clone(),
++            vec![message.clone()],
++            "the full message must be delivered exactly once"
++        );
++        assert!(outcome.per_channel[0].success);
++        assert_eq!(outcome.per_channel[0].sent_message_id.as_deref(), Some("1"));
++
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].direction, "outbound");
++        assert_eq!(rows[0].message_type, "agent_send");
++        assert_eq!(rows[0].status, "sent");
++        assert_eq!(rows[0].content_preview, "a".repeat(200));
++        assert_eq!(rows[0].error_detail, None);
++    }
++
++    /// Regression test for the byte-indexed preview slice panic: a multibyte
++    /// message whose byte length exceeds 200 and whose 200th byte is NOT a char
++    /// boundary (67 CJK chars = 201 bytes) used to panic with "byte index 200 is
++    /// not a char boundary" AFTER the send, losing the response and risking a
++    /// duplicate delivery. Must complete, deliver the full message, and log a
++    /// char-boundary-safe preview.
++    #[tokio::test]
++    async fn multibyte_message_over_200_bytes_does_not_panic() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        // 70 CJK chars = 210 bytes; byte 200 falls inside char #67.
++        let message = "好".repeat(70);
++        let outcome = messaging.send_message(request(&message)).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(
++            rec.msgs.lock().await.clone(),
++            vec![message.clone()],
++            "the full message must be delivered exactly once"
++        );
++
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].status, "sent");
++        // preview = truncate_chars(msg, 200) = 200 chars -> log service caps at
++        // 200 BYTES on a char boundary (66 x 3-byte chars = 198 bytes) and
++        // appends the ellipsis marker.
++        assert_eq!(rows[0].content_preview, format!("{}...", "好".repeat(66)));
++    }
++
++    /// Emoji (4-byte) + CJK (3-byte) mixed body: same boundary hazard as the
++    /// pure-CJK case - the 200th byte lands inside a multi-byte char.
++    #[tokio::test]
++    async fn emoji_cjk_mixed_message_does_not_panic() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        // 30 x 4-byte emoji + 30 x 3-byte CJK = 210 bytes; byte 200 is a
++        // continuation byte of the 27th CJK char.
++        let message = "👋".repeat(30) + &"你".repeat(30);
++        let outcome = messaging.send_message(request(&message)).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(
++            rec.msgs.lock().await.clone(),
++            vec![message.clone()],
++            "the full message must be delivered exactly once"
++        );
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].status, "sent");
++        // 120 bytes of emoji + 78 bytes of CJK = 198 bytes on a char boundary,
++        // then the ellipsis marker - never a panic mid-char.
++        assert_eq!(
++            rows[0].content_preview,
++            format!("{}...", "👋".repeat(30) + &"你".repeat(26))
++        );
++    }
++
++    /// A message at the 4096-char limit (12 KiB of multibyte text) is delivered
++    /// un-truncated - the char cap is exclusive.
++    #[tokio::test]
++    async fn message_at_4096_char_limit_delivers_unchanged() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let message = "界".repeat(MAX_CHANNEL_MESSAGE_CHARS);
++        let outcome = messaging.send_message(request(&message)).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        let recorded = rec.msgs.lock().await.clone();
++        assert_eq!(recorded.len(), 1);
++        assert_eq!(recorded[0].chars().count(), MAX_CHANNEL_MESSAGE_CHARS);
++        assert_eq!(recorded[0], message);
++
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].status, "sent");
++        // 66 x 3-byte chars = 198 bytes on a char boundary, then the marker.
++        assert_eq!(rows[0].content_preview, format!("{}...", "界".repeat(66)));
++    }
++
++    /// Feature OFF (default): soft refusal with an actionable note, nothing
++    /// delivered, nothing logged - even with a channel connected.
++    #[tokio::test]
++    async fn feature_off_rejects_without_sending() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, false, manager).await;
++        let outcome = messaging.send_message(request("hello")).await;
++
++        assert_eq!(outcome.total_sent, 0);
++        assert_eq!(outcome.total_targets, 0);
++        assert!(outcome.per_channel.is_empty());
++        let note = outcome.note.as_deref().unwrap_or("");
++        assert!(note.contains("turned off"), "note was: {note}");
++        assert!(rec.msgs.lock().await.is_empty());
++        assert!(log_rows(&db).await.is_empty());
++    }
++
++    /// Feature ON: plain success, no note.
++    #[tokio::test]
++    async fn feature_on_sends_to_connected_channel() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let outcome = messaging.send_message(request("hello")).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(outcome.total_targets, 1);
++        assert!(outcome.note.is_none());
++        assert!(outcome.per_channel[0].success);
++        assert_eq!(outcome.per_channel[0].channel_id, channel_id);
++        assert_eq!(rec.msgs.lock().await.clone(), vec!["hello".to_string()]);
++    }
++
++    /// No enabled channels: soft refusal explaining none exist, nothing sent
++    /// or logged.
++    #[tokio::test]
++    async fn no_enabled_channels_refuses_with_actionable_note() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let outcome = messaging.send_message(request("hello")).await;
++
++        assert_eq!(outcome.total_sent, 0);
++        assert_eq!(outcome.total_targets, 0);
++        let note = outcome.note.as_deref().unwrap_or("");
++        assert!(
++            note.contains("no enabled chat channels"),
++            "note was: {note}"
++        );
++        assert!(rec.msgs.lock().await.is_empty());
++        assert!(log_rows(&db).await.is_empty());
++    }
++
++    /// Enabled in the DB but not connected in the manager: per-channel failure
++    /// with the manager's NotFound error, logged as failed.
++    #[tokio::test]
++    async fn enabled_but_disconnected_channel_reports_failure() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        // NOTE: manager has NO connected backend for channel_id.
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let outcome = messaging.send_message(request("hello")).await;
++
++        assert_eq!(outcome.total_sent, 0);
++        assert_eq!(outcome.total_targets, 1);
++        assert!(!outcome.per_channel[0].success);
++        assert_eq!(outcome.per_channel[0].channel_id, channel_id);
++        let err = outcome.per_channel[0].error.as_deref().unwrap_or("");
++        assert!(!err.is_empty(), "a per-channel error must be reported");
++        assert!(rec.msgs.lock().await.is_empty());
++
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        assert_eq!(rows[0].status, "failed");
++        assert_eq!(rows[0].channel_id, channel_id);
++        assert!(rows[0].error_detail.is_some());
++    }
++
++    /// Two enabled channels, one connected: the connected one delivers, the
++    /// disconnected one fails, and the outcome reports BOTH independently.
++    #[tokio::test]
++    async fn per_channel_failure_isolation() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let connected_id = seed_enabled_channel(&db).await;
++        let disconnected_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, connected_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let outcome = messaging.send_message(request("hello")).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(outcome.total_targets, 2);
++        assert_eq!(outcome.per_channel.len(), 2);
++        let by_id = |id: i32| {
++            outcome
++                .per_channel
++                .iter()
++                .find(|r| r.channel_id == id)
++                .expect("per-channel result present")
++        };
++        assert!(by_id(connected_id).success);
++        assert_eq!(by_id(connected_id).sent_message_id.as_deref(), Some("1"));
++        assert!(!by_id(disconnected_id).success);
++        assert!(by_id(disconnected_id).error.is_some());
++
++        // Exactly one delivery, and one log row per targeted channel.
++        assert_eq!(rec.msgs.lock().await.len(), 1);
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 2);
++        let statuses: Vec<&str> = rows.iter().map(|r| r.status.as_str()).collect();
++        assert!(statuses.contains(&"sent"));
++        assert!(statuses.contains(&"failed"));
++    }
++
++    /// Successful send persists one outbound `agent_send` log row carrying the
++    /// preview and the sent message id.
++    #[tokio::test]
++    async fn successful_send_persists_agent_send_log() {
++        let db = test_helpers::fresh_in_memory_db().await;
++        let channel_id = seed_enabled_channel(&db).await;
++        let manager = ChatChannelManager::new();
++        let rec = Recorder::default();
++        connect_recording_channel(&manager, channel_id, &rec).await;
++
++        let messaging = messaging_with(&db, true, manager).await;
++        let outcome = messaging.send_message(request("hello world")).await;
++
++        assert_eq!(outcome.total_sent, 1);
++        assert_eq!(outcome.per_channel[0].sent_message_id.as_deref(), Some("1"));
++        assert_eq!(rec.msgs.lock().await.clone(), vec!["hello world".to_string()]);
++
++        let rows = log_rows(&db).await;
++        assert_eq!(rows.len(), 1);
++        let row = &rows[0];
++        assert_eq!(row.channel_id, channel_id);
++        assert_eq!(row.direction, "outbound");
++        assert_eq!(row.message_type, "agent_send");
++        assert_eq!(row.status, "sent");
++        assert_eq!(row.content_preview, "hello world");
++        assert_eq!(row.error_detail, None);
 +    }
 +}
