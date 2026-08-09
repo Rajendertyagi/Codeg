@@ -125,7 +125,8 @@ jobs:
           $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
 
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
-          Copy-Item -Path "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Destination $dir -Force
+          Copy-Item -Path "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" `
+            -Destination "$dir/codeg-mcp.exe" -Force
 
           if (Test-Path "out") {
             New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
