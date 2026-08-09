@@ -1,6 +1,6 @@
 diff --git a/src-tauri/src/commands/chat_channel_messaging.rs b/src-tauri/src/commands/chat_channel_messaging.rs
 new file mode 100644
-index 00000000..b844037d
+index 00000000..4c543af1
 --- /dev/null
 +++ b/src-tauri/src/commands/chat_channel_messaging.rs
 @@ -0,0 +1,669 @@
@@ -115,7 +115,7 @@ index 00000000..b844037d
 +                        ch.id,
 +                        "outbound",
 +                        "agent_send",
-+                        preview,
++                        &preview,
 +                        "sent",
 +                        None,
 +                    )
@@ -138,7 +138,7 @@ index 00000000..b844037d
 +                        ch.id,
 +                        "outbound",
 +                        "agent_send",
-+                        preview,
++                        &preview,
 +                        "failed",
 +                        Some(e.to_string()),
 +                    )
