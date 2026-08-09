@@ -53,6 +53,10 @@ Working guidance for Code Agent when working in this repository (Codeg).
    `newplugin/patches/` and/or `newplugin/` hooks — never as edits to engine files.
 4. **Engine code stays read-only** even for known defects. Bugs in the engine are flagged
    as open debt with `file:line` citations, never silently fixed.
+5. **Before creating, regenerating, modifying, deleting, or applying plugin patches, read
+   `newplugin/PATCH_GENERATION_PROTOCOL.md`** — it is the mandatory, verified protocol for
+   patch ordering, byte-safe generation, and reconstruction validation. Never maintain the
+   same feature simultaneously as direct engine changes and patch files.
 
 ## Carried State (repo invariants)
 
