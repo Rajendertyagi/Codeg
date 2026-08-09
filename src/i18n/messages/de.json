@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "Eigener Stil",
+      "sectionDescription": "Feinjustiere die Farben des aktuellen Themes oder füge eigenes CSS ein. Überschreibungen liegen über der Basisvorlage und bleiben beim Wechsel der Vorlage erhalten.",
+      "summarySuspended": "Ausgesetzt",
+      "summaryDefault": "Vorlage unverändert",
+      "summaryTokens": "{count, plural, one {# Überschreibung} other {# Überschreibungen}}",
+      "summaryCss": "Eigenes CSS",
+      "suspendedByShortcut": "Der eigene Stil ist ausgesetzt. Nichts, was du hier einstellst, wirkt, bis du ihn fortsetzt.",
+      "suspendedBySafeParam": "Dieses Fenster wurde im sicheren Darstellungsmodus geöffnet, daher wird eigener Stil hier ignoriert. Andere Fenster sind nicht betroffen.",
+      "resume": "Eigenen Stil fortsetzen",
+      "enableTheme": "Eigene Farben aktivieren",
+      "editingLight": "Du bearbeitest die Werte des hellen Modus. Wechsle die App in den dunklen Modus, um diesen separat einzustellen.",
+      "editingDark": "Du bearbeitest die Werte des dunklen Modus. Wechsle die App in den hellen Modus, um diesen separat einzustellen.",
+      "resetToken": "Auf Vorlagenwert zurücksetzen",
+      "radius": "Eckenradius",
+      "radiusHint": "Daraus leitet sich die gesamte Radiusskala von sm bis 4xl ab – ein Regler rundet die ganze App.",
+      "advanced": "Erweitert ({count} weitere Variablen)",
+      "enableCss": "Eigenes CSS aktivieren",
+      "cssRisk": "Funktion für Fortgeschrittene. Eigenes CSS überschreibt sämtliche eingebauten Stile und kann die Oberfläche unbrauchbar machen.",
+      "editCss": "CSS bearbeiten…",
+      "cssPresent": "{size} KB gespeichert",
+      "cssEmpty": "Noch nichts gespeichert",
+      "escapeHint": "Oberfläche kaputt? Drücke {shortcut}, um den gesamten eigenen Stil auszusetzen, oder öffne ein Fenster mit dem Query-Parameter safeStyle=1.",
+      "copyTheme": "Theme-JSON kopieren",
+      "importTheme": "Theme importieren…",
+      "clearTheme": "Überschreibungen löschen",
+      "interopHint": "Themes nutzen das registry:theme-Format von shadcn – du kannst hier jedes shadcn-Theme einfügen und exportierte in jedem shadcn-Projekt verwenden.",
+      "importTitle": "Theme importieren",
+      "importDescription": "Füge ein shadcn-registry:theme-Item, ein reines light/dark-Objekt oder eine flache Token-Zuordnung ein.",
+      "readClipboard": "Zwischenablage lesen",
+      "importConfirm": "Importieren",
+      "cancel": "Abbrechen",
+      "apply": "Anwenden",
+      "toasts": {
+        "copied": "Theme-JSON kopiert",
+        "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
+        "clipboardReadFailed": "Zwischenablage konnte nicht gelesen werden, bitte manuell einfügen",
+        "importFailed": "In diesem JSON wurden keine nutzbaren Theme-Variablen gefunden",
+        "imported": "Theme importiert"
+      },
+      "css": {
+        "dialogTitle": "Eigenes CSS",
+        "dialogDescription": "Gilt für alle codeg-Fenster. Änderungen werden live vorschauend angezeigt; zum Speichern auf Anwenden klicken.",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} Regeln",
+        "errorTooLarge": "Zu groß zum Speichern. Bitte unter das Limit kürzen.",
+        "errorImportEscaped": "Eine @import-Regel hat das Entfernen überstanden (maskierte Schreibweise). Bitte entfernen, um zu speichern.",
+        "warnNoRules": "Keine Regeln erkannt – bitte die Syntax prüfen.",
+        "noticeImportsRemoved": "Entfernte @import-Regeln: {count}. Sie würden entfernte Stylesheets laden.",
+        "noticeRemoteUrl": "Enthält eine entfernte url(), die beim Anwenden eine Netzwerkanfrage auslöst.",
+        "noticePreviewSuspended": "Der eigene Stil ist ausgesetzt, daher wird diese Vorschau nicht angewendet.",
+        "noticeDisabled": "Eigenes CSS ist aus. Du kannst hier eine Vorschau sehen, aber es wirkt erst nach dem Aktivieren.",
+        "hintTokens": "Tipp: Deine überschriebenen Farben sind als var(--primary), var(--background) usw. verfügbar."
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "Fensterzoom",
       "sectionDescription": "Skaliert die gesamte Oberfläche. Wird sofort übernommen und pro Gerät gespeichert.",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "Zeilenumbruch einfügen",
         "description": "Einen Zeilenumbruch im Eingabefeld einfügen"
+      },
+      "toggle_custom_style": {
+        "title": "Eigenen Stil aussetzen/fortsetzen",
+        "description": "Notausstieg: schaltet alle eigenen Farben und CSS aus und wieder ein"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "Frageeinstellungen gespeichert",
     "saveFailed": "Frageeinstellungen konnten nicht gespeichert werden",
     "loadFailed": "Laden fehlgeschlagen: {detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "Benachrichtigungstöne",
+    "description": "Spielt einen kurzen Ton ab, wenn ein Agent-Ereignis eintritt. Es sind dieselben Ereignisse, die an die Chat-Kanäle gesendet werden; diese Einstellung gilt nur für dieses Gerät.",
+    "enable": "Benachrichtigungstöne aktivieren",
+    "enableHint": "Standardmäßig aus. Töne werden nur im Arbeitsbereich-Fenster dieses Browsers oder dieser App abgespielt.",
+    "volume": "Lautstärke",
+    "preview": "Anhören",
+    "previewEvent": "Ton für {event} anhören",
+    "onlyWhenUnfocused": "Nur wenn das Fenster nicht im Fokus ist",
+    "onlyWhenUnfocusedHint": "Bleibt stumm, solange du Codeg ansiehst.",
+    "eventsTitle": "Ereignisse",
+    "eventsHint": "Wähle pro Ereignis einen Ton oder „Stumm“, um es zu überspringen. Wiederholt sich dasselbe Ereignis innerhalb weniger Sekunden, erklingt es nur einmal.",
+    "toneNone": "Stumm",
+    "toneChime": "Glockenspiel",
+    "toneDing": "Klingel",
+    "toneBlip": "Blip",
+    "tonePop": "Pop",
+    "toneAlert": "Alarm",
+    "toneDescend": "Absteigend"
   },
   "LogsSettings": {
     "loading": "Wird geladen…",

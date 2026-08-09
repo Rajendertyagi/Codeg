@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "自定义样式",
+      "sectionDescription": "在当前主题的基础上微调配色，或写入自己的 CSS。覆盖叠加在基底预设之上，切换预设后依然保留。",
+      "summarySuspended": "已停用",
+      "summaryDefault": "跟随预设",
+      "summaryTokens": "{count, plural, other {# 项覆盖}}",
+      "summaryCss": "自定义 CSS",
+      "suspendedByShortcut": "自定义样式已停用。在恢复之前，这里的设置都不会生效。",
+      "suspendedBySafeParam": "本窗口以安全外观模式打开，自定义样式在此不生效，其它窗口不受影响。",
+      "resume": "恢复自定义样式",
+      "enableTheme": "启用自定义配色",
+      "editingLight": "正在编辑浅色模式的取值。切换到深色模式可单独设置深色。",
+      "editingDark": "正在编辑深色模式的取值。切换到浅色模式可单独设置浅色。",
+      "resetToken": "恢复为预设取值",
+      "radius": "圆角",
+      "radiusHint": "从 sm 到 4xl 的整套圆角尺寸都由它派生，一个滑块即可改变全局圆角。",
+      "advanced": "高级（另有 {count} 个变量）",
+      "enableCss": "启用自定义 CSS",
+      "cssRisk": "高级功能。自定义 CSS 会压过所有内置样式，写坏可能导致界面不可用。",
+      "editCss": "编辑 CSS…",
+      "cssPresent": "已保存 {size} KB",
+      "cssEmpty": "尚未保存内容",
+      "escapeHint": "界面被改坏了？按 {shortcut} 可停用全部自定义样式，也可以用 safeStyle=1 查询参数打开窗口。",
+      "copyTheme": "复制主题 JSON",
+      "importTheme": "导入主题…",
+      "clearTheme": "清除覆盖",
+      "interopHint": "主题采用 shadcn 的 registry:theme 格式，可以直接粘贴任意 shadcn 主题，导出的主题也能用在任何 shadcn 项目里。",
+      "importTitle": "导入主题",
+      "importDescription": "粘贴 shadcn 的 registry:theme 条目、裸的 light/dark 对象，或者单层的 token 映射。",
+      "readClipboard": "读取剪贴板",
+      "importConfirm": "导入",
+      "cancel": "取消",
+      "apply": "应用",
+      "toasts": {
+        "copied": "主题 JSON 已复制",
+        "copyFailed": "无法写入剪贴板",
+        "clipboardReadFailed": "无法读取剪贴板，请手动粘贴",
+        "importFailed": "这段 JSON 里没有可用的主题变量",
+        "imported": "主题已导入"
+      },
+      "css": {
+        "dialogTitle": "自定义 CSS",
+        "dialogDescription": "对所有 codeg 窗口生效。修改会实时预览，点击「应用」才会保存。",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} 条规则",
+        "errorTooLarge": "内容过大，无法保存，请精简到上限以内。",
+        "errorImportEscaped": "剥离后仍检测到 @import（转义写法），请手动移除后再保存。",
+        "warnNoRules": "没有解析出任何规则，请检查语法。",
+        "noticeImportsRemoved": "已移除 {count} 条 @import：它们会拉取远程样式表。",
+        "noticeRemoteUrl": "含远程 url()，应用后会发起网络请求。",
+        "noticePreviewSuspended": "自定义样式已停用，此处预览不会生效。",
+        "noticeDisabled": "自定义 CSS 未启用。这里可以预览，但启用后才会真正生效。",
+        "hintTokens": "提示：你覆盖的颜色可以直接用 var(--primary)、var(--background) 等引用。"
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "窗口缩放",
       "sectionDescription": "整体放大或缩小界面，立即生效，按设备分别保存。",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "消息换行",
         "description": "在输入框中插入换行符"
+      },
+      "toggle_custom_style": {
+        "title": "停用/恢复自定义样式",
+        "description": "逃生舱：一键关闭全部自定义配色与 CSS，再按一次恢复"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "提问设置已保存",
     "saveFailed": "保存提问设置失败",
     "loadFailed": "加载失败：{detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "提示音",
+    "description": "智能体事件触发时播放一段简短的提示音。这里的事件与消息渠道推送的完全一致，但设置只对本设备生效。",
+    "enable": "启用提示音",
+    "enableHint": "默认关闭。提示音只在当前浏览器或应用的工作区窗口中播放。",
+    "volume": "音量",
+    "preview": "试听",
+    "previewEvent": "试听「{event}」提示音",
+    "onlyWhenUnfocused": "仅在窗口未聚焦时播放",
+    "onlyWhenUnfocusedHint": "正在查看 Codeg 时保持静音。",
+    "eventsTitle": "事件",
+    "eventsHint": "为每个事件选择一种音效，选择「静音」则不播放。同一事件在数秒内重复触发时只播放一次。",
+    "toneNone": "静音",
+    "toneChime": "叮咚",
+    "toneDing": "清铃",
+    "toneBlip": "短音",
+    "tonePop": "轻点",
+    "toneAlert": "警示",
+    "toneDescend": "下行音"
   },
   "LogsSettings": {
     "loading": "加载中…",

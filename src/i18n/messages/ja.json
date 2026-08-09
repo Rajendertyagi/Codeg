@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "カスタムスタイル",
+      "sectionDescription": "現在のテーマの配色を微調整したり、独自の CSS を適用したりできます。上書きはベースプリセットの上に重なるため、プリセットを切り替えても保持されます。",
+      "summarySuspended": "一時停止中",
+      "summaryDefault": "プリセットのまま",
+      "summaryTokens": "{count, plural, one {上書き # 件} other {上書き # 件}}",
+      "summaryCss": "カスタム CSS",
+      "suspendedByShortcut": "カスタムスタイルは一時停止中です。再開するまで、ここでの設定は反映されません。",
+      "suspendedBySafeParam": "このウィンドウはセーフ外観モードで開かれているため、カスタムスタイルは適用されません。他のウィンドウには影響しません。",
+      "resume": "カスタムスタイルを再開",
+      "enableTheme": "カスタム配色を有効にする",
+      "editingLight": "ライトモードの値を編集しています。ダークモードに切り替えると個別に設定できます。",
+      "editingDark": "ダークモードの値を編集しています。ライトモードに切り替えると個別に設定できます。",
+      "resetToken": "プリセット値に戻す",
+      "radius": "角丸",
+      "radiusHint": "sm から 4xl までの角丸スケール全体がこの値から導出されるため、スライダー 1 つでアプリ全体の角丸が変わります。",
+      "advanced": "詳細（他 {count} 個の変数）",
+      "enableCss": "カスタム CSS を有効にする",
+      "cssRisk": "上級者向け機能です。カスタム CSS は組み込みスタイルをすべて上書きするため、画面が使用不能になることがあります。",
+      "editCss": "CSS を編集…",
+      "cssPresent": "{size} KB 保存済み",
+      "cssEmpty": "まだ保存されていません",
+      "escapeHint": "画面が壊れてしまったら、{shortcut} でカスタムスタイルをすべて停止できます。safeStyle=1 のクエリパラメータ付きでウィンドウを開く方法もあります。",
+      "copyTheme": "テーマ JSON をコピー",
+      "importTheme": "テーマをインポート…",
+      "clearTheme": "上書きをクリア",
+      "interopHint": "テーマは shadcn の registry:theme 形式です。任意の shadcn テーマをそのまま貼り付けられ、書き出したテーマはどの shadcn プロジェクトでも使えます。",
+      "importTitle": "テーマをインポート",
+      "importDescription": "shadcn の registry:theme アイテム、light/dark のみのオブジェクト、またはフラットなトークンマップを貼り付けてください。",
+      "readClipboard": "クリップボードから読み取る",
+      "importConfirm": "インポート",
+      "cancel": "キャンセル",
+      "apply": "適用",
+      "toasts": {
+        "copied": "テーマ JSON をコピーしました",
+        "copyFailed": "クリップボードにコピーできませんでした",
+        "clipboardReadFailed": "クリップボードを読み取れませんでした。手動で貼り付けてください",
+        "importFailed": "この JSON には利用できるテーマ変数がありません",
+        "imported": "テーマをインポートしました"
+      },
+      "css": {
+        "dialogTitle": "カスタム CSS",
+        "dialogDescription": "すべての codeg ウィンドウに適用されます。変更はリアルタイムでプレビューされ、「適用」で保存されます。",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} 個のルール",
+        "errorTooLarge": "サイズが大きすぎて保存できません。上限以下に減らしてください。",
+        "errorImportEscaped": "除去後も @import が検出されました（エスケープ記法）。手動で削除してください。",
+        "warnNoRules": "ルールが 1 つも解析されませんでした。構文を確認してください。",
+        "noticeImportsRemoved": "@import を {count} 件削除しました。リモートのスタイルシートを取得してしまうためです。",
+        "noticeRemoteUrl": "リモートの url() が含まれています。適用するとネットワークリクエストが発生します。",
+        "noticePreviewSuspended": "カスタムスタイルが停止中のため、このプレビューは適用されません。",
+        "noticeDisabled": "カスタム CSS は無効です。ここでプレビューはできますが、有効にするまで反映されません。",
+        "hintTokens": "ヒント: 上書きした色は var(--primary) や var(--background) などで参照できます。"
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "ウィンドウズーム",
       "sectionDescription": "インターフェイス全体を拡大・縮小します。すぐに反映され、デバイスごとに保存されます。",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "メッセージ内で改行",
         "description": "入力欄で改行を挿入する"
+      },
+      "toggle_custom_style": {
+        "title": "カスタムスタイルの停止/再開",
+        "description": "緊急脱出用: カスタム配色と CSS をすべてオフにし、再度押すと元に戻します"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "質問設定を保存しました",
     "saveFailed": "質問設定の保存に失敗しました",
     "loadFailed": "読み込みに失敗しました：{detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "通知音",
+    "description": "エージェントのイベント発生時に短い通知音を鳴らします。対象はチャットチャンネルに送られるものと同じイベントで、この設定はこの端末にのみ適用されます。",
+    "enable": "通知音を有効にする",
+    "enableHint": "既定ではオフです。通知音はこのブラウザまたはアプリのワークスペースウィンドウでのみ再生されます。",
+    "volume": "音量",
+    "preview": "試聴",
+    "previewEvent": "「{event}」の通知音を試聴",
+    "onlyWhenUnfocused": "ウィンドウが非アクティブなときのみ再生",
+    "onlyWhenUnfocusedHint": "Codeg を表示している間は鳴らしません。",
+    "eventsTitle": "イベント",
+    "eventsHint": "イベントごとに音を選びます。「なし」を選ぶと鳴りません。同じイベントが数秒以内に繰り返された場合は 1 回だけ再生されます。",
+    "toneNone": "なし",
+    "toneChime": "チャイム",
+    "toneDing": "ベル",
+    "toneBlip": "ブリップ",
+    "tonePop": "ポップ",
+    "toneAlert": "アラート",
+    "toneDescend": "下降音"
   },
   "LogsSettings": {
     "loading": "読み込み中…",

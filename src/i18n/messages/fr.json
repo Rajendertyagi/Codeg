@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "Style personnalisé",
+      "sectionDescription": "Ajustez les couleurs du thème actuel ou injectez votre propre CSS. Les remplacements se superposent au préréglage de base et sont conservés lorsque vous en changez.",
+      "summarySuspended": "Suspendu",
+      "summaryDefault": "Préréglage inchangé",
+      "summaryTokens": "{count, plural, one {# remplacement} other {# remplacements}}",
+      "summaryCss": "CSS personnalisé",
+      "suspendedByShortcut": "Le style personnalisé est suspendu. Rien de ce que vous réglez ici ne s'appliquera tant que vous ne l'aurez pas réactivé.",
+      "suspendedBySafeParam": "Cette fenêtre a été ouverte en mode d'apparence sûre : le style personnalisé y est ignoré. Les autres fenêtres ne sont pas affectées.",
+      "resume": "Réactiver le style personnalisé",
+      "enableTheme": "Activer les couleurs personnalisées",
+      "editingLight": "Vous modifiez les valeurs du mode clair. Passez l'application en mode sombre pour le régler séparément.",
+      "editingDark": "Vous modifiez les valeurs du mode sombre. Passez l'application en mode clair pour le régler séparément.",
+      "resetToken": "Rétablir la valeur du préréglage",
+      "radius": "Rayon des coins",
+      "radiusHint": "Toute l'échelle de rayons, de sm à 4xl, en découle : un seul curseur arrondit l'application entière.",
+      "advanced": "Avancé ({count} variables de plus)",
+      "enableCss": "Activer le CSS personnalisé",
+      "cssRisk": "Fonction avancée. Le CSS personnalisé remplace tous les styles intégrés et peut rendre l'interface inutilisable.",
+      "editCss": "Modifier le CSS…",
+      "cssPresent": "{size} Ko enregistrés",
+      "cssEmpty": "Rien d'enregistré pour l'instant",
+      "escapeHint": "Interface cassée ? Appuyez sur {shortcut} pour suspendre tout le style personnalisé, ou ouvrez une fenêtre avec le paramètre safeStyle=1.",
+      "copyTheme": "Copier le JSON du thème",
+      "importTheme": "Importer un thème…",
+      "clearTheme": "Effacer les remplacements",
+      "interopHint": "Les thèmes utilisent le format registry:theme de shadcn : collez ici n'importe quel thème shadcn, et réutilisez les vôtres dans n'importe quel projet shadcn.",
+      "importTitle": "Importer un thème",
+      "importDescription": "Collez un élément registry:theme de shadcn, un simple objet light/dark, ou une table de tokens à plat.",
+      "readClipboard": "Lire le presse-papiers",
+      "importConfirm": "Importer",
+      "cancel": "Annuler",
+      "apply": "Appliquer",
+      "toasts": {
+        "copied": "JSON du thème copié",
+        "copyFailed": "Impossible de copier dans le presse-papiers",
+        "clipboardReadFailed": "Impossible de lire le presse-papiers, collez manuellement",
+        "importFailed": "Ce JSON ne contient aucune variable de thème utilisable",
+        "imported": "Thème importé"
+      },
+      "css": {
+        "dialogTitle": "CSS personnalisé",
+        "dialogDescription": "S'applique à toutes les fenêtres codeg. Les modifications sont prévisualisées en direct ; cliquez sur Appliquer pour enregistrer.",
+        "size": "{used} Ko / {max} Ko",
+        "ruleCount": "{count} règles",
+        "errorTooLarge": "Trop volumineux pour être enregistré. Réduisez-le sous la limite.",
+        "errorImportEscaped": "Une règle @import a survécu au retrait (syntaxe échappée). Supprimez-la pour enregistrer.",
+        "warnNoRules": "Aucune règle analysée, vérifiez la syntaxe.",
+        "noticeImportsRemoved": "Règles @import supprimées : {count}. Elles chargeraient des feuilles de style distantes.",
+        "noticeRemoteUrl": "Contient une url() distante, qui déclenchera une requête réseau une fois appliquée.",
+        "noticePreviewSuspended": "Le style personnalisé est suspendu, cet aperçu n'est donc pas appliqué.",
+        "noticeDisabled": "Le CSS personnalisé est désactivé. Vous pouvez prévisualiser ici, mais rien ne s'appliquera avant activation.",
+        "hintTokens": "Astuce : vos couleurs remplacées sont accessibles via var(--primary), var(--background), etc."
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "Zoom de la fenêtre",
       "sectionDescription": "Met à l'échelle toute l'interface. S'applique immédiatement et est enregistré par appareil.",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "Retour à la ligne",
         "description": "Insérer un retour à la ligne dans la zone de saisie"
+      },
+      "toggle_custom_style": {
+        "title": "Suspendre/réactiver le style personnalisé",
+        "description": "Issue de secours : désactive toutes les couleurs et le CSS personnalisés, puis les réactive"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "Paramètres de question enregistrés",
     "saveFailed": "Échec de l'enregistrement des paramètres de question",
     "loadFailed": "Échec du chargement : {detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "Sons de notification",
+    "description": "Joue un son bref lorsqu’un événement d’agent se produit. Ce sont les mêmes événements que ceux envoyés aux canaux de discussion ; ce réglage ne s’applique qu’à cet appareil.",
+    "enable": "Activer les sons de notification",
+    "enableHint": "Désactivé par défaut. Les sons ne sont joués que dans la fenêtre de l’espace de travail de ce navigateur ou de cette application.",
+    "volume": "Volume",
+    "preview": "Écouter",
+    "previewEvent": "Écouter le son de {event}",
+    "onlyWhenUnfocused": "Uniquement lorsque la fenêtre n’est pas au premier plan",
+    "onlyWhenUnfocusedHint": "Reste silencieux tant que Codeg est affiché.",
+    "eventsTitle": "Événements",
+    "eventsHint": "Choisissez un son par événement, ou « Silencieux » pour l’ignorer. Si le même événement se répète en quelques secondes, il ne sonne qu’une fois.",
+    "toneNone": "Silencieux",
+    "toneChime": "Carillon",
+    "toneDing": "Clochette",
+    "toneBlip": "Bip",
+    "tonePop": "Pop",
+    "toneAlert": "Alerte",
+    "toneDescend": "Descendant"
   },
   "LogsSettings": {
     "loading": "Chargement…",

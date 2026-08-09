@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "自訂樣式",
+      "sectionDescription": "在目前主題的基礎上微調配色，或寫入自己的 CSS。覆寫疊加在基底預設之上，切換預設後依然保留。",
+      "summarySuspended": "已停用",
+      "summaryDefault": "跟隨預設",
+      "summaryTokens": "{count, plural, other {# 項覆寫}}",
+      "summaryCss": "自訂 CSS",
+      "suspendedByShortcut": "自訂樣式已停用。在恢復之前，這裡的設定都不會生效。",
+      "suspendedBySafeParam": "本視窗以安全外觀模式開啟，自訂樣式在此不生效，其它視窗不受影響。",
+      "resume": "恢復自訂樣式",
+      "enableTheme": "啟用自訂配色",
+      "editingLight": "正在編輯淺色模式的取值。切換到深色模式可單獨設定深色。",
+      "editingDark": "正在編輯深色模式的取值。切換到淺色模式可單獨設定淺色。",
+      "resetToken": "還原為預設取值",
+      "radius": "圓角",
+      "radiusHint": "從 sm 到 4xl 的整套圓角尺寸都由它衍生，一個滑桿即可改變全域圓角。",
+      "advanced": "進階（另有 {count} 個變數）",
+      "enableCss": "啟用自訂 CSS",
+      "cssRisk": "進階功能。自訂 CSS 會壓過所有內建樣式，寫壞可能導致介面無法使用。",
+      "editCss": "編輯 CSS…",
+      "cssPresent": "已儲存 {size} KB",
+      "cssEmpty": "尚未儲存內容",
+      "escapeHint": "介面被改壞了？按 {shortcut} 可停用全部自訂樣式，也可以用 safeStyle=1 查詢參數開啟視窗。",
+      "copyTheme": "複製主題 JSON",
+      "importTheme": "匯入主題…",
+      "clearTheme": "清除覆寫",
+      "interopHint": "主題採用 shadcn 的 registry:theme 格式，可以直接貼上任意 shadcn 主題，匯出的主題也能用在任何 shadcn 專案裡。",
+      "importTitle": "匯入主題",
+      "importDescription": "貼上 shadcn 的 registry:theme 項目、裸的 light/dark 物件，或者單層的 token 對應表。",
+      "readClipboard": "讀取剪貼簿",
+      "importConfirm": "匯入",
+      "cancel": "取消",
+      "apply": "套用",
+      "toasts": {
+        "copied": "主題 JSON 已複製",
+        "copyFailed": "無法寫入剪貼簿",
+        "clipboardReadFailed": "無法讀取剪貼簿，請手動貼上",
+        "importFailed": "這段 JSON 裡沒有可用的主題變數",
+        "imported": "主題已匯入"
+      },
+      "css": {
+        "dialogTitle": "自訂 CSS",
+        "dialogDescription": "對所有 codeg 視窗生效。修改會即時預覽，點擊「套用」才會儲存。",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} 條規則",
+        "errorTooLarge": "內容過大，無法儲存，請精簡到上限以內。",
+        "errorImportEscaped": "剝離後仍偵測到 @import（跳脫寫法），請手動移除後再儲存。",
+        "warnNoRules": "沒有解析出任何規則，請檢查語法。",
+        "noticeImportsRemoved": "已移除 {count} 條 @import：它們會拉取遠端樣式表。",
+        "noticeRemoteUrl": "含遠端 url()，套用後會發起網路請求。",
+        "noticePreviewSuspended": "自訂樣式已停用，此處預覽不會生效。",
+        "noticeDisabled": "自訂 CSS 未啟用。這裡可以預覽，但啟用後才會真正生效。",
+        "hintTokens": "提示：你覆寫的顏色可以直接用 var(--primary)、var(--background) 等引用。"
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "視窗縮放",
       "sectionDescription": "整體放大或縮小介面，立即生效，依裝置分別儲存。",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "訊息換行",
         "description": "在輸入框中插入換行符"
+      },
+      "toggle_custom_style": {
+        "title": "停用/恢復自訂樣式",
+        "description": "逃生艙：一鍵關閉全部自訂配色與 CSS，再按一次恢復"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "提問設定已儲存",
     "saveFailed": "儲存提問設定失敗",
     "loadFailed": "載入失敗：{detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "提示音",
+    "description": "智慧體事件觸發時播放一段簡短的提示音。這裡的事件與訊息通道推送的完全一致，但設定只對本裝置生效。",
+    "enable": "啟用提示音",
+    "enableHint": "預設關閉。提示音只在目前瀏覽器或應用程式的工作區視窗中播放。",
+    "volume": "音量",
+    "preview": "試聽",
+    "previewEvent": "試聽「{event}」提示音",
+    "onlyWhenUnfocused": "僅在視窗未聚焦時播放",
+    "onlyWhenUnfocusedHint": "正在檢視 Codeg 時保持靜音。",
+    "eventsTitle": "事件",
+    "eventsHint": "為每個事件選擇一種音效，選擇「靜音」則不播放。同一事件在數秒內重複觸發時只播放一次。",
+    "toneNone": "靜音",
+    "toneChime": "叮咚",
+    "toneDing": "清鈴",
+    "toneBlip": "短音",
+    "tonePop": "輕點",
+    "toneAlert": "警示",
+    "toneDescend": "下行音"
   },
   "LogsSettings": {
     "loading": "載入中…",

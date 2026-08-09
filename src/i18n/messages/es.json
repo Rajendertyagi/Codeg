@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "Estilo personalizado",
+      "sectionDescription": "Ajusta los colores del tema actual o inyecta tu propio CSS. Las anulaciones se aplican sobre el preajuste base, así que se conservan al cambiar de preajuste.",
+      "summarySuspended": "Suspendido",
+      "summaryDefault": "Preajuste sin cambios",
+      "summaryTokens": "{count, plural, one {# anulación} other {# anulaciones}}",
+      "summaryCss": "CSS personalizado",
+      "suspendedByShortcut": "El estilo personalizado está suspendido. Nada de lo que configures aquí surtirá efecto hasta que lo reanudes.",
+      "suspendedBySafeParam": "Esta ventana se abrió en modo de apariencia segura, por lo que el estilo personalizado se ignora aquí. Las demás ventanas no se ven afectadas.",
+      "resume": "Reanudar estilo personalizado",
+      "enableTheme": "Activar colores personalizados",
+      "editingLight": "Editando los valores del modo claro. Cambia la aplicación al modo oscuro para configurarlo por separado.",
+      "editingDark": "Editando los valores del modo oscuro. Cambia la aplicación al modo claro para configurarlo por separado.",
+      "resetToken": "Restablecer al valor del preajuste",
+      "radius": "Radio de esquina",
+      "radiusHint": "De él deriva toda la escala de radios, de sm a 4xl, así que un único control redondea toda la aplicación.",
+      "advanced": "Avanzado ({count} variables más)",
+      "enableCss": "Activar CSS personalizado",
+      "cssRisk": "Función avanzada. El CSS personalizado anula todos los estilos integrados y puede dejar la interfaz inutilizable.",
+      "editCss": "Editar CSS…",
+      "cssPresent": "{size} KB guardados",
+      "cssEmpty": "Todavía no hay nada guardado",
+      "escapeHint": "¿Interfaz rota? Pulsa {shortcut} para suspender todo el estilo personalizado, o abre una ventana con el parámetro de consulta safeStyle=1.",
+      "copyTheme": "Copiar JSON del tema",
+      "importTheme": "Importar tema…",
+      "clearTheme": "Borrar anulaciones",
+      "interopHint": "Los temas usan el formato registry:theme de shadcn, así que puedes pegar aquí cualquier tema de shadcn y usar los exportados en cualquier proyecto shadcn.",
+      "importTitle": "Importar tema",
+      "importDescription": "Pega un elemento registry:theme de shadcn, un objeto light/dark simple o un mapa plano de tokens.",
+      "readClipboard": "Leer portapapeles",
+      "importConfirm": "Importar",
+      "cancel": "Cancelar",
+      "apply": "Aplicar",
+      "toasts": {
+        "copied": "JSON del tema copiado",
+        "copyFailed": "No se pudo copiar al portapapeles",
+        "clipboardReadFailed": "No se pudo leer el portapapeles, pégalo manualmente",
+        "importFailed": "Ese JSON no contiene variables de tema utilizables",
+        "imported": "Tema importado"
+      },
+      "css": {
+        "dialogTitle": "CSS personalizado",
+        "dialogDescription": "Se aplica a todas las ventanas de codeg. Los cambios se previsualizan en vivo; pulsa Aplicar para guardar.",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} reglas",
+        "errorTooLarge": "Demasiado grande para guardar. Redúcelo por debajo del límite.",
+        "errorImportEscaped": "Una regla @import sobrevivió a la eliminación (sintaxis con escapes). Quítala para guardar.",
+        "warnNoRules": "No se analizó ninguna regla; revisa la sintaxis.",
+        "noticeImportsRemoved": "Reglas @import eliminadas: {count}. Descargarían hojas de estilo remotas.",
+        "noticeRemoteUrl": "Contiene una url() remota, que hará una petición de red al aplicarse.",
+        "noticePreviewSuspended": "El estilo personalizado está suspendido, así que esta vista previa no se aplica.",
+        "noticeDisabled": "El CSS personalizado está desactivado. Puedes previsualizar aquí, pero no se aplicará hasta que lo actives.",
+        "hintTokens": "Consejo: tus colores anulados están disponibles como var(--primary), var(--background), etc."
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "Zoom de ventana",
       "sectionDescription": "Escala toda la interfaz. Se aplica al instante y se guarda por dispositivo.",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "Nueva línea en mensaje",
         "description": "Insertar una nueva línea en el cuadro de entrada"
+      },
+      "toggle_custom_style": {
+        "title": "Suspender/reanudar estilo personalizado",
+        "description": "Vía de escape: desactiva todos los colores y el CSS personalizados, y los vuelve a activar"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "Ajustes de preguntas guardados",
     "saveFailed": "No se pudieron guardar los ajustes de preguntas",
     "loadFailed": "Error al cargar: {detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "Sonidos de notificación",
+    "description": "Reproduce un sonido breve cuando se produce un evento del agente. Son los mismos eventos que se envían a los canales de chat; esta configuración solo se aplica a este dispositivo.",
+    "enable": "Activar sonidos de notificación",
+    "enableHint": "Desactivado por defecto. Los sonidos solo suenan en la ventana del espacio de trabajo de este navegador o aplicación.",
+    "volume": "Volumen",
+    "preview": "Escuchar",
+    "previewEvent": "Escuchar el sonido de {event}",
+    "onlyWhenUnfocused": "Solo cuando la ventana no está enfocada",
+    "onlyWhenUnfocusedHint": "Permanece en silencio mientras estás mirando Codeg.",
+    "eventsTitle": "Eventos",
+    "eventsHint": "Elige un tono para cada evento o «Silencio» para omitirlo. Si el mismo evento se repite en pocos segundos, solo suena una vez.",
+    "toneNone": "Silencio",
+    "toneChime": "Campanilla",
+    "toneDing": "Timbre",
+    "toneBlip": "Pitido",
+    "tonePop": "Pop",
+    "toneAlert": "Alerta",
+    "toneDescend": "Descendente"
   },
   "LogsSettings": {
     "loading": "Cargando…",

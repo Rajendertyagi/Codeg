@@ -89,6 +89,61 @@
         "violet": "Violet"
       }
     },
+    "customStyle": {
+      "sectionTitle": "Custom Style",
+      "sectionDescription": "Fine-tune the current theme's colors, or inject your own CSS. Overrides sit on top of the base preset, so switching presets keeps them.",
+      "summarySuspended": "Suspended",
+      "summaryDefault": "Preset defaults",
+      "summaryTokens": "{count, plural, one {# override} other {# overrides}}",
+      "summaryCss": "Custom CSS",
+      "suspendedByShortcut": "Custom style is suspended. Nothing set here takes effect until you resume it.",
+      "suspendedBySafeParam": "This window was opened in safe appearance mode, so custom style is ignored here. Other windows are unaffected.",
+      "resume": "Resume custom style",
+      "enableTheme": "Enable custom colors",
+      "editingLight": "Editing light mode values. Switch the app to dark mode to set its own.",
+      "editingDark": "Editing dark mode values. Switch the app to light mode to set its own.",
+      "resetToken": "Reset to preset value",
+      "radius": "Corner radius",
+      "radiusHint": "Drives the whole radius scale from sm to 4xl, so one slider rounds the entire app.",
+      "advanced": "Advanced ({count} more variables)",
+      "enableCss": "Enable custom CSS",
+      "cssRisk": "Advanced feature. Custom CSS overrides every built-in style and can make the interface unusable.",
+      "editCss": "Edit CSS…",
+      "cssPresent": "{size} KB saved",
+      "cssEmpty": "Nothing saved yet",
+      "escapeHint": "Stuck with a broken interface? Press {shortcut} to suspend all custom style, or open a window with the safeStyle=1 query parameter.",
+      "copyTheme": "Copy theme JSON",
+      "importTheme": "Import theme…",
+      "clearTheme": "Clear overrides",
+      "interopHint": "Themes use shadcn's registry:theme format, so you can paste any shadcn theme here and use exported ones in any shadcn project.",
+      "importTitle": "Import theme",
+      "importDescription": "Paste a shadcn registry:theme item, a bare light/dark object, or a flat token map.",
+      "readClipboard": "Read clipboard",
+      "importConfirm": "Import",
+      "cancel": "Cancel",
+      "apply": "Apply",
+      "toasts": {
+        "copied": "Theme JSON copied",
+        "copyFailed": "Could not copy to the clipboard",
+        "clipboardReadFailed": "Could not read the clipboard, paste manually",
+        "importFailed": "No usable theme tokens found in that JSON",
+        "imported": "Theme imported"
+      },
+      "css": {
+        "dialogTitle": "Custom CSS",
+        "dialogDescription": "Applies to every codeg window. Changes preview live; press Apply to save.",
+        "size": "{used} KB / {max} KB",
+        "ruleCount": "{count} rules",
+        "errorTooLarge": "Too large to save. Trim it below the limit.",
+        "errorImportEscaped": "An @import rule survived removal (escaped syntax). Remove it to save.",
+        "warnNoRules": "No rules parsed, check the syntax.",
+        "noticeImportsRemoved": "@import rules removed: {count}. They would fetch remote stylesheets.",
+        "noticeRemoteUrl": "Contains a remote url(), which makes a network request when applied.",
+        "noticePreviewSuspended": "Custom style is suspended, so this preview is not applied.",
+        "noticeDisabled": "Custom CSS is off. You can preview here, but nothing applies until you enable it.",
+        "hintTokens": "Tip: your color overrides are available as var(--primary), var(--background) and so on."
+      }
+    },
     "zoomLevel": {
       "sectionTitle": "Window zoom",
       "sectionDescription": "Scale the entire interface. Applies immediately and persists per device.",
@@ -356,6 +411,10 @@
       "newline_in_message": {
         "title": "Newline in Message",
         "description": "Insert a newline in the message input box"
+      },
+      "toggle_custom_style": {
+        "title": "Suspend/resume custom style",
+        "description": "Escape hatch: turns all custom colors and CSS off, and back on"
       }
     }
   },
@@ -4019,6 +4078,26 @@
     "saved": "Question settings saved",
     "saveFailed": "Failed to save question settings",
     "loadFailed": "Failed to load: {detail}"
+  },
+  "NotificationSoundSettings": {
+    "title": "Notification sounds",
+    "description": "Play a short sound when an agent event fires. These are the same events the chat channels push — configured here for this device only.",
+    "enable": "Enable notification sounds",
+    "enableHint": "Off by default. Sounds play in the workspace window of this browser or app only.",
+    "volume": "Volume",
+    "preview": "Preview",
+    "previewEvent": "Preview the {event} sound",
+    "onlyWhenUnfocused": "Only when the window is not focused",
+    "onlyWhenUnfocusedHint": "Stay silent while you are looking at Codeg.",
+    "eventsTitle": "Events",
+    "eventsHint": "Pick a tone per event, or “Silent” to skip it. Repeats of the same event within a couple of seconds play once.",
+    "toneNone": "Silent",
+    "toneChime": "Chime",
+    "toneDing": "Ding",
+    "toneBlip": "Blip",
+    "tonePop": "Pop",
+    "toneAlert": "Alert",
+    "toneDescend": "Descending"
   },
   "LogsSettings": {
     "loading": "Loading…",
