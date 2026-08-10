@@ -10,12 +10,13 @@
  * empty field — no reset effect needed.
  */
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2, Send } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   Dialog,
   DialogContent,
@@ -54,8 +55,8 @@ function FeedbackDialogForm({
   channel,
 }: FeedbackDialogFormProps) {
   const t = useTranslations("LiveFeedback")
+  const ime = useImeGuard()
   const [text, setText] = useState("")
-  const composingRef = useRef(false)
 
   const trimmed = text.trim()
   const canSend = trimmed.length > 0 && !submitting
@@ -80,16 +81,9 @@ function FeedbackDialogForm({
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onCompositionStart={() => (composingRef.current = true)}
-        onCompositionEnd={() => (composingRef.current = false)}
+        {...ime.props}
         onKeyDown={(e) => {
-          if (
-            e.nativeEvent.isComposing ||
-            composingRef.current ||
-            e.key === "Process" ||
-            e.keyCode === 229
-          )
-            return
+          if (ime.isComposing(e)) return
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault()
             handleSubmit()

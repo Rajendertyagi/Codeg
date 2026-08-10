@@ -50,6 +50,14 @@ pub struct AgentExecutionStats {
     /// Tool calls extracted from the subagent's own JSONL transcript.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tool_calls: Vec<AgentToolCall>,
+    /// The child's own session id, when the sub-agent ran as a standalone
+    /// session on disk rather than as chunks folded into the parent's stream
+    /// (Grok: every `spawn_subagent` child is a full session directory). Lets
+    /// the Agent card offer to open that transcript — `get_conversation`
+    /// resolves it directly even though the session is hidden from the list.
+    /// Absent for agents whose sub-agents have no separate session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_session_id: Option<String>,
 }
 
 /// Image payload shared by content blocks and ACP wire events.

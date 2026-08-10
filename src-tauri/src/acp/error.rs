@@ -46,6 +46,17 @@ pub enum AcpError {
     InitializeTimeout,
     #[error("Agent did not publish its configurable options within 60 seconds. The probe was aborted; the agent may be slow, idle, or not ACP-compliant — try again or check the agent binary.")]
     ProbeTimedOut,
+    /// `session/new` failed on a **custom** agent that codeg had just handed
+    /// MCP servers on the wire. That is the exact failure
+    /// `CustomAgentDef::supports_mcp` exists to let the user avoid: an
+    /// arbitrary third-party ACP binary may reject a non-empty `mcpServers`
+    /// outright and never open a session.
+    ///
+    /// codeg cannot distinguish this from an unrelated `session/new` failure,
+    /// so it is a *hint*, not a diagnosis — the payload stays the agent's own
+    /// message and the frontend renders the suggestion alongside it.
+    #[error("{0}")]
+    McpRejectedByAgent(String),
 }
 
 impl AcpError {
@@ -61,6 +72,13 @@ impl AcpError {
         }
 
         Self::Protocol(sanitized)
+    }
+
+    /// [`Self::McpRejectedByAgent`] with the same sanitization
+    /// [`Self::protocol`] applies — the agent's message is still shown, so it
+    /// must not leak local paths or spawn metadata either.
+    pub fn mcp_rejected(raw: impl Into<String>) -> Self {
+        Self::McpRejectedByAgent(sanitize_protocol_message(&raw.into()))
     }
 
     /// Stable machine-readable identifier for this error kind.
@@ -83,6 +101,7 @@ impl AcpError {
             Self::SpawnFailed(_) => Some("spawn_failed"),
             Self::DownloadFailed(_) => Some("download_failed"),
             Self::ConnectionNotFound(_) => Some("connection_not_found"),
+            Self::McpRejectedByAgent(_) => Some("mcp_rejected_by_agent"),
             Self::Protocol(_) => None,
         }
     }

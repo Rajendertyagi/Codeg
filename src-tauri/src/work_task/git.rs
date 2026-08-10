@@ -234,6 +234,127 @@ pub async fn diff_numstat(
     Ok(files)
 }
 
+/// Tip commit of a LOCAL branch (`refs/heads/<name>`), or `None` when no such
+/// branch exists. Deliberately not `rev-parse <name>`: an unqualified name is
+/// resolved with tags taking precedence over branches, so a same-name tag
+/// would silently answer for the branch. `for-each-ref` looks the ref up fully
+/// qualified, and a missing branch is a clean empty result instead of an exit
+/// code shared with real failures — callers can tell "absent" from "probe
+/// broke".
+pub async fn local_branch_tip(
+    repo_path: &str,
+    branch: &str,
+) -> Result<Option<String>, AppCommandError> {
+    let refname = format!("refs/heads/{branch}");
+    let out = run_git(
+        repo_path,
+        &["for-each-ref", "--format=%(refname)\t%(objectname)", &refname],
+    )
+    .await?;
+    if !out.status.success() {
+        return Err(git_command_error("for-each-ref", &out.stderr));
+    }
+    // The pattern also matches refs UNDER `refs/heads/<name>/` — filter to the
+    // exact ref so a branch named `<name>/sub` cannot answer for `<name>`.
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some((name, oid)) = line.split_once('\t') {
+            if name == refname && !oid.trim().is_empty() {
+                return Ok(Some(oid.trim().to_string()));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Re-create the checkout of an EXISTING branch after its worktree directory
+/// disappeared (`git worktree add <path> <branch>`, no `-b`). Prunes stale
+/// registrations first: the vanished directory usually still holds the branch
+/// checked out in git's bookkeeping, and a checked-out branch cannot be added
+/// again.
+pub async fn worktree_add_existing_branch(
+    repo_path: &str,
+    worktree_path: &str,
+    branch: &str,
+) -> Result<(), AppCommandError> {
+    let prune = run_git(repo_path, &["worktree", "prune"]).await?;
+    if !prune.status.success() {
+        return Err(git_command_error("worktree prune", &prune.stderr));
+    }
+    let out = run_git(repo_path, &["worktree", "add", worktree_path, branch]).await?;
+    if !out.status.success() {
+        return Err(git_command_error("worktree add", &out.stderr));
+    }
+    // `worktree add <path> <name>` falls back to a DETACHED checkout when
+    // `<name>` is not a local branch (a same-name tag, say). A detached task
+    // worktree would collect commits nothing points to while the merge targets
+    // the wrong ref — verify the checkout is attached to the branch, and back
+    // the add out when it is not. The FULL ref, not `--short`: when a
+    // same-name tag exists alongside the branch, `--short` disambiguates to
+    // `heads/<name>` and a plain name comparison would throw away a perfectly
+    // valid recovery.
+    let head = run_git(worktree_path, &["symbolic-ref", "--quiet", "HEAD"]).await?;
+    let attached = head.status.success()
+        && String::from_utf8_lossy(&head.stdout).trim() == format!("refs/heads/{branch}");
+    if !attached {
+        let _ = run_git(repo_path, &["worktree", "remove", "--force", worktree_path]).await;
+        return Err(AppCommandError::external_command(
+            "worktree add produced a detached checkout instead of the branch",
+            branch.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Whether the LOCAL branch still holds work the base never received — the
+/// guard that keeps the convergence of a MISSING worktree from deleting real
+/// commits with `branch -D`. True ⟺ the branch exists and its tip is neither
+/// an ancestor of the base ref nor tree-equal to it (the two shapes a landed
+/// merge takes). The base ref is the base branch's CURRENT tip when that
+/// branch still exists, else the recorded base sha. Every ref is resolved
+/// fully qualified and compared as commit ids — an unqualified name would let
+/// a same-name tag answer for the branch and clear unlanded work for
+/// deletion. A probe that errors reads as "holds work": deletion is the
+/// irreversible half, so uncertainty keeps the branch.
+pub async fn branch_holds_unlanded_work(
+    repo_path: &str,
+    branch: &str,
+    base_branch: Option<&str>,
+    base_sha: Option<&str>,
+) -> bool {
+    let tip = match local_branch_tip(repo_path, branch).await {
+        Ok(Some(tip)) => tip,
+        Ok(None) => return false, // no branch, nothing a deletion could destroy
+        Err(_) => return true,
+    };
+    let mut base_ref = None;
+    if let Some(base_branch) = base_branch {
+        match local_branch_tip(repo_path, base_branch).await {
+            Ok(Some(t)) => base_ref = Some(t),
+            Ok(None) => {} // base branch deleted — the recorded sha still anchors
+            Err(_) => return true,
+        }
+    }
+    if base_ref.is_none() {
+        if let Some(sha) = base_sha {
+            if rev_parse(repo_path, sha).await.is_ok() {
+                base_ref = Some(sha.to_string());
+            }
+        }
+    }
+    let Some(base_ref) = base_ref else {
+        return true; // nothing to compare against — keep the branch
+    };
+    match is_ancestor(repo_path, &tip, &base_ref).await {
+        Ok(true) => return false, // merged (or never diverged)
+        Ok(false) => {}
+        Err(_) => return true,
+    }
+    match trees_equal(repo_path, &base_ref, &tip).await {
+        Ok(equal) => !equal, // tree-equal = squash-landed
+        Err(_) => true,
+    }
+}
+
 /// Remove a task worktree directory + its branch. Runs from the project repo.
 /// Tolerant of a directory already gone (prunes the stale registration) and of
 /// a branch already deleted; `-D` is required because a squash-landed branch is
@@ -331,5 +452,179 @@ mod tests {
             "untracked files are invisible to the base diff"
         );
         assert!(has_changes(path).await.expect("status"));
+    }
+
+    /// The branch guard behind converging a missing worktree: unlanded commits
+    /// keep the branch, and both landed shapes (merge ancestry, squash tree
+    /// equality) release it.
+    #[tokio::test]
+    async fn unlanded_branch_work_is_recognized_in_the_root_repo() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_str().expect("utf-8 path");
+        git_run(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("a.txt"), "one\n").expect("write");
+        git_run(dir.path(), &["add", "-A"]);
+        git_run(dir.path(), &["commit", "-q", "-m", "base"]);
+        let base_sha = rev_parse(path, "HEAD").await.expect("base sha");
+
+        // A branch that never diverged has nothing a deletion could destroy.
+        git_run(dir.path(), &["branch", "task/1"]);
+        assert!(!branch_holds_unlanded_work(path, "task/1", Some("main"), Some(&base_sha)).await);
+        // Neither does a branch that no longer exists.
+        assert!(!branch_holds_unlanded_work(path, "task/9", Some("main"), Some(&base_sha)).await);
+
+        // Commit on the branch → unlanded work, whichever base ref resolves.
+        git_run(dir.path(), &["checkout", "-q", "task/1"]);
+        std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").expect("write");
+        git_run(dir.path(), &["commit", "-qam", "work"]);
+        git_run(dir.path(), &["checkout", "-q", "main"]);
+        assert!(branch_holds_unlanded_work(path, "task/1", Some("main"), Some(&base_sha)).await);
+        assert!(branch_holds_unlanded_work(path, "task/1", None, Some(&base_sha)).await);
+        // No resolvable base at all → conservative: keep.
+        assert!(branch_holds_unlanded_work(path, "task/1", Some("gone"), None).await);
+
+        // A squash landing leaves no ancestry, but the trees match.
+        git_run(dir.path(), &["merge", "-q", "--squash", "task/1"]);
+        git_run(dir.path(), &["commit", "-qm", "landed as squash"]);
+        assert!(!branch_holds_unlanded_work(path, "task/1", Some("main"), Some(&base_sha)).await);
+
+        // A merge landing is plain ancestry — even after main moves on.
+        git_run(dir.path(), &["checkout", "-q", "task/1"]);
+        std::fs::write(dir.path().join("b.txt"), "more\n").expect("write");
+        git_run(dir.path(), &["add", "-A"]);
+        git_run(dir.path(), &["commit", "-qm", "more work"]);
+        git_run(dir.path(), &["checkout", "-q", "main"]);
+        assert!(branch_holds_unlanded_work(path, "task/1", Some("main"), Some(&base_sha)).await);
+        git_run(dir.path(), &["merge", "-q", "--no-ff", "-m", "land", "task/1"]);
+        assert!(!branch_holds_unlanded_work(path, "task/1", Some("main"), Some(&base_sha)).await);
+    }
+
+    /// A same-name TAG must never answer for the branch: unqualified
+    /// resolution prefers tags, and both halves of the missing-worktree story
+    /// would go wrong on it — the deletion guard would read the tag's landed
+    /// commit and clear real work for `branch -D`, and the recovery add would
+    /// produce a detached checkout of the tag.
+    #[tokio::test]
+    async fn a_same_name_tag_cannot_shadow_the_branch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).expect("mkdir");
+        let repo_path = repo.to_str().expect("utf-8 path");
+        git_run(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write");
+        git_run(&repo, &["add", "-A"]);
+        git_run(&repo, &["commit", "-q", "-m", "base"]);
+        let base_sha = rev_parse(repo_path, "HEAD").await.expect("base sha");
+
+        // Branch with unlanded work + a tag of the same name pinned at base.
+        git_run(&repo, &["branch", "task/1"]);
+        git_run(&repo, &["tag", "task/1", &base_sha]);
+        git_run(&repo, &["checkout", "-q", "task/1"]);
+        std::fs::write(repo.join("a.txt"), "one\ntwo\n").expect("write");
+        git_run(&repo, &["commit", "-qam", "work"]);
+        git_run(&repo, &["checkout", "-q", "main"]);
+
+        // The qualified probe sees the branch tip, not the tag's base commit.
+        let tip = local_branch_tip(repo_path, "task/1")
+            .await
+            .expect("probe")
+            .expect("branch exists");
+        assert_ne!(tip, base_sha, "the probe must not resolve the tag");
+        assert!(
+            branch_holds_unlanded_work(repo_path, "task/1", Some("main"), Some(&base_sha)).await,
+            "the tag at base must not clear the branch's unlanded commit for deletion"
+        );
+
+        // With BOTH the branch and the tag present, recovery must still work:
+        // git attaches the checkout to the branch, and the attachment check
+        // must recognize it even though `symbolic-ref --short` would
+        // disambiguate the name to `heads/task/1` here.
+        let wt_both = dir.path().join("repo-task-1-both");
+        let wt_both_path = wt_both.to_str().expect("utf-8 path");
+        worktree_add_existing_branch(repo_path, wt_both_path, "task/1")
+            .await
+            .expect("recovery with a shadowing tag present");
+        assert_eq!(
+            rev_parse(wt_both_path, "HEAD").await.expect("head"),
+            tip,
+            "the recovered checkout is the branch tip, not the tag"
+        );
+        git_run(&repo, &["worktree", "remove", "--force", wt_both_path]);
+
+        // With the branch gone the tag still exists — recovery must refuse
+        // rather than hand back a detached checkout of the tag.
+        git_run(&repo, &["branch", "-D", "task/1"]);
+        assert!(local_branch_tip(repo_path, "task/1")
+            .await
+            .expect("probe")
+            .is_none());
+        assert!(
+            !branch_holds_unlanded_work(repo_path, "task/1", Some("main"), Some(&base_sha)).await
+        );
+        let wt = dir.path().join("repo-task-1");
+        let wt_path = wt.to_str().expect("utf-8 path");
+        assert!(
+            worktree_add_existing_branch(repo_path, wt_path, "task/1")
+                .await
+                .is_err(),
+            "a tag-only add must fail instead of leaving a detached worktree"
+        );
+        assert!(!wt.exists(), "the refused detached checkout is backed out");
+    }
+
+    /// Probe failures keep the branch: an unreadable repo must not read as
+    /// "nothing to lose" on the path that ends in `branch -D`.
+    #[tokio::test]
+    async fn a_broken_probe_keeps_the_branch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_repo = dir.path().to_str().expect("utf-8 path");
+        assert!(local_branch_tip(not_a_repo, "task/1").await.is_err());
+        assert!(branch_holds_unlanded_work(not_a_repo, "task/1", Some("main"), None).await);
+    }
+
+    /// A retry after the checkout was removed must get the SAME branch back,
+    /// prior commits included — not a fresh tree on a fresh base.
+    #[tokio::test]
+    async fn a_vanished_checkout_is_recreated_from_its_branch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).expect("mkdir");
+        let repo_path = repo.to_str().expect("utf-8 path");
+        git_run(&repo, &["init", "-q", "-b", "main"]);
+        // `git_run` nulls the global/system config, but the checkout below is
+        // made by `worktree_add_existing_branch` — a production git call that
+        // inherits the host's. Git for Windows ships `core.autocrlf=true`, so
+        // without a repo-local pin the restored file comes back CRLF and the
+        // content assertion at the end reads as a data loss it isn't.
+        git_run(&repo, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write");
+        git_run(&repo, &["add", "-A"]);
+        git_run(&repo, &["commit", "-q", "-m", "base"]);
+
+        let wt = dir.path().join("repo-task-1");
+        let wt_path = wt.to_str().expect("utf-8 path");
+        git_run(&repo, &["worktree", "add", "-q", "-b", "task/1", wt_path]);
+        std::fs::write(wt.join("a.txt"), "one\ntwo\n").expect("write");
+        git_run(&wt, &["commit", "-qam", "work"]);
+        let tip = rev_parse(wt_path, "HEAD").await.expect("tip");
+
+        // The directory vanishes behind git's back (the user deleted it).
+        std::fs::remove_dir_all(&wt).expect("rm worktree");
+        worktree_add_existing_branch(repo_path, wt_path, "task/1")
+            .await
+            .expect("recreate");
+        // Same branch, same history, work restored on disk — and ATTACHED to
+        // the branch, not a detached checkout of its tip.
+        assert_eq!(rev_parse(wt_path, "HEAD").await.expect("head"), tip);
+        let head = std::process::Command::new("git")
+            .args(["symbolic-ref", "--short", "HEAD"])
+            .current_dir(&wt)
+            .output()
+            .expect("spawn git");
+        assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "task/1");
+        assert_eq!(
+            std::fs::read_to_string(wt.join("a.txt")).expect("read"),
+            "one\ntwo\n"
+        );
     }
 }

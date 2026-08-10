@@ -142,7 +142,12 @@ pub struct GitStatusEntry {
 pub struct GitBranchList {
     pub local: Vec<String>,
     pub remote: Vec<String>,
+    /// Branches checked out in some *other* worktree than the queried path.
     pub worktree_branches: Vec<String>,
+    /// The branch checked out in the repo's main working tree, when that is not
+    /// the queried path itself. It appears in `worktree_branches` like any other
+    /// — but its checkout is the repo, so it can neither be deleted nor removed.
+    pub main_worktree_branch: Option<String>,
 }
 
 /// Where a given branch is checked out, resolved against the registered folders.
@@ -155,6 +160,21 @@ pub struct GitBranchList {
 pub struct WorktreeResolution {
     pub path: Option<String>,
     pub folder_id: Option<i32>,
+}
+
+/// What [`git_remove_worktree_core`] actually did, so the caller can report it
+/// without re-probing git.
+#[derive(Debug, Serialize)]
+pub struct GitWorktreeRemoval {
+    /// The worktree directory that was removed — `None` when the branch had no
+    /// registered worktree left (a retry after a partially applied removal).
+    pub worktree_path: Option<String>,
+    /// Whether the branch was deleted too (always `false` when not requested).
+    pub branch_deleted: bool,
+    /// The registered folder dropped along with the directory, if there was one.
+    pub folder_id: Option<i32>,
+    /// Conversations re-parented onto the project folder by that drop.
+    pub reparented: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -2628,38 +2648,37 @@ pub async fn git_list_all_branches(path: String) -> Result<GitBranchList, AppCom
         _ => vec![],
     };
 
-    // Parse worktree entries, excluding the current worktree (path itself)
-    let worktree_branches: Vec<String> = match wt_output {
+    // Worktree entries, excluding the queried path's own checkout. git reports
+    // the main working tree first, which is how it is singled out here.
+    let (worktree_branches, main_worktree_branch) = match wt_output {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let canonical_path =
                 std::fs::canonicalize(&path).unwrap_or_else(|_| PathBuf::from(&path));
             let mut branches = Vec::new();
-            let mut current_wt_path: Option<String> = None;
-            for line in stdout.lines() {
-                if let Some(wt) = line.strip_prefix("worktree ") {
-                    current_wt_path = Some(wt.trim().to_string());
-                } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
-                    if let Some(ref wt) = current_wt_path {
-                        let wt_canonical =
-                            std::fs::canonicalize(wt).unwrap_or_else(|_| PathBuf::from(wt));
-                        if wt_canonical != canonical_path {
-                            branches.push(b.trim().to_string());
-                        }
-                    }
-                } else if line.is_empty() {
-                    current_wt_path = None;
+            let mut main_branch = None;
+            for (index, (wt_path, branch)) in parse_worktrees(&stdout).into_iter().enumerate() {
+                let Some(branch) = branch else { continue };
+                let wt_canonical =
+                    std::fs::canonicalize(&wt_path).unwrap_or_else(|_| PathBuf::from(&wt_path));
+                if wt_canonical == canonical_path {
+                    continue;
                 }
+                if index == 0 {
+                    main_branch = Some(branch.clone());
+                }
+                branches.push(branch);
             }
-            branches
+            (branches, main_branch)
         }
-        _ => vec![],
+        _ => (vec![], None),
     };
 
     Ok(GitBranchList {
         local,
         remote,
         worktree_branches,
+        main_worktree_branch,
     })
 }
 
@@ -2733,23 +2752,30 @@ pub async fn resolve_worktree_folder_core(
     };
 
     let canonical_wt = std::fs::canonicalize(&wt_path).unwrap_or_else(|_| PathBuf::from(&wt_path));
-
-    let folders = folder_service::list_all_folder_details(&db.conn)
-        .await
-        .map_err(AppCommandError::from)?;
-    let folder_id = folders
-        .into_iter()
-        .find(|f| {
-            let canon =
-                std::fs::canonicalize(&f.path).unwrap_or_else(|_| PathBuf::from(&f.path));
-            canon == canonical_wt
-        })
-        .map(|f| f.id);
+    let folder_id = folder_at_path(db, &canonical_wt).await?.map(|f| f.id);
 
     Ok(WorktreeResolution {
         path: Some(canonical_wt.to_string_lossy().to_string()),
         folder_id,
     })
+}
+
+/// The registered folder whose path points at `path`, if any. Both sides are
+/// canonicalized so a symlinked or non-canonical registration still matches the
+/// path git reports — but the folder is returned with its own recorded path,
+/// which is the one the rest of the app (and every conversation's `origin_cwd`)
+/// is written in terms of.
+async fn folder_at_path(
+    db: &AppDatabase,
+    path: &Path,
+) -> Result<Option<FolderDetail>, AppCommandError> {
+    let folders = folder_service::list_all_folder_details(&db.conn)
+        .await
+        .map_err(AppCommandError::from)?;
+    Ok(folders.into_iter().find(|f| {
+        let canon = std::fs::canonicalize(&f.path).unwrap_or_else(|_| PathBuf::from(&f.path));
+        canon == path
+    }))
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2760,6 +2786,332 @@ pub async fn resolve_worktree_folder(
     branch: String,
 ) -> Result<WorktreeResolution, AppCommandError> {
     resolve_worktree_folder_core(&db, repo_path, branch).await
+}
+
+/// Remove the git worktree that has `branch_name` checked out, optionally
+/// deleting the branch and the worktree's registered folder with it.
+///
+/// This is the only way a worktree branch can be deleted at all: `git branch -d`
+/// refuses point blank while a worktree holds the ref ("cannot delete branch 'x'
+/// used by worktree at '…'"), so the checkout has to go first.
+///
+/// Order is load-bearing and each step is tolerant of already having been done,
+/// because a partially applied removal is retried by re-calling this with
+/// `force`:
+/// 1. `worktree remove` (`--force` also discards uncommitted/untracked files).
+///    A branch with no worktree left is not an error — it is what a retry sees.
+/// 2. When `delete_branch`, the folder convergence runs *before* the branch is
+///    deleted, so a refused `branch -d` doesn't strand a folder pointing at a
+///    directory that is already gone.
+/// 3. `branch -d` (or `-D` under `force`, which a worktree branch normally needs
+///    since its commits are unmerged).
+///
+/// Refused outright while a to-do task is mid-run or mid-merge inside the
+/// worktree — `--force` would otherwise delete a live agent's working tree.
+///
+/// `source_folder_id` is the folder the caller is acting from; it only supplies
+/// the re-parent target when the worktree folder has no recorded root.
+pub async fn git_remove_worktree_core(
+    emitter: &EventEmitter,
+    db: &AppDatabase,
+    repo_path: String,
+    branch_name: String,
+    source_folder_id: i32,
+    delete_branch: bool,
+    force: bool,
+) -> Result<GitWorktreeRemoval, AppCommandError> {
+    ensure_git_repo(&repo_path)?;
+
+    let listed = crate::process::tokio_command("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&repo_path)
+        .output()
+        .await
+        .map_err(AppCommandError::io)?;
+    if !listed.status.success() {
+        return Err(git_command_error("worktree list", &listed.stderr));
+    }
+    let entries = parse_worktrees(&String::from_utf8_lossy(&listed.stdout));
+    // `git worktree list` always reports the main working tree first.
+    let main_path = entries.first().map(|(path, _)| path.clone());
+    let hosting = entries
+        .into_iter()
+        .find(|(_, branch)| branch.as_deref() == Some(branch_name.as_str()))
+        .map(|(path, _)| path);
+
+    let mut removal = GitWorktreeRemoval {
+        worktree_path: None,
+        branch_deleted: false,
+        folder_id: None,
+        reparented: 0,
+    };
+
+    if let Some(worktree_path) = hosting {
+        let canonical = std::fs::canonicalize(&worktree_path)
+            .unwrap_or_else(|_| PathBuf::from(&worktree_path));
+        if main_path.as_deref() == Some(worktree_path.as_str()) {
+            return Err(
+                AppCommandError::invalid_input("The main working tree cannot be removed")
+                    .with_detail(worktree_path),
+            );
+        }
+        // Removing the tree the caller is working in would pull the ground out
+        // from under the open session; git's own refusal is less legible.
+        let canonical_repo =
+            std::fs::canonicalize(&repo_path).unwrap_or_else(|_| PathBuf::from(&repo_path));
+        if canonical == canonical_repo {
+            return Err(AppCommandError::invalid_input(
+                "The worktree currently in use cannot be removed",
+            )
+            .with_detail(worktree_path));
+        }
+
+        // Resolve the folder while the directory still exists — canonicalizing
+        // its path afterwards would no longer match anything.
+        let wt_folder = folder_at_path(db, &canonical).await?;
+
+        // A to-do task mid-run or mid-merge is working inside this directory:
+        // removing it (and `--force` would) yanks the tree out from under a live
+        // agent. The task card's own removal refuses the same statuses.
+        if let Some(folder) = &wt_folder {
+            let busy = crate::db::service::work_task_service::tasks_blocking_worktree_removal(
+                &db.conn, folder.id,
+            )
+            .await
+            .map_err(AppCommandError::from)?;
+            if !busy.is_empty() {
+                return Err(AppCommandError::invalid_input(
+                    "A to-do task is still working in this worktree — cancel or finish it first",
+                )
+                .with_detail(busy.join(", ")));
+            }
+        }
+
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(&worktree_path);
+        let removed = crate::process::tokio_command("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .output()
+            .await
+            .map_err(AppCommandError::io)?;
+        if !removed.status.success() {
+            if Path::new(&worktree_path).exists() {
+                return Err(git_command_error("worktree remove", &removed.stderr));
+            }
+            // The directory was deleted behind git's back — drop the stale
+            // registration so it can't block the branch delete below.
+            let pruned = crate::process::tokio_command("git")
+                .args(["worktree", "prune"])
+                .current_dir(&repo_path)
+                .output()
+                .await
+                .map_err(AppCommandError::io)?;
+            if !pruned.status.success() {
+                return Err(git_command_error("worktree prune", &pruned.stderr));
+            }
+        }
+        removal.worktree_path = Some(worktree_path.clone());
+
+        // Only the "delete everything" variant drops the folder: removing just
+        // the checkout is how you free a branch while keeping the workspace
+        // entry (and its sessions) for a worktree you intend to recreate. For
+        // the same reason that variant leaves a settled task's `worktree_folder_id`
+        // pointing here — recreating the directory makes the link whole again,
+        // and detaching it now would cost the task its merge path.
+        if delete_branch {
+            if let Some(wt_folder) = wt_folder {
+                if let Some(project_folder_id) =
+                    reparent_target(db, wt_folder.id, source_folder_id).await
+                {
+                    // Stamp `origin_cwd` with the folder's OWN path, not git's
+                    // canonicalization of it: the agents that fall back to
+                    // matching on `origin_cwd ?? folder.path` were pointed at
+                    // the registered spelling, and a `/private/var` vs `/var`
+                    // rewrite would silently stop matching.
+                    removal.reparented = converge_removed_worktree_folder(
+                        db,
+                        emitter,
+                        wt_folder.id,
+                        project_folder_id,
+                        &wt_folder.path,
+                    )
+                    .await;
+                    removal.folder_id = Some(wt_folder.id);
+                }
+            }
+        }
+    }
+
+    if delete_branch {
+        let flag = if force { "-D" } else { "-d" };
+        let deleted = crate::process::tokio_command("git")
+            .args(["branch", flag, &branch_name])
+            .current_dir(&repo_path)
+            .output()
+            .await
+            .map_err(AppCommandError::io)?;
+        if !deleted.status.success() {
+            // "not found" means an earlier attempt already got it.
+            let stderr = String::from_utf8_lossy(&deleted.stderr).to_lowercase();
+            if !stderr.contains("not found") {
+                return Err(git_command_error(
+                    &format!("branch {flag}"),
+                    &deleted.stderr,
+                ));
+            }
+        }
+        removal.branch_deleted = true;
+    }
+
+    Ok(removal)
+}
+
+/// Where a removed worktree folder's conversations belong: the root repo folder
+/// it was created from, falling back to the caller's own root when the row has
+/// no recorded parent. `None` means there is nowhere safe to move them, and the
+/// caller must leave the folder alone rather than orphan its sessions.
+async fn reparent_target(
+    db: &AppDatabase,
+    worktree_folder_id: i32,
+    source_folder_id: i32,
+) -> Option<i32> {
+    let recorded = folder_service::get_folder_by_id(&db.conn, worktree_folder_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|f| f.parent_id);
+    let target = match recorded {
+        Some(parent_id) => Some(parent_id),
+        None if source_folder_id > 0 => folder_service::get_folder_by_id(&db.conn, source_folder_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|source| source.parent_id.unwrap_or(source.id)),
+        None => None,
+    };
+    target.filter(|id| *id != worktree_folder_id)
+}
+
+/// Converge DB + clients once a worktree directory is off disk: its
+/// conversations move to `project_folder_id` (stamped with `origin_cwd` so
+/// history still resolves), its tabs close, its folder row is soft-deleted, any
+/// to-do task pointing at it is detached, and every client is told. Returns the
+/// number of conversations moved.
+///
+/// Write order matters — conversations first, so they are never left pointing at
+/// a folder that has already vanished — and each step ends in a broadcast,
+/// because a removal no client hears about is a removal no client shows: the
+/// sidebar keeps the dead worktree until the next full `fetchFolders`.
+///
+/// The work-task engine runs the same sequence for the worktree it minted
+/// (`converge_worktree_removal`), wrapped in its own task bookkeeping.
+async fn converge_removed_worktree_folder(
+    db: &AppDatabase,
+    emitter: &EventEmitter,
+    worktree_folder_id: i32,
+    project_folder_id: i32,
+    worktree_path: &str,
+) -> u32 {
+    use crate::db::service::{conversation_service, tab_service, work_task_service};
+
+    let moved = conversation_service::reparent_folder_conversations(
+        &db.conn,
+        worktree_folder_id,
+        project_folder_id,
+        worktree_path,
+    )
+    .await
+    .unwrap_or(0) as u32;
+
+    match tab_service::delete_folder_tabs_and_bump(&db.conn, worktree_folder_id).await {
+        Ok(inv) => {
+            if let Some(tabs) = inv.emit {
+                crate::web::event_bridge::emit_event(
+                    emitter,
+                    crate::web::event_bridge::TABS_CHANGED_EVENT,
+                    crate::web::event_bridge::TabsChanged {
+                        version: inv.version,
+                        origin: "server".to_string(),
+                        tabs,
+                    },
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!("[folders] tab cleanup failed for folder {worktree_folder_id}: {e}")
+        }
+    }
+
+    // Announce the folder drop only when the row really is gone, so a failed
+    // write can't leave clients disagreeing with what a refetch would return.
+    let folder_gone = match folder_service::soft_delete_folder(&db.conn, worktree_folder_id).await {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("[folders] worktree folder {worktree_folder_id} soft-delete failed: {e}");
+            false
+        }
+    };
+
+    // A settled to-do task may own this worktree (its card offers a cleanup and
+    // a diff that would now only fail). The engine detaches the ones it removes
+    // itself; this detaches the ones removed out from under it.
+    let detached = work_task_service::clear_worktree_by_folder(&db.conn, worktree_folder_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("[folders] task detach failed for folder {worktree_folder_id}: {e}");
+            Vec::new()
+        });
+
+    // Conversations first: this starts every client's refetch, so the moved rows
+    // have the shortest possible window with no folder to render under.
+    crate::web::event_bridge::emit_event(
+        emitter,
+        crate::web::event_bridge::CONVERSATIONS_BULK_CHANGED_EVENT,
+        crate::web::event_bridge::ConversationsBulkChanged {
+            imported: 0,
+            updated: moved,
+            folder_ids: vec![project_folder_id],
+        },
+    );
+    if folder_gone {
+        emit_folder_deleted(emitter, worktree_folder_id);
+    }
+    for task_id in detached {
+        crate::web::event_bridge::emit_event(
+            emitter,
+            crate::web::event_bridge::WORK_TASK_CHANGED_EVENT,
+            crate::web::event_bridge::WorkTaskChange::Upsert { id: task_id },
+        );
+    }
+    crate::office_watch::stop_office_watches_under_root(worktree_path);
+    moved
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn git_remove_worktree(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    path: String,
+    branch_name: String,
+    source_folder_id: i32,
+    delete_branch: bool,
+    force: bool,
+) -> Result<GitWorktreeRemoval, AppCommandError> {
+    git_remove_worktree_core(
+        &EventEmitter::Tauri(app),
+        &db,
+        path,
+        branch_name,
+        source_folder_id,
+        delete_branch,
+        force,
+    )
+    .await
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -6111,6 +6463,335 @@ mod tests {
             wt.parent_id, None,
             "non-positive / unknown source degrades to a top-level folder"
         );
+    }
+
+    /// A repo with one commit on `main` plus a linked worktree at `<dir>/wt`
+    /// holding branch `wt`. Returns `(tempdir, repo_path, worktree_path)`.
+    fn repo_with_worktree() -> (tempfile::TempDir, String, String) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git_run(dir.path(), &["init", "-q", "-b", "main"]);
+        git_run(dir.path(), &["commit", "-q", "--allow-empty", "-m", "base"]);
+        let wt_path = dir.path().join("wt");
+        let wt_str = wt_path.to_str().expect("utf-8 path").to_string();
+        git_run(dir.path(), &["worktree", "add", "-q", "-b", "wt", &wt_str]);
+        let repo = dir.path().to_str().expect("utf-8 path").to_string();
+        (dir, repo, wt_str)
+    }
+
+    fn test_emitter() -> EventEmitter {
+        EventEmitter::test_web_only(std::sync::Arc::new(
+            crate::web::event_bridge::WebEventBroadcaster::new(),
+        ))
+    }
+
+    /// Spell a path git printed and one we resolved ourselves the same way
+    /// before comparing them. git reports the fully resolved location (on
+    /// macOS `/var` is a symlink into `/private/var`) with `/` separators,
+    /// while `fs::canonicalize` on Windows hands back the verbatim
+    /// `\\?\C:\…` form of what git prints as `C:/…`. Resolve, drop the
+    /// verbatim prefix, settle on forward slashes.
+    fn comparable_path(path: &str) -> String {
+        let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+        crate::paths::simplify_verbatim_path(&resolved)
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    /// The bug this command exists for: git flatly refuses to delete a branch a
+    /// worktree has checked out, so the branch selector's "delete branch" could
+    /// only ever report an error. Removing the checkout first is the fix.
+    #[tokio::test]
+    async fn remove_worktree_deletes_a_branch_plain_delete_cannot() {
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, wt_path) = repo_with_worktree();
+
+        let refused = git_delete_branch(repo.clone(), "wt".into(), false)
+            .await
+            .expect_err("git refuses a branch held by a worktree");
+        assert!(
+            format!("{refused:?}").contains("used by worktree"),
+            "expected git's worktree refusal, got: {refused:?}"
+        );
+
+        // Resolve ours the way git resolves its own — while the directory is
+        // still there to resolve.
+        let canonical_wt = comparable_path(&wt_path);
+
+        let removal = git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo.clone(),
+            "wt".into(),
+            0,
+            true,
+            false,
+        )
+        .await
+        .expect("worktree + branch removal");
+
+        assert_eq!(
+            removal.worktree_path.as_deref().map(comparable_path),
+            Some(canonical_wt),
+            "reports the directory it removed"
+        );
+        assert!(removal.branch_deleted);
+        assert!(!Path::new(&wt_path).exists(), "worktree directory is gone");
+        let branches = git_list_all_branches(repo).await.expect("branches");
+        assert_eq!(branches.local, vec!["main".to_string()]);
+        assert!(branches.worktree_branches.is_empty());
+    }
+
+    /// The "worktree only" variant frees the checkout but is not a branch
+    /// delete: the commits — and the workspace folder you may want to recreate
+    /// the worktree under — survive.
+    #[tokio::test]
+    async fn remove_worktree_without_branch_keeps_branch_and_folder() {
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, wt_path) = repo_with_worktree();
+        let root = open_folder_core(&db, repo.clone()).await.expect("root");
+        let wt_folder = open_worktree_folder_core(&db, wt_path.clone(), root.id)
+            .await
+            .expect("worktree folder");
+
+        let removal = git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo.clone(),
+            "wt".into(),
+            root.id,
+            false,
+            false,
+        )
+        .await
+        .expect("worktree removal");
+
+        assert!(!removal.branch_deleted);
+        assert_eq!(removal.folder_id, None);
+        assert!(!Path::new(&wt_path).exists());
+        let branches = git_list_all_branches(repo).await.expect("branches");
+        assert!(
+            branches.local.contains(&"wt".to_string()),
+            "the branch outlives its worktree"
+        );
+        assert!(
+            folder_service::get_folder_by_id(&db.conn, wt_folder.id)
+                .await
+                .expect("lookup")
+                .is_some(),
+            "the workspace folder outlives its worktree"
+        );
+    }
+
+    /// Deleting everything also drops the workspace folder — and its sessions
+    /// have to land somewhere first, or they are orphaned under a folder no
+    /// client can fetch.
+    #[tokio::test]
+    async fn remove_worktree_with_branch_rehomes_sessions_then_drops_the_folder() {
+        use crate::db::service::conversation_service;
+        use crate::models::agent::AgentType;
+
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, wt_path) = repo_with_worktree();
+        let root = open_folder_core(&db, repo.clone()).await.expect("root");
+        let wt_folder = open_worktree_folder_core(&db, wt_path.clone(), root.id)
+            .await
+            .expect("worktree folder");
+        let conv =
+            conversation_service::create(&db.conn, wt_folder.id, AgentType::ClaudeCode, None, None)
+                .await
+                .expect("conversation");
+
+        let removal = git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo,
+            "wt".into(),
+            root.id,
+            true,
+            false,
+        )
+        .await
+        .expect("worktree + branch removal");
+
+        assert_eq!(removal.folder_id, Some(wt_folder.id));
+        assert_eq!(removal.reparented, 1);
+        assert!(
+            folder_service::get_folder_by_id(&db.conn, wt_folder.id)
+                .await
+                .expect("lookup")
+                .is_none(),
+            "the workspace folder goes with the branch"
+        );
+        let moved = conversation_service::get_by_id(&db.conn, conv.id)
+            .await
+            .expect("conversation row");
+        assert_eq!(moved.folder_id, root.id);
+        assert_eq!(
+            moved.origin_cwd.as_deref(),
+            Some(wt_path.as_str()),
+            "the session remembers where it actually ran"
+        );
+    }
+
+    /// Seed a to-do task that owns `wt_folder_id` as its worktree.
+    async fn seed_task_on_worktree(
+        db: &AppDatabase,
+        project_folder_id: i32,
+        wt_folder_id: i32,
+    ) -> i32 {
+        use crate::db::service::work_task_service;
+
+        let task = work_task_service::create(
+            &db.conn,
+            crate::models::WorkTaskDraft {
+                folder_id: project_folder_id,
+                title: "fix login".to_string(),
+                config: serde_json::json!({
+                    "display_text": "fix login",
+                    "prompt_blocks": [{ "type": "text", "text": "fix login" }],
+                }),
+            },
+        )
+        .await
+        .expect("task");
+        work_task_service::attach_worktree(&db.conn, task.id, wt_folder_id, "main", "abc", "wt")
+            .await
+            .expect("attach worktree");
+        task.id
+    }
+
+    /// The branch selector cannot tell a to-do task's worktree from any other,
+    /// so a task that has settled must not be left advertising a checkout that
+    /// is gone — its card would offer a cleanup and a diff that can only fail.
+    #[tokio::test]
+    async fn remove_worktree_detaches_the_task_that_owned_it() {
+        use crate::db::service::work_task_service;
+
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, wt_path) = repo_with_worktree();
+        let root = open_folder_core(&db, repo.clone()).await.expect("root");
+        let wt_folder = open_worktree_folder_core(&db, wt_path.clone(), root.id)
+            .await
+            .expect("worktree folder");
+        let task_id = seed_task_on_worktree(&db, root.id, wt_folder.id).await;
+
+        git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo,
+            "wt".into(),
+            root.id,
+            true,
+            false,
+        )
+        .await
+        .expect("worktree + branch removal");
+
+        let after = work_task_service::get_model(&db.conn, task_id)
+            .await
+            .expect("task row");
+        assert_eq!(after.worktree_folder_id, None);
+    }
+
+    /// A task mid-run is working inside that directory right now. `--force`
+    /// would happily delete it out from under the live agent, so the refusal
+    /// has to come before git is asked — exactly as the task card's own
+    /// "remove worktree" refuses these statuses.
+    #[tokio::test]
+    async fn remove_worktree_refuses_while_a_task_is_running_in_it() {
+        use crate::db::entities::work_task::WorkTaskStatus;
+
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, wt_path) = repo_with_worktree();
+        let root = open_folder_core(&db, repo.clone()).await.expect("root");
+        let wt_folder = open_worktree_folder_core(&db, wt_path.clone(), root.id)
+            .await
+            .expect("worktree folder");
+        let task_id = seed_task_on_worktree(&db, root.id, wt_folder.id).await;
+        // Straight to `running` — the real transition chain would need a live
+        // engine, and only the status matters here.
+        {
+            use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+            let row = crate::db::entities::work_task::Entity::find_by_id(task_id)
+                .one(&db.conn)
+                .await
+                .expect("query")
+                .expect("task row");
+            let mut active = row.into_active_model();
+            active.status = Set(WorkTaskStatus::Running);
+            active.update(&db.conn).await.expect("mark running");
+        }
+
+        // Even the destructive variant, which is the one that would succeed.
+        let err = git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo.clone(),
+            "wt".into(),
+            root.id,
+            true,
+            true,
+        )
+        .await
+        .expect_err("a running task must block the removal");
+        assert!(
+            format!("{err:?}").contains("still working in this worktree"),
+            "expected a busy-task refusal, got: {err:?}"
+        );
+        assert!(Path::new(&wt_path).exists(), "the working tree survives");
+        let branches = git_list_all_branches(repo).await.expect("branches");
+        assert!(branches.local.contains(&"wt".to_string()));
+    }
+
+    /// Seen from a linked worktree, the repo's own checkout is just another
+    /// entry in `worktree_branches` — and the branch selector would offer to
+    /// remove it. Naming it separately is what lets the UI leave it alone.
+    #[tokio::test]
+    async fn list_all_branches_names_the_main_working_tree_branch() {
+        let (_dir, repo, wt_path) = repo_with_worktree();
+
+        let from_main = git_list_all_branches(repo).await.expect("from main tree");
+        assert_eq!(from_main.worktree_branches, vec!["wt".to_string()]);
+        assert_eq!(
+            from_main.main_worktree_branch, None,
+            "the queried path IS the main tree — it is not one of the others"
+        );
+
+        let from_worktree = git_list_all_branches(wt_path)
+            .await
+            .expect("from linked worktree");
+        assert_eq!(from_worktree.worktree_branches, vec!["main".to_string()]);
+        assert_eq!(
+            from_worktree.main_worktree_branch.as_deref(),
+            Some("main"),
+            "and from over here it is the one entry that can't be removed"
+        );
+    }
+
+    /// The main working tree hosts the repo itself — removing it would take the
+    /// project with it, so it is refused before git is asked.
+    #[tokio::test]
+    async fn remove_worktree_refuses_the_main_working_tree() {
+        let db = fresh_in_memory_db().await;
+        let (_dir, repo, _wt_path) = repo_with_worktree();
+
+        let err = git_remove_worktree_core(
+            &test_emitter(),
+            &db,
+            repo.clone(),
+            "main".into(),
+            0,
+            true,
+            false,
+        )
+        .await
+        .expect_err("main working tree must be refused");
+        assert!(
+            format!("{err:?}").contains("main working tree"),
+            "expected a main-working-tree refusal, got: {err:?}"
+        );
+        let branches = git_list_all_branches(repo).await.expect("branches");
+        assert!(branches.local.contains(&"main".to_string()));
     }
 
     #[test]

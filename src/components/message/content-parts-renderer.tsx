@@ -7,6 +7,7 @@ import {
 } from "@/lib/adapters/tool-kind-classifier"
 import type { MessageRole, PlanEntryInfo } from "@/lib/types"
 import {
+  aliasToolInputKeys,
   extractClaudeCodeMetaTitle,
   normalizeToolName,
 } from "@/lib/tool-call-normalization"
@@ -1117,9 +1118,11 @@ function deriveToolTitle(
     return "TodoWrite"
   }
 
-  // Skill
+  // Skill. OpenCode's native `skill` tool takes `{name}`; the other hosts pass
+  // `{skill}`, so accept either rather than falling through to a title-less
+  // generic card.
   if (name === "skill") {
-    const sk = getField("skill")
+    const sk = getField("skill") ?? getField("name")
     if (sk) return `Skill: ${sk}`
   }
 
@@ -1533,6 +1536,11 @@ function FileToolInput({
         <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {isRead ? "READ" : "WRITE"}
         </span>
+        {/* No path in the input is not worth an "unknown" placeholder: the
+            enclosing tool card's header already names the file (it derives the
+            title from the call's `title`/`locations`, which agents fill even
+            when their arguments don't). Printing "unknown" under a header that
+            says `minimal/page.tsx` only reads as a bug. */}
         {filePath ? (
           <FilePathLink
             filePath={filePath}
@@ -1541,9 +1549,7 @@ function FileToolInput({
             {filePath}
           </FilePathLink>
         ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-foreground">
-            {t("unknown")}
-          </span>
+          <span className="min-w-0 flex-1" />
         )}
         {badges.length > 0 && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
@@ -1871,7 +1877,12 @@ function StructuredToolInput({
 }) {
   const t = useTranslations("Folder.chat.contentParts")
   const name = toolName.toLowerCase()
-  const parsed = useMemo(() => tryParseJson(input), [input])
+  // Every dedicated card below reads the canonical (snake_case) argument names.
+  // The alias pass fills in the ones an agent spelled differently on the live
+  // wire — OpenCode's camelCase `filePath`/`oldString`, which its ACP adapter
+  // forwards verbatim while the history parser already rewrites them. Doing it
+  // once here rather than per card keeps Write/Read/Edit/Grep in agreement.
+  const parsed = useMemo(() => aliasToolInputKeys(tryParseJson(input)), [input])
   const truncated =
     (name === "edit" || name === "write" || name === "apply_patch") &&
     isTruncatedInput(input)

@@ -489,6 +489,33 @@ pub async fn git_delete_branch(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitRemoveWorktreeParams {
+    pub path: String,
+    pub branch_name: String,
+    pub source_folder_id: i32,
+    pub delete_branch: bool,
+    pub force: bool,
+}
+
+pub async fn git_remove_worktree(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<GitRemoveWorktreeParams>,
+) -> Result<Json<folder_commands::GitWorktreeRemoval>, AppCommandError> {
+    let result = folder_commands::git_remove_worktree_core(
+        &state.emitter,
+        &state.db,
+        params.path,
+        params.branch_name,
+        params.source_folder_id,
+        params.delete_branch,
+        params.force,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitDeleteRemoteBranchParams {
     pub path: String,
     pub remote: String,

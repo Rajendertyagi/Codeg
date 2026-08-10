@@ -383,8 +383,8 @@ fn opencode_minimal_session_snapshot() {
             .expect("open sqlite");
 
         for ddl in [
-            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, title TEXT, \
-             time_created INTEGER, time_updated INTEGER)",
+            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, \
+             title TEXT, time_created INTEGER, time_updated INTEGER)",
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, \
              time_created INTEGER, data TEXT)",
             "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, \
@@ -482,6 +482,296 @@ fn opencode_minimal_session_snapshot() {
         .get_conversation(session_id)
         .expect("get conversation");
     assert_json_snapshot!("opencode_detail", detail, {
+        ".**.started_at" => "[ts]",
+        ".**.ended_at" => "[ts]",
+        ".**.timestamp" => "[ts]",
+        ".**.completed_at" => "[ts]",
+    });
+}
+
+/// Tool calls captured verbatim from a real opencode 1.18.14 run: OpenCode
+/// spells its arguments in camelCase (`filePath`, `oldString`), keeps a failed
+/// call's message in `state.error` rather than `state.output`, wraps `read`
+/// results in an XML envelope with `N: ` line prefixes, and returns the whole
+/// SKILL.md inside `<skill_content>`. This pins the rewrite onto codeg's shared
+/// tool vocabulary, plus the sub-agent session nesting via `session.parent_id`.
+#[test]
+fn opencode_tool_call_session_snapshot() {
+    use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
+
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let base = temp.path().to_path_buf();
+    let db_path = base.join("opencode.db");
+    let session_id = "oc-tools-001";
+    let child_session_id = "oc-tools-001-child";
+
+    // 2026-03-01T10:00:00Z in milliseconds.
+    let t0: i64 = 1_772_020_800_000;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+    rt.block_on(async {
+        let conn = Database::connect(format!("sqlite:{}?mode=rwc", db_path.display()))
+            .await
+            .expect("open sqlite");
+
+        for ddl in [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, \
+             title TEXT, time_created INTEGER, time_updated INTEGER)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, \
+             time_created INTEGER, data TEXT)",
+            "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, \
+             time_created INTEGER, data TEXT)",
+        ] {
+            conn.execute(Statement::from_string(DatabaseBackend::Sqlite, ddl))
+                .await
+                .expect("create table");
+        }
+
+        for (id, parent, title) in [
+            (session_id, None, "OpenCode tool session"),
+            (
+                child_session_id,
+                Some(session_id),
+                "Inspect VERSION (@general subagent)",
+            ),
+        ] {
+            conn.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "INSERT INTO session (id, directory, parent_id, title, time_created, \
+                 time_updated) VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    id.into(),
+                    "/tmp/demo".into(),
+                    parent.into(),
+                    title.into(),
+                    t0.into(),
+                    (t0 + 9_000).into(),
+                ],
+            ))
+            .await
+            .expect("insert session");
+        }
+
+        for (mid, sid, offset, data) in [
+            (
+                "m-tools-user",
+                session_id,
+                500_i64,
+                json!({ "role": "user", "time": { "created": t0 + 500 } }),
+            ),
+            (
+                "m-tools-asst",
+                session_id,
+                1_000,
+                json!({
+                    "role": "assistant",
+                    "modelID": "claude-sonnet-4-6",
+                    "time": { "created": t0 + 1_000, "completed": t0 + 8_000 },
+                    "tokens": { "input": 400, "output": 340, "cache": { "read": 800, "write": 0 } },
+                }),
+            ),
+            (
+                "m-child-user",
+                child_session_id,
+                2_000,
+                json!({ "role": "user", "time": { "created": t0 + 2_000 } }),
+            ),
+        ] {
+            conn.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+                [
+                    mid.into(),
+                    sid.into(),
+                    (t0 + offset).into(),
+                    data.to_string().into(),
+                ],
+            ))
+            .await
+            .expect("insert message");
+        }
+
+        let parts = [
+            ("p-01", "m-tools-user", json!({ "type": "text", "text": "polish the greeting" })),
+            ("p-02", "m-tools-asst", json!({ "type": "text", "text": "Loading the skill." })),
+            ("p-03", "m-tools-asst", json!({
+                "type": "tool", "tool": "skill", "callID": "call_skill",
+                "state": {
+                    "status": "completed",
+                    "input": { "name": "demo-skill" },
+                    "output": "<skill_content name=\"demo-skill\">\n# Skill: demo-skill\n\n1. Read the target file.\n2. Apply the change.\n\nBase directory for this skill: /cfg/skills/demo-skill\nNote: file list is sampled.\n\n<skill_files>\n<file>/cfg/skills/demo-skill/run.sh</file>\n</skill_files>\n</skill_content>",
+                    "title": "Loaded skill: demo-skill",
+                    "metadata": { "name": "demo-skill", "dir": "/cfg/skills/demo-skill" },
+                    "time": { "start": t0 + 1_100, "end": t0 + 1_200 },
+                },
+            })),
+            ("p-04", "m-tools-asst", json!({
+                "type": "tool", "tool": "read", "callID": "call_read",
+                "state": {
+                    "status": "completed",
+                    "input": { "filePath": "src/app.ts" },
+                    "output": "<path>/tmp/demo/src/app.ts</path>\n<type>file</type>\n<content>\n1: export function greet(name: string) {\n2:   return `hello ${name}`\n3: }\n\n(End of file - total 3 lines)\n</content>",
+                    "metadata": {
+                        "preview": "export function greet(name: string) {",
+                        "display": {
+                            "type": "file",
+                            "path": "/tmp/demo/src/app.ts",
+                            "text": "export function greet(name: string) {\n  return `hello ${name}`\n}",
+                            "lineStart": 1,
+                            "lineEnd": 3,
+                            "totalLines": 3,
+                        },
+                    },
+                    "title": "src/app.ts",
+                    "time": { "start": t0 + 1_300, "end": t0 + 1_400 },
+                },
+            })),
+            ("p-05", "m-tools-asst", json!({
+                "type": "tool", "tool": "edit", "callID": "call_edit",
+                "state": {
+                    "status": "completed",
+                    "input": {
+                        "filePath": "src/app.ts",
+                        "oldString": "hello ${name}",
+                        "newString": "Hello, ${name}!",
+                    },
+                    "output": "Edit applied successfully.",
+                    "metadata": {
+                        "diagnostics": {},
+                        "diff": "Index: /tmp/demo/src/app.ts\n===================================================================\n--- /tmp/demo/src/app.ts\n+++ /tmp/demo/src/app.ts\n@@ -2,1 +2,1 @@\n-  return `hello ${name}`\n+  return `Hello, ${name}!`\n",
+                        "filediff": {
+                            "file": "/tmp/demo/src/app.ts",
+                            "patch": "…",
+                            "additions": 1,
+                            "deletions": 1,
+                        },
+                    },
+                    "title": "src/app.ts",
+                    "time": { "start": t0 + 1_500, "end": t0 + 1_600 },
+                },
+            })),
+            ("p-06", "m-tools-asst", json!({
+                "type": "tool", "tool": "write", "callID": "call_write",
+                "state": {
+                    "status": "completed",
+                    "input": { "filePath": "src/new.ts", "content": "export const A = 1\n" },
+                    "output": "Wrote file successfully.",
+                    "metadata": { "filepath": "/tmp/demo/src/new.ts", "exists": false },
+                    "title": "src/new.ts",
+                    "time": { "start": t0 + 1_700, "end": t0 + 1_800 },
+                },
+            })),
+            ("p-07", "m-tools-asst", json!({
+                "type": "tool", "tool": "grep", "callID": "call_grep",
+                "state": {
+                    "status": "completed",
+                    "input": { "pattern": "VERSION", "path": ".", "include": "*.ts" },
+                    "output": "Found 1 matches",
+                    "metadata": { "matches": 1 },
+                    "title": "VERSION",
+                    "time": { "start": t0 + 1_900, "end": t0 + 2_000 },
+                },
+            })),
+            ("p-08", "m-tools-asst", json!({
+                "type": "tool", "tool": "task", "callID": "call_task",
+                "state": {
+                    "status": "completed",
+                    "input": {
+                        "subagent_type": "general",
+                        "description": "Inspect VERSION",
+                        "prompt": "Find the VERSION constant and report it.",
+                    },
+                    "output": "<task id=\"oc-tools-001-child\" state=\"completed\">\n<task_result>\nVERSION is 1.0.0\n</task_result>\n</task>",
+                    "metadata": {
+                        "sessionId": child_session_id,
+                        "model": { "modelID": "claude-sonnet-4-6", "providerID": "anthropic" },
+                    },
+                    "title": "Inspect VERSION",
+                    "time": { "start": t0 + 2_100, "end": t0 + 2_600 },
+                },
+            })),
+            // Failure: the message lives in `state.error`, never `state.output`.
+            ("p-09", "m-tools-asst", json!({
+                "type": "tool", "tool": "edit", "callID": "call_edit_fail",
+                "state": {
+                    "status": "error",
+                    "input": { "filePath": "src/missing.ts", "oldString": "nope", "newString": "yep" },
+                    "error": "File /tmp/demo/src/missing.ts not found",
+                    "time": { "start": t0 + 2_700, "end": t0 + 2_800 },
+                },
+            })),
+            // OpenCode's own UI hides `patch` alongside step-start/step-finish.
+            ("p-10", "m-tools-asst", json!({
+                "type": "patch", "hash": "abc123", "files": ["/tmp/demo/src/app.ts"],
+            })),
+            ("p-11", "m-tools-asst", json!({
+                "type": "step-finish",
+                "reason": "stop",
+                "tokens": { "total": 1540, "input": 400, "output": 340, "reasoning": 0,
+                            "cache": { "read": 800, "write": 0 } },
+            })),
+            ("p-12", "m-child-user", json!({
+                "type": "text", "text": "Find the VERSION constant and report it.",
+            })),
+            // Child-session tool calls surface as `agent_stats.tool_calls`
+            // rows on the parent's Agent card (batch_load_subagent_tool_calls)
+            // and must go through the same normalization: canonical snake_case
+            // input, and `state.error` recovered for failures.
+            ("p-13", "m-child-user", json!({
+                "type": "tool", "tool": "edit", "callID": "call_child_edit",
+                "state": {
+                    "status": "completed",
+                    "input": {
+                        "filePath": "src/app.ts",
+                        "oldString": "  VERSION = \"1.0.0\"\n",
+                        "newString": "  VERSION = \"1.0.1\"\n",
+                    },
+                    "output": "Edit applied successfully.",
+                    "title": "src/app.ts",
+                    "time": { "start": t0 + 2_200, "end": t0 + 2_300 },
+                },
+            })),
+            ("p-14", "m-child-user", json!({
+                "type": "tool", "tool": "read", "callID": "call_child_read_fail",
+                "state": {
+                    "status": "error",
+                    "input": { "filePath": "src/gone.ts" },
+                    "error": "File not found: /tmp/demo/src/gone.ts",
+                    "time": { "start": t0 + 2_400, "end": t0 + 2_500 },
+                },
+            })),
+        ];
+
+        for (i, (pid, mid, data)) in parts.iter().enumerate() {
+            conn.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "INSERT INTO part (id, message_id, time_created, data) VALUES (?, ?, ?, ?)",
+                [
+                    (*pid).into(),
+                    (*mid).into(),
+                    (t0 + 1_000 + i as i64).into(),
+                    data.to_string().into(),
+                ],
+            ))
+            .await
+            .expect("insert part");
+        }
+    });
+
+    let parser = OpenCodeParser::with_base_dir(base);
+    let conversations = parser.list_conversations().expect("list conversations");
+    assert_json_snapshot!("opencode_tools_list", conversations, {
+        ".**.started_at" => "[ts]",
+        ".**.ended_at" => "[ts]",
+    });
+
+    let detail = parser
+        .get_conversation(session_id)
+        .expect("get conversation");
+    assert_json_snapshot!("opencode_tools_detail", detail, {
         ".**.started_at" => "[ts]",
         ".**.ended_at" => "[ts]",
         ".**.timestamp" => "[ts]",

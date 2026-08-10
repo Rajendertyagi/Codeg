@@ -6,20 +6,9 @@ import { BookmarkPlus, Folder, LayoutTemplate, Trash2 } from "lucide-react"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import {
-  RichComposer,
-  type RichComposerHandle,
-} from "@/components/chat/composer/rich-composer"
-import {
-  isComposerChromeClick,
-  restampSkillPrefixes,
-} from "@/components/chat/composer/composer-commands"
-import {
-  ComposerInvocationsPopup,
-  useComposerInvocations,
-} from "@/components/automations/composer-invocations"
-import { useReferenceSearch } from "@/components/chat/composer/use-reference-search"
-import { useComposerMentionLabels } from "@/components/chat/composer/use-composer-mention-labels"
-import { docToPromptBlocks } from "@/components/chat/composer/to-prompt-blocks"
+  TaskMessageComposer,
+  type TaskMessageComposerHandle,
+} from "./task-message-composer"
 import {
   AgentConfigSection,
   effectiveSelections,
@@ -55,7 +44,6 @@ import {
 } from "@/lib/api"
 import type {
   AgentType,
-  PromptInputBlock,
   WorkTask,
   WorkTaskConfig,
   WorkTaskDraft,
@@ -122,6 +110,8 @@ function TaskEditorBody({
   onCancel: () => void
 }) {
   const t = useTranslations("Tasks")
+  // The upload-in-flight message is the conversation composer's own.
+  const tChat = useTranslations("Folder.chat.messageInput")
   const folders = useAppWorkspaceStore((s) => s.folders)
   // Tasks bind to project roots only (never worktrees / chat scratch dirs).
   const projectFolders = useMemo(
@@ -160,14 +150,21 @@ function TaskEditorBody({
   const [templates, setTemplates] = useState<WorkTaskTemplate[]>([])
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [templateBusy, setTemplateBusy] = useState(false)
+  // The composer's mount seed. Blocks, not just text: an edited task's images
+  // and pasted bytes have to come back into the box, or saving it would drop
+  // them. A `key` bump remounts the box to apply a template.
   const [composerSeed, setComposerSeed] = useState(() => ({
     key: 0,
     text: task?.config?.display_text ?? seededText,
+    blocks: task?.config?.prompt_blocks ?? null,
   }))
+  // Mirrors the composer's attached-file count, so a brief that is only a
+  // screenshot still passes the "say something" gate below.
+  const [attachmentCount, setAttachmentCount] = useState(0)
   const { contentRef, onPointerDownOutside, onFocusOutside } =
     useScrollbarSafeDismiss()
 
-  const editorRef = useRef<RichComposerHandle>(null)
+  const composerRef = useRef<TaskMessageComposerHandle>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -212,40 +209,17 @@ function TaskEditorBody({
     [folders, folderId]
   )
 
-  const { groupLabels: referenceGroupLabels, uiLabels: mentionUiLabels } =
-    useComposerMentionLabels()
-  const referenceSearch = useReferenceSearch({
-    defaultPath: folderPath,
-    enabled: true,
-    labels: referenceGroupLabels,
-  })
-
   const agentOptions = useAgentOptions(agentType, folderPath, true)
-
-  // `/` slash commands (from the agent-options probe already running above)
-  // + Codex-only `$` skills, same behavior as the conversation composer.
-  const invocations = useComposerInvocations({
-    editorRef,
-    agentType,
-    folderPath,
-    availableCommands: agentOptions.snapshot?.available_commands ?? [],
-  })
-
-  // Keep inserted skill badges' trigger prefix in sync when the agent flips
-  // (`$` is Codex's trigger; every other agent advertises skills as `/`).
-  useEffect(() => {
-    const editor = editorRef.current?.getEditor()
-    if (editor) restampSkillPrefixes(editor, agentType === "codex" ? "$" : "/")
-  }, [agentType])
 
   // The captured composer + agent state as a `WorkTaskConfig` — the shared
   // payload of both the task draft and a saved template.
   const buildConfig = async (): Promise<WorkTaskConfig> => {
-    const editor = editorRef.current?.getEditor()
-    const displayText = (editorRef.current?.getText() ?? prompt).trim()
-    const blocks: PromptInputBlock[] = editor
-      ? docToPromptBlocks(editor)
-      : [{ type: "text", text: displayText }]
+    const displayText = (composerRef.current?.getText() ?? prompt).trim()
+    // Prose + inline references + attached images, exactly as a chat send
+    // composes them; the engine replays these blocks when the task launches.
+    const blocks = composerRef.current?.getPromptBlocks() ?? [
+      { type: "text", text: displayText },
+    ]
     if (!agentDirty) {
       return {
         prompt_blocks: blocks,
@@ -276,10 +250,17 @@ function TaskEditorBody({
 
   const submit = async () => {
     setError(null)
-    const displayText = (editorRef.current?.getText() ?? prompt).trim()
+    const displayText = (composerRef.current?.getText() ?? prompt).trim()
+    const hasAttachments = composerRef.current?.hasAttachments() ?? false
     if (!title.trim()) return setError(t("errorTitle"))
-    if (!displayText) return setError(t("errorPrompt"))
+    // A brief that is only a screenshot is still a brief.
+    if (!displayText && !hasAttachments) return setError(t("errorPrompt"))
     if (folderId == null) return setError(t("errorFolder"))
+    // An unsettled upload has no server-side uri yet, so the stored block would
+    // carry nothing for the launch to hydrate from.
+    if (composerRef.current?.hasUploadingImage()) {
+      return setError(tChat("attachUploadInProgress"))
+    }
 
     setSaving(true)
     try {
@@ -301,7 +282,11 @@ function TaskEditorBody({
     const text = cfg?.display_text ?? ""
     setTitle(tpl.title)
     setPrompt(text)
-    setComposerSeed((s) => ({ key: s.key + 1, text }))
+    setComposerSeed((s) => ({
+      key: s.key + 1,
+      text,
+      blocks: cfg?.prompt_blocks ?? null,
+    }))
     if (cfg?.agent_type != null) {
       setAgentDirty(true)
       setAgentType(cfg.agent_type)
@@ -318,9 +303,17 @@ function TaskEditorBody({
   // updates that template instead of piling up copies.
   const saveTemplate = async () => {
     setError(null)
-    const displayText = (editorRef.current?.getText() ?? prompt).trim()
+    const displayText = (composerRef.current?.getText() ?? prompt).trim()
     if (!title.trim()) return setError(t("errorTitle"))
-    if (!displayText) return setError(t("errorPrompt"))
+    if (!displayText && !(composerRef.current?.hasAttachments() ?? false)) {
+      return setError(t("errorPrompt"))
+    }
+    // Same gate as the save: an unsettled upload has no server-side uri, so the
+    // template would be stored with an image that resolves to nothing (or, in
+    // web mode, with raw base64 the strip could not remove).
+    if (composerRef.current?.hasUploadingImage()) {
+      return setError(tChat("attachUploadInProgress"))
+    }
     setTemplateBusy(true)
     try {
       await workTaskTemplateSave({
@@ -392,35 +385,23 @@ function TaskEditorBody({
           )}
         </div>
 
-        {/* The real conversation composer with the inline config bottom bar,
-            matching the automation editor's box. */}
-        <div
-          onMouseDown={(e) => {
-            if (!isComposerChromeClick(e.target)) return
-            e.preventDefault()
-            editorRef.current?.focusAtCoords(e.clientX, e.clientY)
-          }}
-          className="codeg-composer-chrome relative rounded-xl border border-input bg-background transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-inset focus-within:ring-ring/50"
-        >
-          <ComposerInvocationsPopup inv={invocations} />
-          <RichComposer
-            key={composerSeed.key}
-            ref={editorRef}
-            defaultText={composerSeed.text}
-            placeholder={t("promptPlaceholder")}
-            ariaLabel={t("promptLabel")}
-            referenceSearch={referenceSearch}
-            mentionUiLabels={mentionUiLabels}
-            tabLabels={referenceGroupLabels}
-            onChange={(text) => {
-              setPrompt(text)
-              invocations.detect()
-            }}
-            isExternalMenuOpen={invocations.isOpen}
-            onExternalMenuKeyDown={invocations.onKeyDown}
-            className="max-h-[14rem] min-h-[6rem]"
-          />
-          <div className="px-2 pb-2 pt-1">
+        {/* The conversation composer, whole: `@` references, `/` commands, the
+            "+" shortcuts menu and image attachments, with the ACP-probed
+            mode/model bar sharing its bottom row. Keyed by the template seed —
+            applying a blueprint replaces the draft, attachments included. */}
+        <TaskMessageComposer
+          key={composerSeed.key}
+          ref={composerRef}
+          agentType={agentType}
+          folderPath={folderPath}
+          defaultText={composerSeed.text}
+          defaultBlocks={composerSeed.blocks}
+          placeholder={t("promptPlaceholder")}
+          ariaLabel={t("promptLabel")}
+          onChange={setPrompt}
+          onAttachmentsChange={setAttachmentCount}
+          editorClassName="max-h-[14rem] min-h-[6rem]"
+          bottomBarExtra={
             <AgentConfigSection
               snapshot={agentOptions.snapshot}
               loading={agentOptions.loading}
@@ -443,8 +424,8 @@ function TaskEditorBody({
                 })
               }}
             />
-          </div>
-        </div>
+          }
+        />
 
         {/* Target — which project board the task lives on. */}
         <div className="flex flex-col gap-2">
@@ -558,7 +539,11 @@ function TaskEditorBody({
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start gap-1.5 px-2 text-xs"
-                disabled={templateBusy || !title.trim() || !prompt.trim()}
+                disabled={
+                  templateBusy ||
+                  !title.trim() ||
+                  (!prompt.trim() && attachmentCount === 0)
+                }
                 onClick={() => void saveTemplate()}
               >
                 <BookmarkPlus className="size-3.5" aria-hidden="true" />

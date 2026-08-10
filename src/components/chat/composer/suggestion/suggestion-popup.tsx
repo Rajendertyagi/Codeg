@@ -11,6 +11,7 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 
+import { isImeCompositionKey } from "@/lib/ime-composition"
 import { cn } from "@/lib/utils"
 
 import { ReferenceIcon } from "../badges/reference-badge"
@@ -251,6 +252,10 @@ export const SuggestionPopup = forwardRef<
     ref,
     (): SuggestionPopupHandle => ({
       onKeyDown: (event) => {
+        // Mid-composition the key is the IME's: on WebKit the Enter that picks
+        // a CJK candidate arrives after `compositionend`, so the plugin's
+        // `allow` gate has already reopened and only the event itself says so.
+        if (isImeCompositionKey(event)) return false
         switch (event.key) {
           case "ArrowDown":
             if (flat.length > 0) {

@@ -381,9 +381,10 @@ fn build_node_version_check(current_version: Option<&str>, required: &str) -> Ch
     }
 }
 
-/// Preflight for `Uvx` agents (Python ACP agents launched via `uvx`, e.g.
-/// Hermes). Passes when either the `uv` tool runner is resolvable, or — as a
-/// fallback — the agent's own CLI is already installed on PATH.
+/// Preflight for `Uvx` agents (custom ACP agents distributed as Python
+/// packages and launched via `uvx`). Passes when either the `uv` tool runner
+/// is resolvable, or — as a fallback — the agent's own CLI is already
+/// installed on PATH.
 async fn check_uv_environment(
     uv_required: Option<&str>,
     system_cmd: Option<(&str, &[&str])>,

@@ -6,7 +6,6 @@ import { toast } from "sonner"
 import { workTaskRequeue, workTaskRetry } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { followUpComposerTarget } from "@/lib/task-follow-up"
-import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { Button } from "@/components/ui/button"
@@ -18,7 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { TaskFollowUpComposer } from "./task-follow-up-composer"
+import {
+  TaskMessageComposer,
+  type TaskMessageComposerHandle,
+} from "./task-message-composer"
 import type { WorkTask } from "@/lib/types"
 
 export type TaskRestartKind = "retry" | "requeue"
@@ -52,10 +54,12 @@ export function TaskRestartDialog({
   kind,
 }: TaskRestartDialogProps) {
   const t = useTranslations("Tasks")
+  // The upload-in-flight toast is the conversation composer's own message.
+  const tChat = useTranslations("Folder.chat.messageInput")
   // The whole list: a task's worktree is normally not among the open folders.
   const allFolders = useAppWorkspaceStore((s) => s.allFolders)
   const { shortcuts } = useShortcutSettings()
-  const editorRef = useRef<RichComposerHandle>(null)
+  const composerRef = useRef<TaskMessageComposerHandle>(null)
   const [text, setText] = useState("")
   const [submitting, setSubmitting] = useState(false)
   /** Synchronous in-flight latch — see `submit`. */
@@ -83,7 +87,15 @@ export function TaskRestartDialog({
   const submit = async () => {
     // Straight from the editor: reference badges serialize to their inline
     // token here, and this cannot lag a keystroke behind the state.
-    const note = (editorRef.current?.getText() ?? text).trim() || null
+    const note = (composerRef.current?.getText() ?? text).trim() || null
+    // Images / pasted bytes ride beside the note as their own blocks.
+    const blocks = composerRef.current?.getAttachmentBlocks() ?? []
+    // An unsettled upload has no server-side uri yet, so the block would reach
+    // the agent empty. The box keeps its content — this is "wait a moment".
+    if (composerRef.current?.hasUploadingImage()) {
+      toast.error(tChat("attachUploadInProgress"))
+      return
+    }
     // A ref, not `submitting`: the send key is read out of a ref inside the
     // editor's own keydown handler, so a second Enter can arrive before React
     // has re-rendered. The backend's CAS would reject the loser anyway — this
@@ -92,8 +104,8 @@ export function TaskRestartDialog({
     submittingRef.current = true
     setSubmitting(true)
     try {
-      if (kind === "retry") await workTaskRetry(task.id, note)
-      else await workTaskRequeue(task.id, note)
+      if (kind === "retry") await workTaskRetry(task.id, note, blocks)
+      else await workTaskRequeue(task.id, note, blocks)
       onOpenChange(false)
     } catch (e) {
       toast.error(toErrorMessage(e))
@@ -115,8 +127,8 @@ export function TaskRestartDialog({
           <DialogDescription>{t("restartDescription")}</DialogDescription>
         </DialogHeader>
 
-        <TaskFollowUpComposer
-          editorRef={editorRef}
+        <TaskMessageComposer
+          ref={composerRef}
           agentType={target.agentType}
           folderPath={target.folderPath}
           defaultText={text}

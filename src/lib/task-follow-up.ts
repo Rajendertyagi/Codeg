@@ -85,12 +85,23 @@ export function followUpScenario(intent: FollowUpIntent): FollowUpScenario {
   )
 }
 
-/** Whether this scenario can be sent with the text currently in the box. */
+/**
+ * Whether this scenario can be sent with what is currently in the box.
+ *
+ * An attachment counts as content on its own: a screenshot of the bug with no
+ * sentence is a complete instruction, and it reaches the agent as its own
+ * prompt block — refusing it because the prose is empty would drop it silently.
+ */
 export function canSubmitFollowUp(
   intent: FollowUpIntent,
-  text: string
+  text: string,
+  hasAttachments = false
 ): boolean {
-  return text.trim().length > 0 || followUpScenario(intent).allowsEmpty
+  return (
+    text.trim().length > 0 ||
+    hasAttachments ||
+    followUpScenario(intent).allowsEmpty
+  )
 }
 
 /** What the follow-up composer resolves its commands / references against. */

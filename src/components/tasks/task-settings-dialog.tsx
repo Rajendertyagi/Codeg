@@ -8,6 +8,7 @@ import {
   Gauge,
   GitMerge,
   Info,
+  Merge,
   MessageSquarePlus,
   PackagePlus,
   ShieldCheck,
@@ -36,7 +37,7 @@ import {
   SettingCard,
   SettingNote,
   SettingRow,
-} from "@/components/tasks/setting-card"
+} from "@/components/shared/setting-card"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -218,6 +219,7 @@ function TaskSettingsBody({
   const [mergeStrategy, setMergeStrategy] = useState<"squash" | "merge">(
     "squash"
   )
+  const [autoMerge, setAutoMerge] = useState(false)
   const [deleteWorktreeDefault, setDeleteWorktreeDefault] = useState(true)
   const [initCommand, setInitCommand] = useState("")
   const [preflightCommand, setPreflightCommand] = useState("")
@@ -257,6 +259,7 @@ function TaskSettingsBody({
         setAutoProcess(s.auto_process)
         setMaxConcurrent(String(s.max_concurrent))
         setMergeStrategy(s.merge_strategy === "merge" ? "merge" : "squash")
+        setAutoMerge(s.auto_merge)
         setDeleteWorktreeDefault(s.delete_worktree_default)
         setInitCommand(s.init_command ?? "")
         setStagePrompts(s.stage_prompts ?? {})
@@ -313,6 +316,7 @@ function TaskSettingsBody({
         auto_process: autoProcess,
         max_concurrent: Number.isFinite(parsed) && parsed >= 0 ? parsed : 2,
         merge_strategy: mergeStrategy,
+        auto_merge: autoMerge,
         delete_worktree_default: deleteWorktreeDefault,
         // Free text is the only surface now; a legacy id was migrated into
         // the text field on load, so the id is always cleared on save.
@@ -558,6 +562,22 @@ function TaskSettingsBody({
                     })}
                   </div>
                 </SettingRow>
+                {/* Unattended landing: same dispatch as the merge button, so
+                    it sits between "how commits land" and "what happens to the
+                    worktree" — the two knobs it inherits. */}
+                <SettingRow
+                  icon={Merge}
+                  title={t("settingsAutoMerge")}
+                  description={t("settingsAutoMergeHint")}
+                  htmlFor="task-auto-merge"
+                  control={
+                    <Switch
+                      id="task-auto-merge"
+                      checked={autoMerge}
+                      onCheckedChange={setAutoMerge}
+                    />
+                  }
+                />
                 <SettingRow
                   icon={Trash2}
                   title={t("settingsDeleteWorktree")}

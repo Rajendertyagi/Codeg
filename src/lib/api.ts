@@ -28,6 +28,7 @@ import type {
   WorkTaskTemplate,
   ConversationSummary,
   ConversationDetail,
+  ConversationTurnsPage,
   DbConversationDetail,
   FolderInfo,
   AgentStats,
@@ -68,6 +69,7 @@ import type {
   CreateChatConversationResult,
   CreateChatDirResult,
   WorktreeResolution,
+  GitWorktreeRemoval,
   DbConversationSummary,
   ImportResult,
   ImportSelectedResult,
@@ -838,6 +840,13 @@ export interface CustomAgentInfo {
   source: string
   /** Optional command that prints the locally installed version. */
   versionProbe: string | null
+  /**
+   * User declaration that the agent accepts MCP servers on the ACP wire —
+   * for a custom agent, codeg's built-in codeg-mcp companion. Off means the
+   * connection is made without it, for agents that fail `session/new` when
+   * any server is sent.
+   */
+  supportsMcp: boolean
   /** False when the definition cannot launch here (e.g. no build for this OS). */
   launchable: boolean
   problem: string | null
@@ -883,8 +892,64 @@ export async function acpSaveCustomAgent(params: {
   source?: string
   /** Optional version-probe command; full-replace like the skills fields. */
   versionProbe?: string | null
+  /**
+   * MCP declaration. Omitted = the backend keeps the stored row's value (or
+   * on, for a new row) — the safe default here is what is already stored.
+   */
+  supportsMcp?: boolean
 }): Promise<void> {
   return getTransport().call("acp_save_custom_agent", { params })
+}
+
+/**
+ * Change ONE declaration on a stored custom-agent definition.
+ *
+ * `acp_save_custom_agent` is a full replace: a declaration the payload leaves
+ * out is cleared, not kept — so a caller that edits one field has to send every
+ * other field back. That makes the payload only as fresh as whatever the caller
+ * is holding, and the settings page renders several independent cards over the
+ * SAME definition, each loaded once on mount. Sending a card's own snapshot
+ * therefore lets it revert a save another card made after it mounted (turn MCP
+ * off in one card, flip a skills switch in the other, and MCP comes back on).
+ *
+ * So the definition is re-read here, immediately before the write, and the
+ * patch is applied to THAT. Callers pass only what they are actually changing,
+ * and a stale card cannot resurrect a value it never showed. The remaining
+ * window is read-to-write, which is as narrow as this gets without a
+ * compare-and-swap on the backend.
+ */
+export async function acpPatchCustomAgent(
+  registryId: string,
+  patch: Partial<
+    Pick<
+      CustomAgentInfo,
+      "skillsSharedStore" | "skillsDir" | "supportsMcp" | "versionProbe"
+    >
+  >
+): Promise<void> {
+  const current = (await acpListCustomAgents()).find(
+    (a) => a.registryId === registryId
+  )
+  if (!current) {
+    // Deleted from another window while this card was open. Failing is right:
+    // saving would re-create the definition the user just removed.
+    throw new Error(`Custom agent ${registryId} no longer exists`)
+  }
+  return acpSaveCustomAgent({
+    registryId: current.registryId,
+    name: current.name,
+    description: current.description,
+    version: current.version,
+    distributionKind: current.distributionKind as CustomDistributionKind,
+    spec: current.spec,
+    iconUrl: current.iconUrl,
+    source: current.source,
+    skillsSharedStore: current.skillsSharedStore,
+    skillsDir: current.skillsDir,
+    supportsMcp: current.supportsMcp,
+    versionProbe: current.versionProbe,
+    ...patch,
+  })
 }
 
 export async function acpDeleteCustomAgent(
@@ -1725,10 +1790,35 @@ export async function importSelectedSessions(
   return getTransport().call("import_selected_sessions", { selections })
 }
 
+/**
+ * Fetch a conversation's detail, optionally windowed:
+ * - `{ tailTurns }` — last N turns, start aligned to a user-round boundary
+ * - `{ fromIndex }` — exact slice `turns[fromIndex..]` (window refresh)
+ * No window → legacy full response (also what an old server returns for any
+ * request; the windowed fields are then absent).
+ */
 export async function getFolderConversation(
-  conversationId: number
+  conversationId: number,
+  window?: { tailTurns?: number; fromIndex?: number }
 ): Promise<DbConversationDetail> {
-  return getTransport().call("get_folder_conversation", { conversationId })
+  return getTransport().call("get_folder_conversation", {
+    conversationId,
+    ...(window?.tailTurns != null ? { tailTurns: window.tailTurns } : {}),
+    ...(window?.fromIndex != null ? { fromIndex: window.fromIndex } : {}),
+  })
+}
+
+/** Fetch one page of older history ending just before `beforeIndex`. */
+export async function getFolderConversationTurns(
+  conversationId: number,
+  beforeIndex: number,
+  limit: number
+): Promise<ConversationTurnsPage> {
+  return getTransport().call("get_folder_conversation_turns", {
+    conversationId,
+    beforeIndex,
+    limit,
+  })
 }
 
 export async function removeFolderFromHistory(path: string): Promise<void> {
@@ -1906,6 +1996,32 @@ export async function gitDeleteBranch(
   return getTransport().call("git_delete_branch", {
     path,
     branchName,
+    force,
+  })
+}
+
+/**
+ * Remove the worktree that has `branchName` checked out — the only way such a
+ * branch can be deleted, since git refuses `branch -d` while a worktree holds
+ * the ref. `deleteBranch` also takes the branch and the worktree's workspace
+ * folder (its sessions move to the repo folder); `force` discards uncommitted
+ * work in the worktree and force-deletes an unmerged branch.
+ *
+ * `sourceFolderId` is the folder the caller acts from — it only supplies the
+ * re-parent target when the worktree folder has no recorded root.
+ */
+export async function gitRemoveWorktree(
+  path: string,
+  branchName: string,
+  sourceFolderId: number,
+  deleteBranch: boolean,
+  force: boolean = false
+): Promise<GitWorktreeRemoval> {
+  return getTransport().call("git_remove_worktree", {
+    path,
+    branchName,
+    sourceFolderId,
+    deleteBranch,
     force,
   })
 }
@@ -2830,15 +2946,45 @@ export async function workTaskEvents(
   return getTransport().call("work_task_events", { taskId, limit })
 }
 
+/**
+ * Drop an uploaded image's base64 from a task's blocks in every mode where the
+ * call leaves through an HTTP body, the same rule (and the same helper) a chat
+ * send follows: the bytes already live in the uploads dir, and the engine's
+ * dispatch re-inlines them from the uri (`acp::prompt_hydration`) when the task
+ * eventually runs.
+ */
+function stripUploadedTaskBlocks(
+  blocks: PromptInputBlock[] | null | undefined
+): PromptInputBlock[] {
+  if (!blocks || blocks.length === 0) return []
+  return stripUploadedImagePayloads(
+    blocks,
+    !isDesktop() || getActiveRemoteConnectionId() !== null
+  )
+}
+
 export async function workTaskCreate(draft: WorkTaskDraft): Promise<WorkTask> {
-  return getTransport().call("work_task_create", { draft })
+  return getTransport().call("work_task_create", {
+    draft: { ...draft, config: stripUploadedTaskConfig(draft.config) },
+  })
+}
+
+/** {@link stripUploadedTaskBlocks} over a whole task config. */
+function stripUploadedTaskConfig(config: WorkTaskConfig): WorkTaskConfig {
+  return {
+    ...config,
+    prompt_blocks: stripUploadedTaskBlocks(config.prompt_blocks),
+  }
 }
 
 export async function workTaskUpdate(
   id: number,
   draft: WorkTaskDraft
 ): Promise<WorkTask> {
-  return getTransport().call("work_task_update", { id, draft })
+  return getTransport().call("work_task_update", {
+    id,
+    draft: { ...draft, config: stripUploadedTaskConfig(draft.config) },
+  })
 }
 
 /** Persist the pending column's drag order (index → sort_order). */
@@ -2860,12 +3006,21 @@ export async function workTaskStart(id: number): Promise<void> {
   return getTransport().call("work_task_start", { id })
 }
 
-/** failed → queued. `note` (optional) reaches the retry prompt. */
+/**
+ * failed → queued. `note` (optional) reaches the retry prompt, and `blocks`
+ * carries whatever the note box attached out of band (images, pasted bytes) —
+ * stripped of uploaded payloads on the way out, exactly like a chat send.
+ */
 export async function workTaskRetry(
   id: number,
-  note?: string | null
+  note?: string | null,
+  blocks?: PromptInputBlock[] | null
 ): Promise<void> {
-  return getTransport().call("work_task_retry", { id, note: note ?? null })
+  return getTransport().call("work_task_retry", {
+    id,
+    note: note ?? null,
+    blocks: stripUploadedTaskBlocks(blocks),
+  })
 }
 
 /**
@@ -2874,9 +3029,14 @@ export async function workTaskRetry(
  */
 export async function workTaskRequeue(
   id: number,
-  note?: string | null
+  note?: string | null,
+  blocks?: PromptInputBlock[] | null
 ): Promise<void> {
-  return getTransport().call("work_task_requeue", { id, note: note ?? null })
+  return getTransport().call("work_task_requeue", {
+    id,
+    note: note ?? null,
+    blocks: stripUploadedTaskBlocks(blocks),
+  })
 }
 
 /**
@@ -2898,12 +3058,14 @@ export async function workTaskSchedule(
 export async function workTaskReturn(
   id: number,
   feedback: string,
-  intent?: FollowUpIntent
+  intent?: FollowUpIntent,
+  blocks?: PromptInputBlock[] | null
 ): Promise<void> {
   return getTransport().call("work_task_return", {
     id,
     feedback,
     intent: intent ?? null,
+    blocks: stripUploadedTaskBlocks(blocks),
   })
 }
 
@@ -3012,7 +3174,9 @@ export async function workTaskTemplateSave(draft: {
   title: string
   config: WorkTaskConfig
 }): Promise<WorkTaskTemplate> {
-  return getTransport().call("work_task_template_save", { draft })
+  return getTransport().call("work_task_template_save", {
+    draft: { ...draft, config: stripUploadedTaskConfig(draft.config) },
+  })
 }
 
 export async function workTaskTemplateDelete(id: number): Promise<void> {

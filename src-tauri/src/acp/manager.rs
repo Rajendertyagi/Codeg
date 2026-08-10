@@ -27,7 +27,7 @@ use crate::acp::question::{
 };
 use crate::acp::types::{
     AcpEvent, AgentOptionsSnapshot, ConfigStaleKind, ConnectionInfo, ConnectionStatus,
-    ForkResultInfo, PromptInputBlock,
+    ForkResultInfo, PromptCapabilitiesInfo, PromptInputBlock,
 };
 use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
 use crate::db::service::conversation_service;
@@ -1838,7 +1838,13 @@ impl ConnectionManager {
         let grace_period = Duration::from_millis(500);
         let mut selectors_ready_at: Option<std::time::Instant> = None;
         loop {
-            let (config_options, modes, available_commands, selectors_ready) = {
+            let (
+                config_options,
+                modes,
+                available_commands,
+                prompt_capabilities,
+                selectors_ready,
+            ) = {
                 let conns = self.connections.lock().await;
                 let conn = conns
                     .get(conn_id)
@@ -1848,6 +1854,7 @@ impl ConnectionManager {
                     s.config_options.clone(),
                     s.modes.clone(),
                     s.available_commands.clone(),
+                    s.prompt_capabilities.clone(),
                     s.selectors_ready,
                 )
             };
@@ -1860,6 +1867,7 @@ impl ConnectionManager {
                         modes,
                         config_options: config_options.unwrap_or_default(),
                         available_commands,
+                        prompt_capabilities,
                     });
                 }
             }
@@ -2086,6 +2094,49 @@ impl ConnectionManager {
         connections
             .get(conn_id)
             .map(|conn| (conn.state.clone(), conn.emitter.clone()))
+    }
+
+    /// Wait (bounded) for the connected agent to say what a prompt may carry.
+    ///
+    /// `spawn_agent` returns as soon as the process is up and registered: it
+    /// only holds for `SessionStarted` when deduplicating a RESUME, so a fresh
+    /// session's `initialize` — which is what publishes these capabilities
+    /// (`emit_prompt_capabilities`) — is still in flight when it returns. A
+    /// caller that must know the encoding before its first prompt therefore has
+    /// to ask, rather than read the state and find `None`.
+    ///
+    /// `None` means the wait ran out or the connection went away; callers treat
+    /// that as "no information" and send what they already had, never as an
+    /// error — the prompt itself is about to surface any real problem.
+    pub async fn wait_for_prompt_capabilities(
+        &self,
+        conn_id: &str,
+        timeout: Duration,
+    ) -> Option<PromptCapabilitiesInfo> {
+        let state = {
+            let connections = self.connections.lock().await;
+            connections.get(conn_id)?.state.clone()
+        };
+        let start = std::time::Instant::now();
+        loop {
+            {
+                let s = state.read().await;
+                if let Some(caps) = s.prompt_capabilities.clone() {
+                    return Some(caps);
+                }
+                // A connection that already died will never advertise anything.
+                if matches!(
+                    s.status,
+                    ConnectionStatus::Disconnected | ConnectionStatus::Error
+                ) {
+                    return None;
+                }
+            }
+            if start.elapsed() >= timeout {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     /// Append a live-feedback note to a connection's session and broadcast it.

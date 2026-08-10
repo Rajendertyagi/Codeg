@@ -83,6 +83,13 @@ const EXACT_TOOL_NAME_ALIASES: Record<string, string> = {
   wait_agent: "task",
   close_agent: "task",
   update_plan: "task",
+  // Grok
+  // The native sub-agent launcher. The history parser rewrites it to "Agent"
+  // and the live path classifies it from `rawInput.subagent_type`; this alias
+  // is the belt-and-braces for any path where only the raw name survives
+  // (`x.ai/tool.name` fallback with no rawInput). The freeform `\bagent\b`
+  // matcher can NOT catch it — "subagent" has no word boundary before "agent".
+  spawn_subagent: "agent",
   create_goal: "create_goal",
   "functions.create_goal": "create_goal",
   update_goal: "update_goal",
@@ -231,6 +238,53 @@ function hasAnyKey(obj: Record<string, unknown>, keys: string[]): boolean {
   )
 }
 
+/**
+ * Wire spellings that mean the same argument as one of the canonical
+ * (snake_case) keys every tool card reads. OpenCode names its tool arguments in
+ * camelCase and its ACP adapter forwards them verbatim, so the LIVE stream
+ * carries `filePath` / `oldString` where the history parser has already
+ * rewritten them (`parsers/opencode.rs::normalize_tool_call`) — the renderers
+ * only ever learned the canonical names, so a live Write card lost its path and
+ * a live Edit card lost its diff. `include` → `glob` is the same one-sided
+ * rename the history parser applies to OpenCode's grep filter.
+ */
+const TOOL_INPUT_KEY_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["filePath", "file_path"],
+  ["notebookPath", "notebook_path"],
+  ["oldString", "old_string"],
+  ["newString", "new_string"],
+  ["newSource", "new_source"],
+  ["replaceAll", "replace_all"],
+  ["editMode", "edit_mode"],
+  ["cellType", "cell_type"],
+  ["include", "glob"],
+]
+
+/**
+ * Fill in canonical argument names an agent spelled differently on the wire.
+ *
+ * Only writes a canonical key that is ABSENT (or null/undefined) on the input,
+ * so it can never override what an agent actually sent — which makes it a
+ * no-op on every payload that was already normalized in Rust (all history) and
+ * on every agent that speaks snake_case natively. Returns the SAME object when
+ * nothing had to be added, so `useMemo` consumers keep their reference.
+ */
+export function aliasToolInputKeys(
+  parsed: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  if (!parsed) return parsed
+  let out: Record<string, unknown> | null = null
+  for (const [alias, canonical] of TOOL_INPUT_KEY_ALIASES) {
+    const value = parsed[alias]
+    if (value === undefined || value === null) continue
+    const existing = parsed[canonical]
+    if (existing !== undefined && existing !== null) continue
+    out ??= { ...parsed }
+    out[canonical] = value
+  }
+  return out ?? parsed
+}
+
 function inferFromInput(
   rawInput: string | null | undefined,
   kind: string | null | undefined,
@@ -290,7 +344,20 @@ function inferFromInput(
     ])
   )
     return "bash"
-  if (hasAnyKey(parsed, ["old_string", "new_string", "replace_all"]))
+  // OpenCode names these arguments in camelCase on the wire, and its ACP
+  // adapter forwards them verbatim, so the live stream sees `oldString` where
+  // the history parser has already rewritten them to snake_case
+  // (`parsers/opencode.rs::normalize_tool_call`).
+  if (
+    hasAnyKey(parsed, [
+      "old_string",
+      "new_string",
+      "replace_all",
+      "oldString",
+      "newString",
+      "replaceAll",
+    ])
+  )
     return "edit"
   if (hasAnyKey(parsed, ["changes"])) return "edit"
   if (hasAnyKey(parsed, ["todos"])) return "todowrite"
@@ -330,7 +397,15 @@ function inferFromInput(
     )
   }
 
-  const hasPath = hasAnyKey(parsed, ["file_path", "notebook_path", "path"])
+  // `filePath` is OpenCode's spelling; `session-files.ts` already counts it as
+  // a path key, so recognising it here keeps classification and file tallies
+  // agreeing on the same payload.
+  const hasPath = hasAnyKey(parsed, [
+    "file_path",
+    "notebook_path",
+    "path",
+    "filePath",
+  ])
   if (hasPath) {
     // Check write-specific input keys first — they take priority over
     // kind/title because ACP ToolKind::Edit ("edit") is a category that

@@ -121,6 +121,12 @@ export interface AgentExecutionStats {
   lines_removed?: number | null
   other_tool_count?: number | null
   tool_calls?: AgentToolCall[]
+  /** The child's own session id, when the sub-agent ran as a standalone session
+   *  on disk instead of as chunks folded into the parent (Grok: every
+   *  `spawn_subagent` child). Drives the Agent card's "open the sub-agent's
+   *  session" action — `getConversation` resolves it even though the session is
+   *  hidden from the sidebar. Absent for every other agent. */
+  child_session_id?: string | null
 }
 
 /**
@@ -597,6 +603,46 @@ export interface DbConversationDetail {
    * mid-stream, which would otherwise double-render against the live reply.
    */
   in_flight_user_turn_id?: string | null
+  /**
+   * Turn-window metadata, present only when the request asked for a window
+   * (`tailTurns`/`fromIndex`); their absence marks a legacy full response
+   * (old server) and disables windowed merging. `turns` then holds
+   * `full[turns_offset..]` while every other field still describes the full
+   * transcript. See `src/lib/turn-window.ts` for the derivation helpers.
+   */
+  turns_offset?: number | null
+  turns_total?: number | null
+  /** Assistant turns in `full[0..turns_offset)` (baseline globalization). */
+  assistant_turns_before_offset?: number | null
+  /**
+   * Structural fingerprint of `full[0..turns_offset)` as a fixed-width 16-hex
+   * string (a raw u64 JSON number would be rounded past 2^53-1). Compared on
+   * window refreshes to detect prefix rewrites (compaction), and used as the
+   * seed for client-side chain extension.
+   */
+  prefix_hash?: string | null
+  /**
+   * Max timestamp across `full[0..turns_offset)`; absent when the window
+   * covers the whole transcript. A background overlay turn may only be
+   * retired by the watermark rule when its timestamp is STRICTLY greater
+   * than this bound (its persisted twin is then provably inside the window).
+   */
+  uncovered_prefix_max_ts?: string | null
+}
+
+/** One page of older history for reverse infinite scroll:
+ *  `full[turns_offset .. turns_offset + turns.length)`. */
+export interface ConversationTurnsPage {
+  turns: MessageTurn[]
+  turns_offset: number
+  turns_total: number
+  assistant_turns_before_offset: number
+  /** H(0..turns_offset) — adopted as the window fingerprint after a prepend. */
+  prefix_hash: string
+  /** H(0..min(beforeIndex, total)) — must equal the client's current window
+   *  fingerprint for the page to legally join the loaded window. */
+  prefix_hash_before_index: string
+  uncovered_prefix_max_ts?: string | null
 }
 
 export type ConversationStatus =
@@ -892,6 +938,13 @@ export const HERMES_PROVIDERS: HermesProviderOption[] = [
     needsBaseUrl: false,
     kind: "apiKey",
   },
+  // New in Hermes 0.20.0.
+  {
+    id: "ai-gateway",
+    label: "Vercel AI Gateway",
+    needsBaseUrl: false,
+    kind: "apiKey",
+  },
   // OAuth / external providers — credentials set via the terminal `--setup` flow.
   {
     id: "nous",
@@ -941,6 +994,15 @@ export const HERMES_PROVIDERS: HermesProviderOption[] = [
     label: "AWS Bedrock",
     needsBaseUrl: false,
     kind: "aws",
+  },
+  // Google Vertex AI (Hermes 0.20.0) — service-account JSON / application-
+  // default credentials, configured via the terminal `--setup` flow like the
+  // other no-key providers, hence `oauth` (no API-key or base-URL field).
+  {
+    id: "vertex",
+    label: "Google Vertex AI",
+    needsBaseUrl: false,
+    kind: "oauth",
   },
 ]
 
@@ -1140,7 +1202,15 @@ export interface SessionConfigSelectInfo {
   groups: SessionConfigSelectGroupInfo[]
 }
 
-export type SessionConfigKindInfo = { type: "select" } & SessionConfigSelectInfo
+/** An on/off toggle config option (ACP's unstable boolean config kind). Cline
+ *  3.0.50+ ships one as `auto_approve` ("Auto-approve tools"). */
+export interface SessionConfigBooleanInfo {
+  current_value: boolean
+}
+
+export type SessionConfigKindInfo =
+  | ({ type: "select" } & SessionConfigSelectInfo)
+  | ({ type: "boolean" } & SessionConfigBooleanInfo)
 
 export interface SessionConfigOptionInfo {
   id: string
@@ -1156,6 +1226,10 @@ export interface AgentOptionsSnapshot {
   /** Slash commands captured during the same transient probe as modes/config
    *  (empty when the agent advertises none in the probe window). */
   available_commands: AvailableCommandInfo[]
+  /** What the agent accepts in a prompt, from the same probe. Lets a composer
+   *  with no live session (the to-do task boxes) encode an attached image the
+   *  way this agent takes it. Null when the agent advertised none. */
+  prompt_capabilities?: PromptCapabilitiesInfo | null
 }
 
 export interface AgentDelegationDefaults {
@@ -1299,6 +1373,10 @@ export interface WorkTask {
   run_seq: number
   sort_order: number
   worktree_folder_id: number | null
+  /** A worktree is recorded but unusable — its folder row was removed or its
+   *  directory is gone from disk. Merge cannot run; review offers "complete"
+   *  instead. Absent = false (stamped by the list/get commands). */
+  worktree_missing?: boolean
   conversation_id: number | null
   /** Live ACP connection of the current generation; stale after a settle —
    *  gate on status before attaching. */
@@ -1378,6 +1456,10 @@ export interface WorkTaskFolderSettings {
   /** 0 = unlimited. */
   max_concurrent: number
   merge_strategy: "squash" | "merge"
+  /** Land reviewed tasks automatically: when a task settles into review and is
+   *  actually mergeable, the engine dispatches the same merge the button would
+   *  (agent-written commit message, worktree per `delete_worktree_default`). */
+  auto_merge: boolean
   delete_worktree_default: boolean
   /** folder_command id run in the worktree when a task settles into review
    *  (the acceptance red/green light); null = no preflight. */
@@ -2862,7 +2944,14 @@ export type GitResetMode = "soft" | "mixed" | "hard" | "keep"
 export interface GitBranchList {
   local: string[]
   remote: string[]
+  /** Branches checked out in some *other* worktree than the queried path. */
   worktree_branches: string[]
+  /**
+   * The branch checked out in the repo's main working tree, when that is not the
+   * queried path itself. It appears in `worktree_branches` like any other — but
+   * its checkout is the repo, so it can neither be deleted nor removed.
+   */
+  main_worktree_branch: string | null
 }
 
 /**
@@ -2891,6 +2980,20 @@ export interface GitHeadInfo {
 export interface WorktreeResolution {
   path: string | null
   folder_id: number | null
+}
+
+/**
+ * What removing a worktree actually did (mirrors Rust `GitWorktreeRemoval`).
+ * `worktree_path` is null when the branch had no worktree left to remove — what
+ * a retry after a partially applied removal sees. `folder_id` is the workspace
+ * folder dropped along with the directory (only the "…and branch" variant drops
+ * one), and `reparented` counts the conversations it moved to the repo folder.
+ */
+export interface GitWorktreeRemoval {
+  worktree_path: string | null
+  branch_deleted: boolean
+  folder_id: number | null
+  reparented: number
 }
 
 export interface GitConflictInfo {

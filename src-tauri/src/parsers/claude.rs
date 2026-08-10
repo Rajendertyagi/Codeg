@@ -1776,6 +1776,9 @@ fn extract_agent_execution_stats(tur: &serde_json::Value) -> AgentExecutionStats
             .and_then(|v| v.as_u64())
             .map(|v| v as u32),
         tool_calls: Vec::new(),
+        // Claude's sub-agent lives inside the parent transcript (a sidechain),
+        // not as a session of its own.
+        child_session_id: None,
     }
 }
 

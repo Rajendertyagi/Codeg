@@ -10,7 +10,12 @@ import {
 } from "@/components/ui/tooltip"
 import { formatRelative } from "@/components/conversations/sidebar-conversation-grouping"
 import { cn } from "@/lib/utils"
-import { ScheduleChip, statusAccent, StatusChip } from "./task-card"
+import {
+  ScheduleChip,
+  statusAccent,
+  StatusChip,
+  WorktreeRemovedChip,
+} from "./task-card"
 import {
   buildTaskActions,
   type TaskActionHandlers,
@@ -155,6 +160,9 @@ export function TaskRow({
               and a dedicated column would cost every row its alignment to
               serve a handful. Renders nothing when there is no plan. */}
           <ScheduleChip task={task} />
+          {/* Same reasoning: a deleted worktree is the exception, and the row
+              must say so wherever the board card would. */}
+          <WorktreeRemovedChip task={task} />
         </div>
         {note ? (
           <span

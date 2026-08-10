@@ -105,6 +105,7 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   useGitQuickActions,
   type GitQuickActions,
@@ -1258,6 +1259,7 @@ function LogHeader({
 }
 
 export function GitLogTab() {
+  const ime = useImeGuard()
   const t = useTranslations("Folder.gitLogTab")
   const tCommon = useTranslations("Folder.common")
   const isMobile = useIsMobile()
@@ -1297,6 +1299,7 @@ export function GitLogTab() {
     local: [],
     remote: [],
     worktree_branches: [],
+    main_worktree_branch: null,
   })
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   // null = the default "all branches" view (git log --all); a name narrows to
@@ -2574,14 +2577,9 @@ export function GitLogTab() {
             placeholder={t("dialogs.branchNamePlaceholder")}
             value={newBranchName}
             onChange={(event) => setNewBranchName(event.target.value)}
+            {...ime.props}
             onKeyDown={(event) => {
-              if (
-                event.nativeEvent.isComposing ||
-                event.key === "Process" ||
-                event.key !== "Enter"
-              ) {
-                return
-              }
+              if (ime.isComposing(event) || event.key !== "Enter") return
               void handleCreateBranchFromCommit()
             }}
             autoFocus

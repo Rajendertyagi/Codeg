@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it, vi } from "vitest"
 
@@ -136,6 +136,15 @@ const store = vi.hoisted(() => ({
     additions: number
     deletions: number
   }[],
+}))
+
+const gitCommitMock = vi.hoisted(() =>
+  vi.fn(async () => ({ committed_files: 1 }))
+)
+
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  gitCommit: gitCommitMock,
 }))
 
 vi.mock("@/hooks/use-workspace-state-store", () => ({
@@ -344,5 +353,57 @@ describe("GitChangesTab render cap", () => {
     expect(
       screen.queryByText(id(MAX_VISIBLE_ROWS + 120))
     ).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Quick-commit toolbar — the Enter that confirms a CJK candidate is the IME's,
+// not a commit. WebKit ends the composition before dispatching that keydown, so
+// `isComposing` is already false there and only the 229 sentinel marks it.
+// ---------------------------------------------------------------------------
+
+describe("GitChangesTab quick commit IME guard", () => {
+  const PLACEHOLDER = "Commit message (Enter to commit)"
+
+  function typeMessage() {
+    store.git = flatGit(1)
+    gitCommitMock.mockClear()
+    renderTab()
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
+    fireEvent.change(input, { target: { value: "修复提交" } })
+    return input
+  }
+
+  it("does not commit on the candidate-confirming Enter (WebKit: keyCode 229)", () => {
+    const input = typeMessage()
+    fireEvent.compositionStart(input)
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+    expect(gitCommitMock).not.toHaveBeenCalled()
+  })
+
+  it("does not commit while a composition is still open", () => {
+    const input = typeMessage()
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(gitCommitMock).not.toHaveBeenCalled()
+  })
+
+  it("still commits on a deliberate Enter", async () => {
+    const input = typeMessage()
+    fireEvent.compositionStart(input)
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+    // Awaited inside act so the commit's post-await state updates settle here.
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(gitCommitMock).toHaveBeenCalledTimes(1)
+    expect(gitCommitMock).toHaveBeenCalledWith(
+      "/repo",
+      "修复提交",
+      ["f0001"],
+      "f1"
+    )
   })
 })

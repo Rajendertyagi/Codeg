@@ -30,12 +30,14 @@ pub enum AgentDistribution {
     },
     /// Python agents launched through `uvx` (the `uv` tool runner), which
     /// fetches + caches the pinned package on first use — analogous to npx.
-    /// Used for ACP agents distributed as Python packages (e.g. Hermes).
+    /// Used for custom ACP agents distributed as PyPI packages (Hermes shipped
+    /// this way through 0.19.0, before upstream retired its PyPI channel and
+    /// the registry entry moved to the npm bridge — see `AgentType::Hermes`).
     Uvx {
         version: &'static str,
-        /// The `uvx --from` package spec, e.g. "hermes-agent[acp,mcp]==0.19.0".
+        /// The `uvx --from` package spec, e.g. "some-agent[extra]==1.2.0".
         package: &'static str,
-        /// The console-script entry point to run, e.g. "hermes-acp".
+        /// The console-script entry point to run.
         cmd: &'static str,
         args: &'static [&'static str],
         env: &'static [(&'static str, &'static str)],
@@ -46,9 +48,9 @@ pub enum AgentDistribution {
         /// package (or a transitive dep) does not support the machine's default
         /// Python — uv auto-downloads a managed build of the pinned version.
         python: Option<&'static str>,
-        /// Fallback command resolvable on PATH when `uvx` is unavailable, e.g.
-        /// `Some(("hermes", &["acp"]))` — lets users who installed the agent via
-        /// its official installer launch it without `uv`.
+        /// Fallback command resolvable on PATH when `uvx` is unavailable —
+        /// lets users who installed the agent's own CLI (pipx, `uv tool
+        /// install`, an official installer) launch it without `uv`.
         system_cmd: Option<(&'static str, &'static [&'static str])>,
     },
 }
@@ -545,22 +547,37 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             agent_type,
             supports_mcp: true,
             name: "Hermes Agent",
-            description: "Nous Research's self-improving agent (ACP via uvx)",
-            distribution: AgentDistribution::Uvx {
-                version: "0.19.0",
-                package: "hermes-agent[acp,mcp]==0.19.0",
-                cmd: "hermes-acp",
-                args: &[],
+            description: "Nous Research's self-improving agent (ACP)",
+            // DISTRIBUTION STORY (0.20.0): upstream retired the pip/PyPI wheel
+            // channel (PyPI stops at 0.19.0), ships no wheels on the GitHub
+            // release, and blocks git-tag source builds with an install-channel
+            // guard (HERMES_NIX_BUILD) — shell installer / Docker / Nix are the
+            // supported channels. The npm `hermes-agent` package is a COMMUNITY
+            // bridge (wyrtensi/hermes-agent-npm, not Nous Research), pinned
+            // here at an exact, audited version: its postinstall clones the
+            // OFFICIAL repo at tag v2026.8.3 verifying the full commit SHA
+            // (3c27eb62…), bootstraps an isolated Python 3.11 venv with a
+            // checksum-pinned uv, and `uv sync --locked --extra all` (⊇ the
+            // acp+mcp extras) from upstream's lockfile — all inside the npm
+            // package directory; config/credentials stay in `~/.hermes`. Its
+            // `hermes` bin execs the venv's real upstream console script, so
+            // `hermes acp` is the same adapter the official install runs. Keep
+            // the pin EXACT on version bumps and re-audit the wrapper diff —
+            // the exact pin is what bounds the third-party trust surface.
+            //
+            // Launch preference: `resolve_npx_command("hermes")` checks PATH
+            // first, so an official-installer `hermes` (which self-updates)
+            // naturally outranks the npm-managed copy; the npm global install
+            // is the managed/one-click channel codeg's Install button drives.
+            distribution: AgentDistribution::Npx {
+                version: "0.20.0",
+                package: "hermes-agent@0.20.0",
+                cmd: "hermes",
+                args: &["acp"],
                 env: &[],
-                uv_required: Some("0.5.0"),
-                // hermes-agent 0.19.0 is `requires-python = ">=3.11,<3.14"`, and
-                // its win32 dep `pywinpty` (>=2.0.0,<3) has no Python 3.14 wheel
-                // (the 2.0.15 source build fails against PyO3's 3.13 ceiling).
-                // Without this pin uvx grabs the machine's default interpreter
-                // (e.g. 3.14) and the install breaks; 3.13 is the newest version
-                // Hermes supports.
-                python: Some("3.13"),
-                system_cmd: Some(("hermes", &["acp"])),
+                // The wrapper declares engines.node >=20; its bins are plain
+                // passthrough scripts (no build step at require time).
+                node_required: Some("20.0.0"),
             },
         },
         AgentType::CodeBuddy => AcpAgentMeta {
@@ -751,34 +768,6 @@ mod tests {
         }
     }
 
-    fn assert_uvx_version(
-        agent_type: AgentType,
-        expected_version: &str,
-        expected_package: &str,
-        expected_uv_required: Option<&str>,
-        expected_python: Option<&str>,
-    ) {
-        let meta = get_agent_meta(agent_type);
-        match meta.distribution {
-            AgentDistribution::Uvx {
-                version,
-                package,
-                uv_required,
-                python,
-                ..
-            } => {
-                assert_eq!(version, expected_version);
-                assert_eq!(package, expected_package);
-                assert_eq!(uv_required, expected_uv_required);
-                assert_eq!(python, expected_python);
-                assert_eq!(meta.registry_version(), Some(expected_version));
-            }
-            other => {
-                panic!("expected uvx distribution for {agent_type:?}, got {other:?}");
-            }
-        }
-    }
-
     fn assert_binary_version(
         agent_type: AgentType,
         expected_version: &str,
@@ -919,23 +908,36 @@ mod tests {
             Some("20.0.0"),
         );
         assert_binary_version(AgentType::OpenCode, "1.18.14", "/releases/download/v1.18.14/");
-        assert_uvx_version(
+        // Hermes rides the community npm bridge (upstream retired its PyPI
+        // channel at 0.19.0; see the registry entry). The npm package version
+        // tracks the upstream version 1:1, and the pin must stay EXACT — the
+        // audited wrapper code is only what the pinned version ships.
+        assert_npx_version(
             AgentType::Hermes,
-            "0.19.0",
-            "hermes-agent[acp,mcp]==0.19.0",
-            Some("0.5.0"),
-            // hermes-agent 0.19.0 is requires-python `<3.14`; uvx must pin an
-            // interpreter it (and its win32 `pywinpty` dep) supports.
-            Some("3.13"),
+            "0.20.0",
+            "hermes-agent@0.20.0",
+            Some("20.0.0"),
         );
     }
 
-    // OpenClaw rejects MCP server entries inside `mcpServers` (the empty `[]`
-    // field is still serialized and tolerated) and fails session/new on any
-    // entry, so it must be the only agent with `supports_mcp == false`. Every
-    // other agent (current and future) keeps it `true`. Iterating the full
-    // registry means a newly-added agent that wrongly opts out — or a
-    // regression flipping OpenClaw back on — trips this assert.
+    // The Hermes launch command must be the wrapper's `hermes` bin with the
+    // `acp` subcommand — the package's OTHER bins (`hermes-agent`,
+    // `hermes-npm`) map to different console scripts (`run_agent:main` and
+    // the bridge maintenance CLI), not the ACP adapter. `resolve_npx_command`
+    // checks PATH before the npm prefix, so an official-installer `hermes`
+    // keeps outranking the npm-managed copy without any policy bit.
+    #[test]
+    fn hermes_launches_the_hermes_bin_with_acp_subcommand() {
+        let meta = get_agent_meta(AgentType::Hermes);
+        match meta.distribution {
+            AgentDistribution::Npx { cmd, args, .. } => {
+                assert_eq!(cmd, "hermes");
+                assert_eq!(args, &["acp"]);
+            }
+            other => panic!("expected npx distribution for Hermes, got {other:?}"),
+        }
+    }
+
     // Only Claude Code and Codex ship as a third-party ACP adapter wrapping a
     // vendor CLI of a different name. Every other agent's registry `cmd` IS the
     // vendor CLI, so claiming an adapter relation for one would make preflight
@@ -963,9 +965,18 @@ mod tests {
         }
     }
 
+    // OpenClaw rejects MCP server entries inside `mcpServers` (the empty `[]`
+    // field is still serialized and tolerated) and fails session/new on any
+    // entry, so it must be the only BUILT-IN with `supports_mcp == false`.
+    // Every other built-in (current and future) keeps it `true`, so a newly
+    // added agent that wrongly opts out — or a regression flipping OpenClaw
+    // back on — trips this assert. Custom agents are deliberately out of
+    // scope: their flag is a stored, user-set declaration
+    // (`CustomAgentDef::supports_mcp`), so a registry hydrated by another test
+    // may legitimately hold an opted-out one.
     #[test]
-    fn only_openclaw_opts_out_of_mcp() {
-        for agent_type in all_acp_agents() {
+    fn only_builtin_openclaw_opts_out_of_mcp() {
+        for agent_type in builtin_acp_agents() {
             let meta = get_agent_meta(agent_type);
             assert_eq!(
                 meta.supports_mcp,

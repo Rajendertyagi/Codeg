@@ -61,6 +61,7 @@ function settings(
     auto_process: false,
     max_concurrent: 2,
     merge_strategy: "squash",
+    auto_merge: false,
     delete_worktree_default: true,
     ...overrides,
   }
@@ -113,6 +114,23 @@ describe("TaskCompleteDialog", () => {
 
     await waitFor(() => expect(settingsMock).toHaveBeenCalled())
     expect(screen.queryByRole("checkbox")).toBeNull()
+
+    await userEvent.click(screen.getByRole("button", { name: "Complete" }))
+    await waitFor(() => expect(completeMock).toHaveBeenCalledWith(7, false))
+  })
+
+  it("explains a gone worktree and completes without a deletion choice", async () => {
+    settingsMock.mockResolvedValue(settings())
+    // Recorded worktree, but its folder/directory no longer exists — the
+    // engine converges the leftovers itself, so the checkbox disappears and
+    // the copy switches to the no-merge-possible explanation.
+    renderDialog(task({ files_changed: 3, worktree_missing: true }))
+
+    await waitFor(() => expect(settingsMock).toHaveBeenCalled())
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(
+      screen.getByText(/worktree has been removed/, { exact: false })
+    ).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole("button", { name: "Complete" }))
     await waitFor(() => expect(completeMock).toHaveBeenCalledWith(7, false))

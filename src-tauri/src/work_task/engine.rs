@@ -27,7 +27,7 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::MissedTickBehavior;
 
 use crate::acp::manager::ConnectionManager;
-use crate::acp::types::{AcpEvent, EventEnvelope, PromptInputBlock};
+use crate::acp::types::{AcpEvent, EventEnvelope, PromptCapabilitiesInfo, PromptInputBlock};
 use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
 use crate::acp::InternalEventBus;
 use crate::commands::acp::{build_session_runtime_env, verify_agent_installed};
@@ -272,10 +272,12 @@ enum LaunchMode {
     Fresh,
     /// Retry after failure: resume the session if possible and ask to continue.
     Retry,
-    /// A follow-up on a reviewed task: the user's text, framed by their intent.
+    /// A follow-up on a reviewed task: the user's text, framed by their intent,
+    /// plus whatever the composer attached out of band (images, pasted bytes).
     Return {
         intent: FollowUpIntent,
         feedback: String,
+        attachments: Vec<serde_json::Value>,
     },
     /// Merge generation: the agent lands the task onto the base branch itself
     /// (sync base into the worktree, resolve conflicts, merge into base). The
@@ -426,14 +428,23 @@ impl TaskEngine {
         self: &Arc<Self>,
         task_id: i32,
         note: Option<String>,
+        attachments: Vec<serde_json::Value>,
     ) -> Result<(), String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
             .map_err(|e| e.to_string())?;
         self.preflight_folder(task.folder_id).await?;
         let note = note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
-        let action = note
-            .map(|note| serde_json::json!({ "action": "retry", "note": note }));
+        // An attachment is an instruction on its own: a screenshot with no
+        // sentence still has to reach the retry prompt, so the action is
+        // recorded whenever EITHER part is present.
+        let action = (note.is_some() || !attachments.is_empty()).then(|| {
+            serde_json::json!({
+                "action": "retry",
+                "note": note.unwrap_or_default(),
+                "blocks": attachments,
+            })
+        });
         match work_task_service::claim_for_run_with_action(
             &self.db.conn,
             task_id,
@@ -464,6 +475,7 @@ impl TaskEngine {
         task_id: i32,
         intent: FollowUpIntent,
         feedback: String,
+        attachments: Vec<serde_json::Value>,
     ) -> Result<(), String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
@@ -478,6 +490,7 @@ impl TaskEngine {
                 "action": "return",
                 "intent": intent.as_str(),
                 "feedback": feedback,
+                "blocks": attachments,
             })),
         )
         .await
@@ -489,7 +502,11 @@ impl TaskEngine {
         self.spawn_launch(
             task_id,
             task.folder_id,
-            LaunchMode::Return { intent, feedback },
+            LaunchMode::Return {
+                intent,
+                feedback,
+                attachments,
+            },
         );
         Ok(())
     }
@@ -971,7 +988,31 @@ impl TaskEngine {
         };
         emit_conversation_upsert(&self.emitter, &self.db.conn, conversation_id).await;
 
-        let blocks = compose_prompt(&cfg, &task, &mode, &settings, resumed, &self.db.conn).await?;
+        let mut blocks =
+            compose_prompt(&cfg, &task, &mode, &settings, resumed, &self.db.conn).await?;
+        // Re-encode attached images for the agent that actually answered the
+        // handshake. A task's blocks are STORED — the composer picked their
+        // encoding from a transient probe that may not have landed, possibly
+        // months ago, and the task's agent can change between then and this
+        // run. The live session's advertised capabilities are the only truth.
+        //
+        // Only for a prompt that actually carries an image, and only then do we
+        // wait: `spawn_agent` returns before a FRESH session's handshake
+        // completes, so the capabilities are typically still unpublished here.
+        // Every other launch (the overwhelming majority) pays nothing.
+        if blocks.iter().any(carries_image) {
+            match self
+                .manager
+                .wait_for_prompt_capabilities(&conn_id, IMAGE_CAPABILITY_WAIT)
+                .await
+            {
+                Some(caps) => reencode_images(&mut blocks, &caps),
+                None => tracing::warn!(
+                    "[work_task] task {task_id}: agent never advertised prompt capabilities; \
+                     sending attached images as stored"
+                ),
+            }
+        }
 
         // Register for completion correlation BEFORE prompting so a fast
         // TurnComplete can't race ahead of the index entry.
@@ -1076,6 +1117,16 @@ impl TaskEngine {
             }
         }
 
+        // The directory is gone, but the branch may not be: a retry / follow-up
+        // after the checkout was removed must continue the work already
+        // committed on the branch — not restart on a fresh base while those
+        // commits sit stranded on a branch nothing points to. Only when the
+        // branch cannot be re-checked-out does the fresh mint below take over
+        // (re-recording base + branch).
+        if let Some(wt) = self.recreate_worktree_from_branch(task, root).await {
+            return Ok(wt);
+        }
+
         let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
         let base_branch = head
             .branch
@@ -1126,6 +1177,91 @@ impl TaskEngine {
         .await
         .map_err(|e| e.to_string())?;
         Ok(WorktreeRef {
+            folder_id: wt.id,
+            path: wt.path,
+        })
+    }
+
+    /// Try to re-create the task's worktree from its still-existing work
+    /// branch (`git worktree add <path> <branch>`, prior commits intact), at
+    /// the recorded folder's path — or the standard naming when that row is
+    /// gone. `None` when the branch is gone too, the path is occupied, or git
+    /// refuses (e.g. the branch is checked out elsewhere) — the caller then
+    /// mints a fresh worktree.
+    async fn recreate_worktree_from_branch(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+        root: &crate::models::FolderDetail,
+    ) -> Option<WorktreeRef> {
+        let branch = task.work_branch.as_deref()?;
+        // The recorded base stays authoritative for the branch's history; the
+        // three are only ever written together, but a row missing them must
+        // fall through to the fresh mint that records them.
+        let base_branch = task.base_branch.as_deref()?;
+        let base_sha = task.base_sha.as_deref()?;
+        // The LOCAL branch specifically — an unqualified lookup would let a
+        // same-name tag answer here and the add below would check out a
+        // detached HEAD instead of the branch.
+        match task_git::local_branch_tip(&root.path, branch).await {
+            Ok(Some(_)) => {}
+            _ => return None, // branch gone too — nothing to continue from
+        }
+        // Prefer the recorded folder row's path so the row binds back to the
+        // same workspace entry; fall back to the standard naming.
+        let recorded = match task.worktree_folder_id {
+            Some(wt_id) => get_folder_core(&self.db, wt_id).await.ok().map(|d| d.path),
+            None => None,
+        };
+        let path = recorded.unwrap_or_else(|| {
+            sibling_path(
+                &root.path,
+                &format!("{}-task-{}", basename(&root.path), task.id),
+            )
+        });
+        if Path::new(&path).exists() {
+            return None; // something else lives there now
+        }
+        if let Err(e) = task_git::worktree_add_existing_branch(&root.path, &path, branch).await {
+            tracing::info!(
+                "[work_task] task {}: could not re-create the worktree from branch \
+                 {branch}: {e}",
+                task.id
+            );
+            return None;
+        }
+        let wt = match open_worktree_folder_core(&self.db, path.clone(), task.folder_id).await {
+            Ok(wt) => wt,
+            Err(e) => {
+                // The checkout exists but has no folder row; the fresh-mint
+                // fallback will collide on the path and suffix itself, so the
+                // launch still proceeds.
+                tracing::warn!(
+                    "[work_task] task {}: recreated worktree at {path} but could not open \
+                     its folder: {e}",
+                    task.id
+                );
+                return None;
+            }
+        };
+        // Re-attach under the ORIGINAL base: the branch's history is diffed
+        // against it, and re-recording today's HEAD would misstate the change
+        // set the review shows.
+        if let Err(e) = work_task_service::attach_worktree(
+            &self.db.conn,
+            task.id,
+            wt.id,
+            base_branch,
+            base_sha,
+            branch,
+        )
+        .await
+        {
+            tracing::warn!(
+                "[work_task] task {}: could not re-attach the recreated worktree: {e}",
+                task.id
+            );
+        }
+        Some(WorktreeRef {
             folder_id: wt.id,
             path: wt.path,
         })
@@ -1362,6 +1498,9 @@ impl TaskEngine {
             self.settle_merge_generation(t, stop_reason, summary.as_deref())
                 .await;
             self.pump_folder(t.folder_id).await;
+            // The folder's one merge slot just freed — the next reviewed task
+            // in the auto-merge train (if any) can land now.
+            self.spawn_auto_merge_sweep(t.folder_id);
             return;
         }
 
@@ -1409,7 +1548,7 @@ impl TaskEngine {
                     .await
                     .unwrap_or(false);
                     if settled {
-                        self.spawn_preflight(task_id, run_seq);
+                        self.spawn_post_review(task_id, run_seq);
                     }
                     settled
                 }
@@ -1530,13 +1669,19 @@ impl TaskEngine {
 
     // ── preflight (acceptance red/green light) ──────────────────────────────
 
-    /// Run the folder's configured preflight command against the task worktree
-    /// after a settle into review. Fire-and-forget: the result is written CAS
-    /// (review + run_seq), so a task that moved on ignores a slow finish.
-    fn spawn_preflight(self: &Arc<Self>, task_id: i32, run_seq: i32) {
+    /// After a settle into review: run the folder's preflight command (if one
+    /// is configured), then give auto-merge its chance. One spawned task, in
+    /// that order — the sweep requires a green light whenever a preflight is
+    /// configured, so the light must be on the row before the sweep reads it.
+    /// Fire-and-forget: the light is written CAS (review + run_seq), so a task
+    /// that moved on ignores a slow finish, and the sweep re-checks status.
+    fn spawn_post_review(self: &Arc<Self>, task_id: i32, run_seq: i32) {
         let engine = self.clone();
         tokio::spawn(async move {
             engine.run_preflight(task_id, run_seq).await;
+            if let Ok(task) = work_task_service::get_model(&engine.db.conn, task_id).await {
+                engine.auto_merge_sweep(task.folder_id).await;
+            }
         });
     }
 
@@ -1636,20 +1781,29 @@ impl TaskEngine {
 
     // ── accept without merging ─────────────────────────────────────────────
 
-    /// Accept a reviewed task that produced nothing to land: no merge
-    /// generation, just review → done, optionally taking the worktree with it.
+    /// Accept a reviewed task without dispatching a merge generation: review →
+    /// done, optionally taking the worktree with it.
     ///
-    /// The board only offers this when the recorded diff stat is empty, and
-    /// that stat is a snapshot from when the run settled — so git, not the row,
-    /// decides. The whole decision runs inside the folder's git lock, with the
-    /// CAS in the middle: check, settle and remove form one critical section,
-    /// leaving no window in which the task can gain a commit between the check
-    /// that cleared it and the `branch -D` that would take it away.
+    /// Two ways in, and the board offers exactly one of them per task:
+    /// - the recorded diff stat is empty — nothing to land. The stat is a
+    ///   snapshot from when the run settled, so git (not the row) re-decides
+    ///   under the lock;
+    /// - the worktree is GONE (folder row removed, or its directory deleted
+    ///   from disk) — a merge generation cannot run at all, so completing is
+    ///   the only acceptance left. The leftovers are converged like any other
+    ///   removal, except the work branch survives whenever it still holds
+    ///   commits the base never received.
     ///
-    /// Two probes, because neither alone sees everything the removal destroys:
-    /// a commit made on the work branch is invisible to `git status` but shows
-    /// up in the diff against the base, and an untracked file is the reverse.
-    /// Anything either one finds keeps the worktree on disk.
+    /// The whole decision runs inside the folder's git lock, with the CAS in
+    /// the middle: check, settle and remove form one critical section, leaving
+    /// no window in which the task can gain a commit between the check that
+    /// cleared it and the `branch -D` that would take it away.
+    ///
+    /// Two probes on the live-worktree path, because neither alone sees
+    /// everything the removal destroys: a commit made on the work branch is
+    /// invisible to `git status` but shows up in the diff against the base, and
+    /// an untracked file is the reverse. Anything either one finds keeps the
+    /// worktree on disk.
     pub async fn complete_task(&self, task_id: i32, delete_worktree: bool) -> Result<(), String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
@@ -1664,12 +1818,20 @@ impl TaskEngine {
         let lock = self.folder_lock(task.folder_id).await;
         let _guard = lock.lock().await;
 
-        if self.has_landable_changes(&task).await? {
-            return Err(
-                "this task changed files after all — merge it instead of completing it".to_string(),
-            );
-        }
-        if !work_task_service::complete_without_merge(&self.db.conn, task_id)
+        let live_wt = self.live_worktree(&task).await;
+        let reason = match &live_wt {
+            Some(wt) => {
+                if self.has_landable_changes(&task, &wt.path).await? {
+                    return Err(
+                        "this task changed files after all — merge it instead of completing it"
+                            .to_string(),
+                    );
+                }
+                "completed without merging: no changes"
+            }
+            None => "completed without merging: the worktree is gone",
+        };
+        if !work_task_service::complete_without_merge(&self.db.conn, task_id, reason)
             .await
             .map_err(|e| e.to_string())?
         {
@@ -1677,7 +1839,13 @@ impl TaskEngine {
         }
         self.emit_upsert(task_id);
 
-        if delete_worktree {
+        if live_wt.is_none() {
+            // Nothing usable is left behind the worktree pointer — converge
+            // the bookkeeping regardless of the checkbox (there is no worktree
+            // left to keep), sparing only a branch that still holds work.
+            self.converge_missing_worktree(&task).await;
+            self.emit_upsert(task_id);
+        } else if delete_worktree {
             if self.worktree_holds_uncommitted(&task).await {
                 let _ = work_task_service::set_cleanup_state(
                     &self.db.conn,
@@ -1696,6 +1864,82 @@ impl TaskEngine {
             self.emit_upsert(task_id);
         }
         Ok(())
+    }
+
+    /// The task's recorded worktree while it can still serve a merge: folder
+    /// row live and directory on disk. `None` covers "never recorded", "row
+    /// removed" and "directory gone" alike.
+    async fn live_worktree(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+    ) -> Option<crate::models::FolderDetail> {
+        let wt_id = task.worktree_folder_id?;
+        let detail = get_folder_core(&self.db, wt_id).await.ok()?;
+        Path::new(&detail.path).exists().then_some(detail)
+    }
+
+    /// Converge the leftovers of a worktree that is no longer usable (folder
+    /// row removed, or directory gone from disk): prune the stale git
+    /// registration, soft-delete the folder row, re-parent its conversations —
+    /// the same sequence every other removal runs — EXCEPT that the work
+    /// branch survives whenever it still holds commits the base never
+    /// received. This path is reached without the user ever confirming a
+    /// deletion of work, and `branch -D` is its only irreversible step; a kept
+    /// branch stays visible in the branch selector for a manual merge or
+    /// delete. Caller holds the folder git lock.
+    async fn converge_missing_worktree(&self, task: &crate::db::entities::work_task::Model) {
+        let task_id = task.id;
+        let Some(wt_id) = task.worktree_folder_id else {
+            return; // already detached — nothing to converge
+        };
+        let root = get_folder_core(&self.db, task.folder_id).await.ok();
+        let wt = get_folder_core(&self.db, wt_id).await.ok();
+        let (Some(root), Some(wt)) = (root, wt) else {
+            // The folder rows are already gone — detach, and tell clients
+            // still holding a stale copy to drop it.
+            let _ = work_task_service::clear_worktree(&self.db.conn, task_id).await;
+            emit_folder_deleted(&self.emitter, wt_id);
+            return;
+        };
+        let mut branch_to_delete = task.work_branch.as_deref();
+        if let Some(branch) = branch_to_delete {
+            if task_git::branch_holds_unlanded_work(
+                &root.path,
+                branch,
+                task.base_branch.as_deref(),
+                task.base_sha.as_deref(),
+            )
+            .await
+            {
+                tracing::info!(
+                    "[work_task] task {task_id}: keeping branch {branch} — it still holds \
+                     unlanded commits"
+                );
+                let _ = work_task_service::record_event(
+                    &self.db.conn,
+                    task_id,
+                    "user_action",
+                    "engine",
+                    Some(serde_json::json!({ "action": "branch_kept", "branch": branch })),
+                )
+                .await;
+                branch_to_delete = None;
+            }
+        }
+        if let Err(e) =
+            task_git::remove_worktree_and_branch(&root.path, &wt.path, branch_to_delete).await
+        {
+            let _ = work_task_service::set_cleanup_state(
+                &self.db.conn,
+                task_id,
+                true,
+                Some(e.to_string()),
+            )
+            .await;
+            return;
+        }
+        converge_worktree_removal(&self.db, &self.emitter, task_id, wt_id, task.folder_id, &wt.path)
+            .await;
     }
 
     /// Whether the task worktree still has anything uncommitted (tracked edits
@@ -1719,22 +1963,17 @@ impl TaskEngine {
     /// task?" — including work committed on the branch after the run settled,
     /// which `git status` reports as a clean worktree. Mirrors the changed-files
     /// view the user reviewed (same base fallback), so the board's offer and
-    /// this check cannot disagree. A task whose worktree is already gone has
-    /// nothing to land.
+    /// this check cannot disagree. `wt_path` is the already-verified live
+    /// worktree (see [`Self::live_worktree`]).
     async fn has_landable_changes(
         &self,
         task: &crate::db::entities::work_task::Model,
+        wt_path: &str,
     ) -> Result<bool, String> {
-        let Some(wt_id) = task.worktree_folder_id else {
-            return Ok(false);
-        };
         let Some(base) = task.base_sha.clone().or_else(|| task.base_branch.clone()) else {
             return Ok(false);
         };
-        let wt = get_folder_core(&self.db, wt_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        let files = task_git::diff_numstat(&wt.path, &base)
+        let files = task_git::diff_numstat(wt_path, &base)
             .await
             .map_err(|e| format!("could not read the task's changes: {e}"))?;
         Ok(!files.is_empty())
@@ -1750,12 +1989,15 @@ impl TaskEngine {
     /// conflicts in the same turn. Validation runs before the review→merging
     /// CAS, so a refused merge leaves the task untouched; after dispatch the
     /// settle comes from git truth (`settle_merge_generation` / recovery),
-    /// never from the agent's word.
+    /// never from the agent's word. `auto` marks a dispatch the engine's
+    /// auto-merge sweep issued rather than a click — same pipeline (including
+    /// the folder's per-stage prompts), different actor on the timeline.
     pub async fn merge_task(
         self: &Arc<Self>,
         task_id: i32,
         message: Option<String>,
         delete_worktree: bool,
+        auto: bool,
     ) -> Result<(), String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
@@ -1821,7 +2063,19 @@ impl TaskEngine {
         };
         // Keep recovery away from the dispatch window (begin → live conn).
         self.merging.lock().await.insert(task_id);
-        let result = match work_task_service::begin_merge(&self.db.conn, task_id, &state).await {
+        // `task.run_seq` was read before the folder lock; the CAS binds the
+        // dispatch to that exact generation, so waiting out the lock behind an
+        // attempt that failed (and bannered the row) misses instead of
+        // redispatching — the auto path's no-retry latch depends on this.
+        let result = match work_task_service::begin_merge(
+            &self.db.conn,
+            task_id,
+            &state,
+            task.run_seq,
+            auto,
+        )
+        .await
+        {
             Err(e) => Err(e.to_string()),
             Ok(None) => Err("task left review before the merge began".to_string()),
             Ok(Some(_run_seq)) => {
@@ -2014,6 +2268,116 @@ impl TaskEngine {
         Ok((root, wt, base_branch, work_branch))
     }
 
+    // ── auto-merge (unattended landing) ─────────────────────────────────────
+
+    /// Fire-and-forget [`Self::auto_merge_sweep`] — a dispatch holds the
+    /// folder's git lock for the whole launch, which must not stall the
+    /// engine's event loop.
+    fn spawn_auto_merge_sweep(self: &Arc<Self>, folder_id: i32) {
+        let engine = self.clone();
+        tokio::spawn(async move {
+            engine.auto_merge_sweep(folder_id).await;
+        });
+    }
+
+    /// Sweep one folder — or, with `None`, every folder that currently holds a
+    /// reviewed task. `None` serves the reconcile tick and a change of the
+    /// global settings row, which can switch auto-merge on for any folder that
+    /// follows it. Each folder's sweep runs spawned, so one folder's dispatch
+    /// cannot delay another's.
+    pub async fn sweep_auto_merge_backlog(self: &Arc<Self>, folder_id: Option<i32>) {
+        match folder_id {
+            Some(folder_id) => self.spawn_auto_merge_sweep(folder_id),
+            None => {
+                let review = work_task_service::list_by_status(
+                    &self.db.conn,
+                    &[WorkTaskStatus::Review],
+                )
+                .await
+                .unwrap_or_default();
+                let mut swept: HashSet<i32> = HashSet::new();
+                for task in review {
+                    if swept.insert(task.folder_id) {
+                        self.spawn_auto_merge_sweep(task.folder_id);
+                    }
+                }
+            }
+        }
+    }
+
+    /// When the folder's settings ask for it, dispatch the same merge the
+    /// button would — agent-written commit message, worktree per the folder's
+    /// default — for the oldest reviewed task that is actually mergeable. One
+    /// dispatch per sweep: merges are serial per folder anyway, and every
+    /// settle re-sweeps, so a column of reviewed tasks drains one landing at a
+    /// time (the merge train).
+    ///
+    /// Concurrent sweeps, clicks and settles are all safe: `merge_task`
+    /// serializes dispatches on the folder git lock and CAS-guards
+    /// review→merging, so the worst case is a benign "someone got there first"
+    /// refusal, which the sweep swallows. A dispatch refused for a real reason
+    /// (wrong base branch, staged changes, …) leaves that reason on the row as
+    /// the card's error banner — and a row with an error is no longer
+    /// eligible, so a hopeless dispatch is attempted once, not looped.
+    async fn auto_merge_sweep(self: &Arc<Self>, folder_id: i32) {
+        let settings = work_task_service::settings_get_effective(&self.db.conn, folder_id)
+            .await
+            .unwrap_or_default();
+        if !settings.auto_merge {
+            return;
+        }
+        // Fast path only — merge_task re-checks under the folder lock.
+        let merging = work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Merging])
+            .await
+            .unwrap_or_default();
+        if merging.iter().any(|t| t.folder_id == folder_id) {
+            return;
+        }
+        let mut candidates: Vec<_> =
+            work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Review])
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|t| t.folder_id == folder_id && auto_merge_candidate(t, &settings))
+                .collect();
+        candidates.sort_by_key(|t| (t.settled_at, t.id));
+        for task in candidates {
+            // A gone worktree cannot serve a merge generation; that task's
+            // acceptance is the "complete" button — a user decision.
+            if self.live_worktree(&task).await.is_none() {
+                continue;
+            }
+            match self
+                .merge_task(task.id, None, settings.delete_worktree_default, true)
+                .await
+            {
+                Ok(()) => {}
+                Err(e) if is_benign_merge_race(&e) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        "[work_task] auto-merge of task {} refused: {e}",
+                        task.id
+                    );
+                    if work_task_service::set_review_error(
+                        &self.db.conn,
+                        task.id,
+                        task.run_seq,
+                        &format!("auto-merge failed: {e}"),
+                    )
+                    .await
+                    .unwrap_or(false)
+                    {
+                        self.emit_upsert(task.id);
+                    }
+                }
+            }
+            // One dispatch (or one refusal) per sweep. Cascading on after a
+            // refusal would stamp one environmental problem onto every card
+            // in the column.
+            return;
+        }
+    }
+
     // ── merging crash recovery (git truth) ──────────────────────────────────
 
     /// Recover a task stuck in `merging` (crash / lost process) from git
@@ -2127,6 +2491,12 @@ impl TaskEngine {
             return;
         };
         let Some(wt_id) = task.worktree_folder_id else {
+            // Nothing left to remove. A cleanup flag surviving past the
+            // detach would offer a retry that can never succeed — clear it.
+            if task.cleanup_state.is_some() {
+                let _ =
+                    work_task_service::set_cleanup_state(&self.db.conn, task_id, false, None).await;
+            }
             return;
         };
         // Precondition: no live connection of ours on this task.
@@ -2226,7 +2596,7 @@ impl TaskEngine {
             let changed = match conv_status {
                 Some(ConversationStatus::PendingReview) | Some(ConversationStatus::Completed) => {
                     let stats = self.snapshot_diff_stats(task.id).await;
-                    work_task_service::settle_review(
+                    let settled = work_task_service::settle_review(
                         &self.db.conn,
                         task.id,
                         task.run_seq,
@@ -2234,7 +2604,14 @@ impl TaskEngine {
                         stats,
                     )
                     .await
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                    if settled {
+                        // The dropped TurnComplete owed review its preflight
+                        // and its auto-merge chance — same hook as the live
+                        // settle path.
+                        self.spawn_post_review(task.id, task.run_seq);
+                    }
+                    settled
                 }
                 Some(ConversationStatus::Cancelled) => {
                     work_task_service::cancel(&self.db.conn, task.id, None)
@@ -2298,6 +2675,9 @@ impl TaskEngine {
             tokio::spawn(async move {
                 engine.recover_merging(task.id).await;
                 engine.pump_folder(task.folder_id).await;
+                // Recovery freed the folder's merge slot (landed or bounced) —
+                // resume the auto-merge train where the crash cut it.
+                engine.auto_merge_sweep(task.folder_id).await;
             });
         }
 
@@ -2309,6 +2689,12 @@ impl TaskEngine {
         {
             self.pump_folder(folder_id).await;
         }
+
+        // Review backlog for auto-merge folders: a dispatch lost between the
+        // settle and the merge (crash window), and tasks already sitting in
+        // review when the setting was switched on. The sweep re-checks the
+        // setting per folder, so this is a cheap scan for folders without it.
+        self.sweep_auto_merge_backlog(None).await;
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -2466,6 +2852,69 @@ async fn converge_worktree_removal(
     }
 }
 
+/// Row-level auto-merge eligibility: everything the sweep can decide without
+/// touching git. Mirrors what the board offers — a task whose merge button the
+/// user would not see (nothing to land) or would not press yet (red or pending
+/// preflight, an error banner from an earlier attempt) is not auto-merged.
+///
+/// - `files_changed == 0` is the "complete" button's territory: dispatching a
+///   merge generation there would land nothing and bounce. `None` (stats
+///   unreadable) merges, exactly like the UI defaults to the merge button.
+/// - With a preflight configured, only a green light qualifies; `None` means
+///   the light is not written yet (the post-preflight hook re-sweeps) and a
+///   red light waits for the user. Without one, there is no gate.
+/// - `last_error` present = an earlier merge failed or was refused; retrying
+///   unattended would loop, so the row waits for the user (any claim or a
+///   fresh dispatch clears it).
+fn auto_merge_candidate(
+    task: &crate::db::entities::work_task::Model,
+    settings: &WorkTaskFolderSettings,
+) -> bool {
+    if task.status != WorkTaskStatus::Review {
+        return false;
+    }
+    if task.last_error.is_some() {
+        return false;
+    }
+    if task.files_changed == Some(0) {
+        return false;
+    }
+    if preflight_configured(settings) {
+        let passed = task
+            .preflight
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<WorkTaskPreflight>(s).ok())
+            .is_some_and(|p| p.status == "passed");
+        if !passed {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether the folder's settings would make `run_preflight` attempt a command
+/// at all — the sweep's gate must not wait for a light that will never be
+/// written.
+fn preflight_configured(settings: &WorkTaskFolderSettings) -> bool {
+    settings
+        .preflight_command
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|c| !c.is_empty())
+        || settings.preflight_command_id.is_some()
+}
+
+/// Merge-dispatch refusals that mean "someone else is (or just was) handling
+/// this" rather than "this merge cannot work": the losing side of a race with
+/// a click, another sweep or a user action. Matched on `merge_task`'s own
+/// wording (same file, a screen up) — these are skipped silently, because the
+/// next settle re-sweeps, while every other refusal banners the row.
+fn is_benign_merge_race(error: &str) -> bool {
+    error.contains("not in review")
+        || error.contains("left review")
+        || error.contains("already merging")
+}
+
 /// Pick the launch mode for a pump-driven launch from the task's history: a
 /// task with a prior conversation continues (retry semantics); a pristine one
 /// starts fresh. Explicit returns launch directly with `LaunchMode::Return`.
@@ -2542,12 +2991,11 @@ async fn compose_prompt(
             // and the user attached a note when re-queueing it. Review feedback
             // cannot exist here — that needs a session — but match on the kind
             // rather than assume it.
-            if let Some(Outstanding {
-                kind: OutstandingKind::Restart,
-                text,
-            }) = outstanding_instruction(conn, task.id).await
-            {
-                blocks.push(restart_note_block(&text));
+            if let Some(outstanding) = outstanding_instruction(conn, task.id).await {
+                if matches!(outstanding.kind, OutstandingKind::Restart) {
+                    blocks.push(restart_note_block(&outstanding.text));
+                    blocks.extend(attachment_blocks(&outstanding.attachments, task.id));
+                }
             }
         }
         LaunchMode::Retry => {
@@ -2580,9 +3028,16 @@ async fn compose_prompt(
                         text: format!("Latest review feedback to address:\n{}", outstanding.text),
                     },
                 });
+                // Whatever the user attached to that instruction follows it, so
+                // the replay carries the screenshot as well as the sentence.
+                blocks.extend(attachment_blocks(&outstanding.attachments, task.id));
             }
         }
-        LaunchMode::Return { intent, feedback } => {
+        LaunchMode::Return {
+            intent,
+            feedback,
+            attachments,
+        } => {
             if !resumed {
                 // Session resume failed — the fresh session has no context, so
                 // replay the task before the feedback.
@@ -2597,6 +3052,7 @@ async fn compose_prompt(
             blocks.push(PromptInputBlock::Text {
                 text: follow_up_text(*intent, feedback),
             });
+            blocks.extend(attachment_blocks(attachments, task.id));
         }
         LaunchMode::Merge {
             root_path,
@@ -2757,6 +3213,107 @@ fn follow_up_text(intent: FollowUpIntent, feedback: &str) -> String {
     }
 }
 
+/// The attachment blocks recorded on a `user_action` payload, if any. Absent on
+/// every event written before follow-ups could carry attachments, so a missing
+/// or malformed field simply means "nothing was attached".
+fn payload_blocks(payload: &serde_json::Value) -> Vec<serde_json::Value> {
+    payload
+        .get("blocks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Parse stored attachment blocks, dropping (with a warning) any that no longer
+/// deserialize. Unlike the task's own prompt, an attachment is an addition to
+/// the instruction — losing one must not stop the run that carries the rest.
+fn attachment_blocks(raw: &[serde_json::Value], task_id: i32) -> Vec<PromptInputBlock> {
+    raw.iter()
+        .filter_map(|v| match serde_json::from_value::<PromptInputBlock>(v.clone()) {
+            Ok(block) => Some(block),
+            Err(e) => {
+                tracing::warn!("[work_task] task {task_id}: dropping bad attachment block: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
+/// How long a launch waits for the agent to advertise what a prompt may carry,
+/// before sending its attached images in whatever shape they were stored. Only
+/// image-bearing prompts ever wait, and only until the handshake lands — which
+/// is the same round trip the prompt itself is about to need anyway.
+const IMAGE_CAPABILITY_WAIT: Duration = Duration::from_secs(20);
+
+/// Whether this block carries image bytes in either of the two wire encodings.
+fn carries_image(block: &PromptInputBlock) -> bool {
+    match block {
+        PromptInputBlock::Image { .. } => true,
+        PromptInputBlock::Resource {
+            mime_type, blob, ..
+        } => {
+            blob.is_some()
+                && mime_type
+                    .as_deref()
+                    .is_some_and(|m| m.starts_with("image/"))
+        }
+        _ => false,
+    }
+}
+
+/// Swap every attached image into the shape the connected agent advertised.
+///
+/// Two wire encodings carry the same bytes: a native `Image` block, and a
+/// `Resource` whose `blob` holds them under an image mime type (what agents
+/// that reject image content but accept embedded context — e.g. Grok — take).
+/// The composer picks one at compose time from a probe; this picks again at
+/// dispatch, when the session has actually said what it accepts.
+///
+/// Only image-carrying blocks are touched, and only to move between those two
+/// encodings — never to invent or drop content. An agent that advertises
+/// neither is left alone: there is no third shape to reach for, and rewriting
+/// into one it also rejects would only obscure the error it is about to raise.
+fn reencode_images(blocks: &mut [PromptInputBlock], caps: &PromptCapabilitiesInfo) {
+    for (index, block) in blocks.iter_mut().enumerate() {
+        match block {
+            PromptInputBlock::Image {
+                data,
+                mime_type,
+                uri,
+            } if !caps.image && caps.embedded_context => {
+                *block = PromptInputBlock::Resource {
+                    // A path-less image (a pasted screenshot) needs some stable
+                    // identifier; its position in this prompt is one.
+                    uri: uri
+                        .clone()
+                        .unwrap_or_else(|| format!("clipboard://work-task-image-{index}")),
+                    mime_type: Some(mime_type.clone()),
+                    text: None,
+                    blob: Some(std::mem::take(data)),
+                };
+            }
+            PromptInputBlock::Resource {
+                uri,
+                mime_type,
+                text: None,
+                blob: Some(blob),
+            } if caps.image
+                && !caps.embedded_context
+                && mime_type
+                    .as_deref()
+                    .is_some_and(|m| m.starts_with("image/")) =>
+            {
+                *block = PromptInputBlock::Image {
+                    data: std::mem::take(blob),
+                    mime_type: mime_type.clone().unwrap_or_default(),
+                    uri: Some(uri.clone()),
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A restart note reaches the agent as context, not as the task itself.
 fn restart_note_block(note: &str) -> PromptInputBlock {
     PromptInputBlock::Text {
@@ -2779,6 +3336,10 @@ enum OutstandingKind {
 struct Outstanding {
     kind: OutstandingKind,
     text: String,
+    /// Raw prompt blocks the user attached to that instruction (images, pasted
+    /// bytes). Kept unparsed here — `attachment_blocks` validates at the point
+    /// the prompt is composed.
+    attachments: Vec<serde_json::Value>,
 }
 
 /// The user instruction the agent still owes a turn to, if any.
@@ -2840,6 +3401,7 @@ async fn outstanding_instruction(
                         return Some(Outstanding {
                             kind: OutstandingKind::Review(intent),
                             text: text.to_string(),
+                            attachments: payload_blocks(&payload),
                         });
                     }
                     "retry" | "requeue" => {
@@ -2847,6 +3409,7 @@ async fn outstanding_instruction(
                         return Some(Outstanding {
                             kind: OutstandingKind::Restart,
                             text: text.to_string(),
+                            attachments: payload_blocks(&payload),
                         });
                     }
                     // Other user actions (delete, …) neither carry nor consume
@@ -3089,6 +3652,78 @@ mod tests {
         assert_eq!(prompt_head(&[]), "");
     }
 
+    /// The sweep's row-level gate: exactly the tasks whose merge button the
+    /// board would show — and whose light is green — land unattended.
+    #[test]
+    fn auto_merge_candidate_mirrors_the_board() {
+        let settings = WorkTaskFolderSettings::default();
+        let mut task = task_row();
+        task.status = WorkTaskStatus::Review;
+        assert!(auto_merge_candidate(&task, &settings));
+
+        // Unknown stats merge (the UI defaults to the merge button there); an
+        // empty change set is the complete button's territory.
+        task.files_changed = Some(3);
+        assert!(auto_merge_candidate(&task, &settings));
+        task.files_changed = Some(0);
+        assert!(!auto_merge_candidate(&task, &settings));
+        task.files_changed = None;
+
+        // An earlier failed or refused merge waits for the user.
+        task.last_error = Some("merge dispatch failed: conflict".into());
+        assert!(!auto_merge_candidate(&task, &settings));
+        task.last_error = None;
+
+        // Only review is mergeable.
+        task.status = WorkTaskStatus::Running;
+        assert!(!auto_merge_candidate(&task, &settings));
+        task.status = WorkTaskStatus::Review;
+
+        // A configured preflight gates on a green light — absent, running and
+        // red all wait. A blank custom command is no gate; a legacy id-only
+        // reference is one.
+        let gated = WorkTaskFolderSettings {
+            preflight_command: Some("pnpm test".into()),
+            ..Default::default()
+        };
+        assert!(!auto_merge_candidate(&task, &gated));
+        for status in ["running", "failed"] {
+            task.preflight =
+                Some(format!(r#"{{"status":"{status}","command":"pnpm test"}}"#));
+            assert!(!auto_merge_candidate(&task, &gated), "{status} light");
+        }
+        task.preflight = Some(r#"{"status":"passed","command":"pnpm test"}"#.into());
+        assert!(auto_merge_candidate(&task, &gated));
+        assert!(!preflight_configured(&WorkTaskFolderSettings {
+            preflight_command: Some("  ".into()),
+            ..Default::default()
+        }));
+        assert!(preflight_configured(&WorkTaskFolderSettings {
+            preflight_command_id: Some(4),
+            ..Default::default()
+        }));
+    }
+
+    /// The refusal wordings that mean "lost a race" are skipped silently by
+    /// the sweep; the strings live in `merge_task`, and this pin keeps the
+    /// match and the wording from drifting apart.
+    #[test]
+    fn benign_merge_races_are_recognized() {
+        assert!(is_benign_merge_race("task is not in review"));
+        assert!(is_benign_merge_race(
+            "task left review before the merge began"
+        ));
+        assert!(is_benign_merge_race(
+            "another task of this project is already merging — wait for it"
+        ));
+        assert!(!is_benign_merge_race(
+            "project folder is on 'feature', expected 'main' — switch back to merge"
+        ));
+        assert!(!is_benign_merge_race(
+            "the task worktree no longer exists on disk"
+        ));
+    }
+
     /// Minimal task row for prompt composition (nothing here touches the DB).
     fn task_row() -> crate::db::entities::work_task::Model {
         let now = chrono::Utc::now();
@@ -3173,6 +3808,7 @@ mod tests {
         LaunchMode::Return {
             intent,
             feedback: "please fix the copy".to_string(),
+            attachments: Vec::new(),
         }
     }
 
@@ -3304,6 +3940,7 @@ mod tests {
             &LaunchMode::Return {
                 intent: FollowUpIntent::Verify,
                 feedback: String::new(),
+                attachments: Vec::new(),
             },
             &WorkTaskFolderSettings::default(),
             true,
@@ -3432,6 +4069,199 @@ mod tests {
         // The task's own brief still opens the prompt, so the transcript's
         // phase divider keeps matching on it.
         assert_eq!(prompt_head(&blocks), "Fix the login flow and add tests.");
+    }
+
+    /// A screenshot pasted into the follow-up box has to reach the agent as an
+    /// image block, right behind the sentence that framed it — dropping it
+    /// would leave the framing pointing at nothing.
+    #[tokio::test]
+    async fn a_follow_up_carries_its_attachments_after_the_framing() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let blocks = compose_prompt(
+            &task_config(),
+            &task_row(),
+            &LaunchMode::Return {
+                intent: FollowUpIntent::Revise,
+                feedback: "the header is wrong, see this".to_string(),
+                attachments: vec![
+                    serde_json::json!({
+                        "type": "image", "data": "aGk=", "mime_type": "image/png", "uri": null,
+                    }),
+                    // A block that no longer deserializes is dropped, not fatal:
+                    // one bad attachment must not stop the run carrying the rest.
+                    serde_json::json!({ "type": "not_a_block" }),
+                ],
+            },
+            &WorkTaskFolderSettings::default(),
+            true,
+            &db.conn,
+        )
+        .await
+        .expect("compose");
+        // The framing sentence, then the image it refers to, then the worktree
+        // guard every prompt ends with.
+        let framing = blocks
+            .iter()
+            .position(
+                |b| matches!(b, PromptInputBlock::Text { text } if text.contains("the header is wrong, see this")),
+            )
+            .expect("the feedback is in there");
+        assert!(
+            matches!(
+                blocks.get(framing + 1),
+                Some(PromptInputBlock::Image { data, .. }) if data == "aGk="
+            ),
+            "the image follows the framing text, unparseable blocks aside: {blocks:?}"
+        );
+        assert_eq!(
+            blocks
+                .iter()
+                .filter(|b| matches!(b, PromptInputBlock::Image { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// The same attachments have to survive the replay path: a run interrupted
+    /// before it answered owes the user the screenshot as well as the sentence.
+    #[tokio::test]
+    async fn an_outstanding_instruction_replays_its_attachments() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let id = seeded_task(&db.conn).await;
+        user_action(
+            &db.conn,
+            id,
+            serde_json::json!({
+                "action": "retry",
+                "note": "it looked like this",
+                "blocks": [
+                    { "type": "image", "data": "aGk=", "mime_type": "image/png", "uri": null },
+                ],
+            }),
+        )
+        .await;
+
+        let outstanding = outstanding_instruction(&db.conn, id)
+            .await
+            .expect("an outstanding instruction");
+        assert_eq!(outstanding.attachments.len(), 1);
+
+        let mut row = task_row();
+        row.id = id;
+        let blocks = compose_prompt(
+            &task_config(),
+            &row,
+            &LaunchMode::Retry,
+            &WorkTaskFolderSettings::default(),
+            true,
+            &db.conn,
+        )
+        .await
+        .expect("compose");
+        assert!(
+            blocks
+                .iter()
+                .any(|b| matches!(b, PromptInputBlock::Image { data, .. } if data == "aGk=")),
+            "the replayed instruction keeps its image: {blocks:?}"
+        );
+    }
+
+    /// A task's image blocks are stored, so the encoding the composer chose can
+    /// be stale by the time the run happens (a slow probe then, a different
+    /// agent now). Dispatch re-encodes for whoever actually answered.
+    #[test]
+    fn images_are_reencoded_for_the_agent_that_answered() {
+        let caps = |image, embedded_context| PromptCapabilitiesInfo {
+            image,
+            audio: false,
+            embedded_context,
+        };
+        let image = || PromptInputBlock::Image {
+            data: "aGk=".to_string(),
+            mime_type: "image/png".to_string(),
+            uri: None,
+        };
+        let embedded = || PromptInputBlock::Resource {
+            uri: "file:///shot.png".to_string(),
+            mime_type: Some("image/png".to_string()),
+            text: None,
+            blob: Some("aGk=".to_string()),
+        };
+
+        // Native image → embedded blob for an agent that takes only the latter,
+        // with a stable synthetic uri for a path-less screenshot.
+        let mut blocks = vec![PromptInputBlock::Text { text: "see".into() }, image()];
+        reencode_images(&mut blocks, &caps(false, true));
+        assert!(
+            matches!(
+                &blocks[1],
+                PromptInputBlock::Resource { uri, mime_type, text: None, blob: Some(b) }
+                    if uri == "clipboard://work-task-image-1"
+                        && mime_type.as_deref() == Some("image/png")
+                        && b == "aGk="
+            ),
+            "{:?}",
+            blocks[1]
+        );
+        // The prose beside it is untouched.
+        assert!(matches!(&blocks[0], PromptInputBlock::Text { text } if text == "see"));
+
+        // …and back, for an agent that takes images but not embedded context.
+        let mut blocks = vec![embedded()];
+        reencode_images(&mut blocks, &caps(true, false));
+        assert!(
+            matches!(
+                &blocks[0],
+                PromptInputBlock::Image { data, mime_type, uri: Some(u) }
+                    if data == "aGk=" && mime_type == "image/png" && u == "file:///shot.png"
+            ),
+            "{:?}",
+            blocks[0]
+        );
+
+        // An agent that takes both, or neither, gets exactly what was stored:
+        // there is no better shape to reach for in either case.
+        for c in [caps(true, true), caps(false, false)] {
+            let mut blocks = vec![image(), embedded()];
+            reencode_images(&mut blocks, &c);
+            assert!(matches!(&blocks[0], PromptInputBlock::Image { uri: None, .. }));
+            assert!(matches!(&blocks[1], PromptInputBlock::Resource { blob: Some(_), .. }));
+        }
+
+        // A non-image embedded resource (a pasted text file) is never turned
+        // into an image, whatever the agent accepts.
+        let mut blocks = vec![PromptInputBlock::Resource {
+            uri: "clipboard://notes".to_string(),
+            mime_type: Some("text/markdown".to_string()),
+            text: None,
+            blob: Some("aGk=".to_string()),
+        }];
+        reencode_images(&mut blocks, &caps(true, false));
+        assert!(matches!(
+            &blocks[0],
+            PromptInputBlock::Resource { mime_type, .. }
+                if mime_type.as_deref() == Some("text/markdown")
+        ));
+    }
+
+    /// An event written before follow-ups could carry attachments has no
+    /// `blocks` field at all — that has to read as "nothing was attached".
+    #[tokio::test]
+    async fn a_legacy_instruction_without_blocks_still_replays() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let id = seeded_task(&db.conn).await;
+        user_action(
+            &db.conn,
+            id,
+            serde_json::json!({ "action": "return", "intent": "revise", "feedback": "redo it" }),
+        )
+        .await;
+
+        let outstanding = outstanding_instruction(&db.conn, id)
+            .await
+            .expect("an outstanding instruction");
+        assert_eq!(outstanding.text, "redo it");
+        assert!(outstanding.attachments.is_empty());
     }
 
     /// Two ways a busy task could hide its own instruction: `list_events`

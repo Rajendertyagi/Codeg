@@ -1451,6 +1451,7 @@ mod tests {
             skills_dir: None,
             source: Default::default(),
             version_probe: None,
+            supports_mcp: true,
         };
         let agent = crate::models::agent::AgentType::custom("office-pack-agent").unwrap();
 

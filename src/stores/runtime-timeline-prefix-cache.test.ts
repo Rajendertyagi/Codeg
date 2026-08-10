@@ -70,6 +70,10 @@ function seedSession(
     delegationKickoffText: null,
     sessionStats: null,
     historyAssistantBaseline: null,
+    batchBoundaryIndex: null,
+    batchBoundaryPrefixHash: null,
+    loadingOlderTurns: false,
+    olderTurnsPrependEpoch: 0,
     pendingCleanup: false,
     ...overrides,
   }
@@ -198,13 +202,13 @@ describe("timeline prefix cache across streaming batches", () => {
     const detail = makeDetail([turn("u1", "user")])
     seedSession(CID, { detail })
     const timelineA = getTimelineTurns(CID)
-    expect(timelineA[0].key).toBe(`persisted-${CID}-u1-0`)
+    expect(timelineA[0].key).toBe(`persisted-${CID}-u1`)
 
     // Migration re-homes the same detail object under a new conversation id.
     const CID2 = CID + 1
     seedSession(CID2, { detail })
     const timelineB = getTimelineTurns(CID2)
-    expect(timelineB[0].key).toBe(`persisted-${CID2}-u1-0`)
+    expect(timelineB[0].key).toBe(`persisted-${CID2}-u1`)
     expect(timelineB[0]).not.toBe(timelineA[0])
   })
 })

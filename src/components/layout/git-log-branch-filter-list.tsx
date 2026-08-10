@@ -13,6 +13,8 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
+import { useImeGuard } from "@/hooks/use-ime-guard"
+import { isImeCompositionKey } from "@/lib/ime-composition"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { branchRowPaddingLeft } from "@/components/layout/branch-tree-collapsible"
@@ -103,6 +105,7 @@ export function GitLogBranchFilterList({
   onSelectBranch,
   onSelectHead,
 }: GitLogBranchFilterListProps) {
+  const ime = useImeGuard()
   const t = useTranslations("Folder.gitLogTab.branchSelector")
 
   const [query, setQuery] = useState("")
@@ -162,7 +165,7 @@ export function GitLogBranchFilterList({
           active.isContentEditable)
       )
         return
-      if (event.isComposing || event.key === "Process") return
+      if (isImeCompositionKey(event)) return
       const isPrintable =
         event.key.length === 1 &&
         !event.metaKey &&
@@ -331,7 +334,7 @@ export function GitLogBranchFilterList({
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     // Don't steal Enter/arrows while an IME composition is in flight (CJK).
-    if (event.nativeEvent.isComposing || event.key === "Process") return
+    if (ime.isComposing(event)) return
 
     switch (event.key) {
       case "ArrowDown":
@@ -524,6 +527,7 @@ export function GitLogBranchFilterList({
             setQuery(event.target.value)
             setActiveIndex(0)
           }}
+          {...ime.props}
           onKeyDown={handleKeyDown}
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />

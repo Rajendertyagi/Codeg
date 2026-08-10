@@ -119,6 +119,53 @@ pub struct DbConversationDetail {
     /// mid-stream, which would otherwise double-render against the live reply.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_flight_user_turn_id: Option<String>,
+    /// Turn-window metadata, present only when the request asked for a window
+    /// (`tailTurns` / `fromIndex`). All four fields are set together; their
+    /// absence tells the frontend this is a legacy full response and windowed
+    /// merging must be disabled. `turns` then holds `full[turns_offset..]`
+    /// while every OTHER field of this struct (summary counts, stats,
+    /// watermark) still describes the full transcript.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns_offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns_total: Option<usize>,
+    /// Assistant turns in `full[0..turns_offset)` — lets the frontend convert
+    /// its send-time history baseline between global and window coordinates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_turns_before_offset: Option<usize>,
+    /// Structural fingerprint of `full[0..turns_offset)` (see
+    /// `commands::turn_window::prefix_fingerprint`), as a fixed-width 16-hex
+    /// string — a u64 JSON number would be rounded past 2^53-1 by JS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix_hash: Option<String>,
+    /// Max `timestamp` across `full[0..turns_offset)`; `None` when the window
+    /// covers the whole list (offset 0). The frontend retires a background
+    /// overlay turn only when its timestamp is STRICTLY greater than this
+    /// bound (i.e. its persisted twin is provably inside the window).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncovered_prefix_max_ts: Option<DateTime<Utc>>,
+}
+
+/// One page of older history for the reverse-infinite-scroll path:
+/// `full[turns_offset .. turns_offset + turns.len())`, ending just before the
+/// `beforeIndex` the client asked for. Light-path response — no summary, no
+/// stats, no live correlation.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConversationTurnsPage {
+    pub turns: Vec<MessageTurn>,
+    pub turns_offset: usize,
+    pub turns_total: usize,
+    pub assistant_turns_before_offset: usize,
+    /// Fingerprint of `full[0..turns_offset)` — adopted by the client as its
+    /// new window fingerprint after a successful prepend.
+    pub prefix_hash: String,
+    /// Fingerprint of `full[0..min(beforeIndex, total))` — the seam proof:
+    /// must equal the client's current window fingerprint or the page cannot
+    /// legally join the already-loaded window (the prefix was rewritten
+    /// between requests).
+    pub prefix_hash_before_index: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncovered_prefix_max_ts: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

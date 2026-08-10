@@ -11,11 +11,13 @@ import { useEffect } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
-import type { WorkTask } from "@/lib/types"
+import type { PromptInputBlock, WorkTask } from "@/lib/types"
 
 import { TaskRestartDialog } from "./task-restart-dialog"
-import type { TaskFollowUpComposerProps } from "./task-follow-up-composer"
+import type {
+  TaskMessageComposerHandle,
+  TaskMessageComposerProps,
+} from "./task-message-composer"
 
 const workTaskRetry = vi.fn().mockResolvedValue(undefined)
 const workTaskRequeue = vi.fn().mockResolvedValue(undefined)
@@ -34,15 +36,23 @@ vi.mock("@/stores/app-workspace-store", () => {
 
 /** The composer, stubbed to a handle whose text the test sets directly. */
 let editorText = ""
-let composerProps: TaskFollowUpComposerProps | null = null
-vi.mock("./task-follow-up-composer", () => ({
-  TaskFollowUpComposer: (props: TaskFollowUpComposerProps) => {
+let editorBlocks: PromptInputBlock[] = []
+let uploading = false
+let composerProps: TaskMessageComposerProps | null = null
+vi.mock("./task-message-composer", () => ({
+  TaskMessageComposer: (props: TaskMessageComposerProps) => {
     composerProps = props
-    const ref = props.editorRef
+    const ref = props.ref
     useEffect(() => {
-      if (ref) ref.current = { getText: () => editorText } as RichComposerHandle
+      if (!ref || typeof ref === "function") return
+      ref.current = {
+        getText: () => editorText,
+        getAttachmentBlocks: () => editorBlocks,
+        hasUploadingImage: () => uploading,
+        hasAttachments: () => editorBlocks.length > 0,
+      } as TaskMessageComposerHandle
       return () => {
-        if (ref) ref.current = null
+        ref.current = null
       }
     }, [ref])
     return <div data-testid="restart-composer" />
@@ -71,6 +81,8 @@ function mount(row: WorkTask, kind: "retry" | "requeue" = "retry") {
 
 beforeEach(() => {
   editorText = ""
+  editorBlocks = []
+  uploading = false
   composerProps = null
   vi.clearAllMocks()
 })
@@ -87,7 +99,8 @@ describe("TaskRestartDialog", () => {
     await waitFor(() => expect(workTaskRetry).toHaveBeenCalledTimes(1))
     expect(workTaskRetry).toHaveBeenCalledWith(
       7,
-      "look at [retry.ts](file:///repo/retry.ts) first"
+      "look at [retry.ts](file:///repo/retry.ts) first",
+      []
     )
   })
 
@@ -96,7 +109,31 @@ describe("TaskRestartDialog", () => {
     mount(task({ status: "canceled" }), "requeue")
     await user.click(screen.getByRole("button", { name: "Requeue" }))
     await waitFor(() => expect(workTaskRequeue).toHaveBeenCalledTimes(1))
-    expect(workTaskRequeue).toHaveBeenCalledWith(7, null)
+    expect(workTaskRequeue).toHaveBeenCalledWith(7, null, [])
+  })
+
+  it("restarts on a pasted screenshot alone, with no note", async () => {
+    const user = userEvent.setup()
+    editorBlocks = [
+      { type: "image", data: "aGk=", mime_type: "image/png", uri: null },
+    ]
+    mount(task())
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(workTaskRetry).toHaveBeenCalledTimes(1))
+    // No prose, but the image still reaches the next run as its own block.
+    expect(workTaskRetry).toHaveBeenCalledWith(7, null, editorBlocks)
+  })
+
+  it("refuses to send while an image upload is still in flight", async () => {
+    const user = userEvent.setup()
+    uploading = true
+    editorBlocks = [
+      { type: "image", data: "", mime_type: "image/png", uri: null },
+    ]
+    mount(task())
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    // The block would carry neither bytes nor a uri to hydrate from.
+    expect(workTaskRetry).not.toHaveBeenCalled()
   })
 
   it("sends once when the send key fires twice before React catches up", async () => {

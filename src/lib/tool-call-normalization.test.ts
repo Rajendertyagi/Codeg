@@ -1,12 +1,67 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  aliasToolInputKeys,
   claudeCodeMarksSubagent,
   codexMarksPlanReview,
   extractClaudeCodeMetaTitle,
   inferLiveToolName,
   normalizeToolName,
 } from "./tool-call-normalization"
+
+describe("aliasToolInputKeys", () => {
+  it("fills the canonical names OpenCode spells in camelCase", () => {
+    // The live wire shape of an OpenCode `write` / `edit` call: its ACP adapter
+    // forwards the tool's own camelCase arguments, so the Write card found no
+    // `file_path` and rendered "unknown" under a header naming the file.
+    expect(
+      aliasToolInputKeys({
+        filePath: "src/app/minimal/page.tsx",
+        content: "export const A = 1\n",
+      })
+    ).toEqual({
+      filePath: "src/app/minimal/page.tsx",
+      file_path: "src/app/minimal/page.tsx",
+      content: "export const A = 1\n",
+    })
+
+    expect(
+      aliasToolInputKeys({
+        filePath: "src/app.ts",
+        oldString: "a",
+        newString: "b",
+        replaceAll: true,
+      })
+    ).toMatchObject({
+      file_path: "src/app.ts",
+      old_string: "a",
+      new_string: "b",
+      replace_all: true,
+    })
+  })
+
+  it("never overrides what the agent actually sent", () => {
+    const input = { filePath: "camel.ts", file_path: "snake.ts" }
+    expect(aliasToolInputKeys(input)).toBe(input)
+  })
+
+  it("is a no-op (same reference) on already-canonical and unrelated input", () => {
+    // History is normalized in Rust, and snake_case agents never trip this —
+    // returning the same object keeps `useMemo` consumers from re-rendering.
+    const canonical = { file_path: "a.ts", old_string: "x", new_string: "y" }
+    expect(aliasToolInputKeys(canonical)).toBe(canonical)
+
+    const unrelated = { command: "pnpm test" }
+    expect(aliasToolInputKeys(unrelated)).toBe(unrelated)
+
+    expect(aliasToolInputKeys(null)).toBeNull()
+  })
+
+  it("ignores an alias whose value is null", () => {
+    const input = { filePath: null, content: "x" }
+    expect(aliasToolInputKeys(input)).toBe(input)
+  })
+})
 
 describe("inferLiveToolName meta.claudeCode.toolName override", () => {
   it("returns memory_recall for synthesized recall events without rawInput", () => {
@@ -476,6 +531,50 @@ describe("normalizeToolName Grok terminal tool", () => {
     // via the generic tool shell (raw ANSI, no terminal title) instead of the
     // Terminal card.
     expect(normalizeToolName("run_terminal_command")).toBe("bash")
+  })
+})
+
+describe("Grok spawn_subagent routes to the Agent card", () => {
+  it("aliases the raw spawn_subagent name to agent", () => {
+    // The freeform `\bagent\b` matcher can NOT catch it — "subagent" has no
+    // word boundary before "agent" — so without the exact alias any path
+    // where only the raw name survives renders a generic card.
+    expect(normalizeToolName("spawn_subagent")).toBe("agent")
+  })
+
+  it("classifies the live frame-1 tool_call by its input shape", () => {
+    // The exact first frame captured from a real grok session (019f9432):
+    // rawInput carries the standard `{description, prompt, subagent_type}`.
+    expect(
+      inferLiveToolName({
+        title: "spawn_subagent",
+        kind: "other",
+        rawInput: JSON.stringify({
+          description: "Explore test pages patterns",
+          prompt: "Explore this Next.js app codebase…",
+          subagent_type: "explore",
+          capability_mode: "read-only",
+        }),
+        meta: {
+          "x.ai/tool": {
+            name: "spawn_subagent",
+            kind: "task",
+            label: "Subagent",
+          },
+        },
+      })
+    ).toBe("agent")
+  })
+
+  it("still resolves via x.ai/tool.name when rawInput is absent", () => {
+    expect(
+      inferLiveToolName({
+        title: "Explore test pages patterns",
+        kind: "other",
+        rawInput: null,
+        meta: { "x.ai/tool": { name: "spawn_subagent", kind: "task" } },
+      })
+    ).toBe("agent")
   })
 })
 

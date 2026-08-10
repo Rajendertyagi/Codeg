@@ -11,6 +11,7 @@ import {
 } from "react"
 import { Reorder, useDragControls } from "motion/react"
 import { useLocale, useTranslations } from "next-intl"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useSearchParams } from "next/navigation"
 import {
   AlertCircle,
@@ -45,6 +46,8 @@ import {
 } from "@/lib/custom-agents"
 import { AgentIcon } from "@/components/agent-icon"
 import { AddCustomAgentDialog } from "@/components/settings/add-custom-agent-dialog"
+import { SettingCard, SettingRow } from "@/components/shared/setting-card"
+import { CustomAgentMcpToggle } from "@/components/settings/custom-agent-mcp-toggle"
 import { CustomAgentSkillsToggle } from "@/components/settings/custom-agent-skills-toggle"
 import {
   AlertDialog,
@@ -3517,10 +3520,11 @@ export function buildAcpAdapterCheck(
 }
 
 // `uvReady` reports whether the uv runtime (uvx) is installed — only meaningful
-// for uvx agents (Hermes). Derived from the uv preflight check by the caller.
-// uvx agents need uv installed before their package can be prepared, so when
-// uv isn't ready every managed install/upgrade action is surfaced disabled and
-// the user is pointed at the separate "Install uv" preflight action.
+// for uvx agents (custom Python-package agents; built-in Hermes moved to the
+// npm bridge). Derived from the uv preflight check by the caller. uvx agents
+// need uv installed before their package can be prepared, so when uv isn't
+// ready every managed install/upgrade action is surfaced disabled and the
+// user is pointed at the separate "Install uv" preflight action.
 export function buildVersionCheck(
   agent: AcpAgentInfo,
   uvReady: boolean = true
@@ -3553,11 +3557,11 @@ export function buildVersionCheck(
   const uninstallAction: RunningActionKind =
     agent.distribution_type === "binary" ? "uninstall_binary" : "uninstall_npx"
 
-  // uvx agents (Hermes) need the uv runtime before any managed install/upgrade
-  // can run. Surface a single blocked state pointing at the separate "Install
+  // uvx agents need the uv runtime before any managed install/upgrade can
+  // run. Surface a single blocked state pointing at the separate "Install
   // uv" preflight action below, with the agent-install action shown disabled.
   // This covers both the fresh case (available=false) and the rare system-CLI
-  // case (available=true via a global `hermes`, but uvx still missing).
+  // case (available=true via the agent's own PATH CLI, but uvx still missing).
   // Uninstall stays available even without uv — it only clears the prepared
   // marker — so a prepared package can still be removed when uv is gone.
   if (agent.distribution_type === "uvx" && !uvReady) {
@@ -3860,6 +3864,7 @@ function AgentReorderItem({
 }
 
 export function AcpAgentSettings() {
+  const ime = useImeGuard()
   const locale = useLocale()
   const t = useTranslations("AcpAgentSettings")
   const rawTranslator = t as unknown as AcpTranslator
@@ -4070,10 +4075,11 @@ export function AcpAgentSettings() {
         }
 
         // Re-sync `available` from the authoritative backend status. It is
-        // recomputed live (e.g. `uvx_agent_launchable` for Hermes), so an
-        // install that provisions the runtime flips it true here — otherwise
-        // the version-status panel would stay stuck on the unavailable /
-        // "runtime not ready" branch with the freshly installed version shown.
+        // recomputed live (e.g. `uvx_agent_launchable` for custom uvx
+        // agents), so an install that provisions the runtime flips it true
+        // here — otherwise the version-status panel would stay stuck on the
+        // unavailable / "runtime not ready" branch with the freshly installed
+        // version shown.
         if (statusState.status === "fulfilled") {
           setAgents((prev) => {
             let changed = false
@@ -9173,7 +9179,14 @@ supports_websockets = true`}
                                                             modelId
                                                           )
                                                         }}
+                                                        {...ime.props}
                                                         onKeyDown={(event) => {
+                                                          if (
+                                                            ime.isComposing(
+                                                              event
+                                                            )
+                                                          )
+                                                            return
                                                           if (
                                                             event.key ===
                                                             "Enter"
@@ -10643,56 +10656,67 @@ supports_websockets = true`}
                   // channel that works for every agent, so they are the whole
                   // surface — plus the skills declaration and removing the
                   // agent.
+                  // All four blocks share the settings-card vocabulary
+                  // (`SettingCard` / `SettingRow`, as in the task settings
+                  // dialog) so the panel reads as one stack of settings rather
+                  // than four differently-shaped boxes.
                   <>
-                    <div className="space-y-3 rounded-md border bg-muted/10 p-3">
-                      <div>
-                        <label className="text-xs font-medium">
-                          {t("customAgentEdit")}
-                        </label>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          {t("customAgentEditHint")}
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setEditCustomAgentId(
-                            customAgentId(selectedAgent.agent_type)
-                          )
+                    <SettingCard>
+                      <SettingRow
+                        icon={Pencil}
+                        title={t("customAgentEdit")}
+                        description={t("customAgentEditHint")}
+                        control={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setEditCustomAgentId(
+                                customAgentId(selectedAgent.agent_type)
+                              )
+                            }
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            {t("customAgentEdit")}
+                          </Button>
                         }
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        {t("customAgentEdit")}
-                      </Button>
-                    </div>
+                      />
+                    </SettingCard>
                     <CustomAgentSkillsToggle
                       registryId={customAgentId(selectedAgent.agent_type) ?? ""}
                     />
-                    <div className="space-y-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-                      <div>
-                        <label className="text-xs font-medium text-destructive">
-                          {t("customAgentRemove")}
-                        </label>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          {t("customAgentRemoveHint")}
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        disabled={removingCustomAgent}
-                        onClick={() => setRemoveConfirmAgent(selectedAgent)}
-                      >
-                        {removingCustomAgent ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                        {t("customAgentRemove")}
-                      </Button>
-                    </div>
+                    <CustomAgentMcpToggle
+                      registryId={customAgentId(selectedAgent.agent_type) ?? ""}
+                    />
+                    {/* The one destructive action keeps its own tinting — the
+                        card shape is shared, the color is the warning. */}
+                    <SettingCard className="border-destructive/30 bg-destructive/5">
+                      <SettingRow
+                        icon={Trash2}
+                        title={
+                          <span className="text-destructive">
+                            {t("customAgentRemove")}
+                          </span>
+                        }
+                        description={t("customAgentRemoveHint")}
+                        control={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            disabled={removingCustomAgent}
+                            onClick={() => setRemoveConfirmAgent(selectedAgent)}
+                          >
+                            {removingCustomAgent ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                            {t("customAgentRemove")}
+                          </Button>
+                        }
+                      />
+                    </SettingCard>
                   </>
                 ) : (
                   <div className="space-y-3 rounded-md border bg-muted/10 p-3">
@@ -11458,7 +11482,9 @@ supports_websockets = true`}
               value={customVersionInput}
               placeholder={customInstallAgent?.registry_version ?? "1.0.0"}
               onChange={(e) => setCustomVersionInput(e.target.value)}
+              {...ime.props}
               onKeyDown={(e) => {
+                if (ime.isComposing(e)) return
                 if (
                   e.key === "Enter" &&
                   isValidCustomVersion(customVersionInput)

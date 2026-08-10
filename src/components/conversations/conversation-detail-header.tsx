@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   deleteConversation,
   updateConversationPinned,
@@ -100,6 +101,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   status,
 }: ConversationDetailHeaderProps) {
   const t = useTranslations("Folder.conversationCard")
+  const ime = useImeGuard()
   const tConv = useTranslations("Folder.conversation")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
@@ -341,8 +343,9 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
           <Input
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
+            {...ime.props}
             onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing || e.key === "Process") return
+              if (ime.isComposing(e)) return
               if (e.key === "Enter") handleRenameConfirm()
             }}
             autoFocus

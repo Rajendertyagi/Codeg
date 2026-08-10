@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { WorkTask } from "@/lib/types"
-import { hasNothingToMerge } from "./task-acceptance"
+import {
+  hasNothingToMerge,
+  isWorktreeGone,
+  worktreeWasRemoved,
+} from "./task-acceptance"
 
 function task(overrides?: Partial<WorkTask>): WorkTask {
   return {
@@ -55,5 +59,55 @@ describe("hasNothingToMerge", () => {
   it("only speaks for tasks that are actually up for review", () => {
     expect(hasNothingToMerge(task({ status: "running" }))).toBe(false)
     expect(hasNothingToMerge(task({ status: "done" }))).toBe(false)
+  })
+
+  it("offers complete when the worktree is gone — merge could only fail", () => {
+    // Detached entirely (removed via the app)…
+    expect(
+      hasNothingToMerge(task({ files_changed: 3, worktree_folder_id: null }))
+    ).toBe(true)
+    // …or recorded but no longer usable (folder/dir removed behind the app).
+    expect(
+      hasNothingToMerge(task({ files_changed: 3, worktree_missing: true }))
+    ).toBe(true)
+    // Still only in review: elsewhere the state carries no acceptance.
+    expect(
+      hasNothingToMerge(
+        task({ status: "running", files_changed: 3, worktree_missing: true })
+      )
+    ).toBe(false)
+  })
+})
+
+describe("isWorktreeGone", () => {
+  it("reads either the detached pointer or the backend's missing stamp", () => {
+    expect(isWorktreeGone(task())).toBe(false)
+    expect(isWorktreeGone(task({ worktree_folder_id: null }))).toBe(true)
+    expect(isWorktreeGone(task({ worktree_missing: true }))).toBe(true)
+  })
+})
+
+describe("worktreeWasRemoved", () => {
+  it("tells a deleted worktree from one that never existed", () => {
+    // Ran and detached — the branch is the witness a worktree once existed.
+    expect(
+      worktreeWasRemoved(task({ status: "done", worktree_folder_id: null }))
+    ).toBe(true)
+    // Recorded but no longer usable on disk.
+    expect(worktreeWasRemoved(task({ worktree_missing: true }))).toBe(true)
+    // Intact worktree — nothing was removed.
+    expect(worktreeWasRemoved(task())).toBe(false)
+    // Just created, never initialized: nothing existed to remove.
+    expect(
+      worktreeWasRemoved(
+        task({
+          status: "todo",
+          worktree_folder_id: null,
+          work_branch: null,
+          base_branch: null,
+          base_sha: null,
+        })
+      )
+    ).toBe(false)
   })
 })

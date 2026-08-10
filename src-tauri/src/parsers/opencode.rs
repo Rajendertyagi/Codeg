@@ -77,6 +77,7 @@ impl OpenCodeParser {
     fn parse_sqlite_summary_row(row: &QueryResult) -> Result<ConversationSummary, ParseError> {
         let id: String = row.try_get("", "id")?;
         let directory: Option<String> = row.try_get("", "directory")?;
+        let parent_id: Option<String> = row.try_get("", "parent_id")?;
         let title: Option<String> = row.try_get("", "title")?;
         let created_ms: i64 = row.try_get("", "created_ms")?;
         let updated_ms: i64 = row.try_get("", "updated_ms")?;
@@ -103,7 +104,11 @@ impl OpenCodeParser {
             message_count,
             model: normalize_optional_string(model),
             git_branch: None,
-            parent_id: None,
+            // A `task` tool call runs its sub-agent in its own session row,
+            // linked by `parent_id`. Dropping it listed every delegated
+            // sub-agent alongside the real conversations instead of nesting it
+            // under the one that spawned it.
+            parent_id: normalize_optional_string(parent_id),
             parent_tool_use_id: None,
             delegation_call_id: None,
         })
@@ -119,6 +124,7 @@ impl OpenCodeParser {
                 SELECT
                     s.id AS id,
                     s.directory AS directory,
+                    s.parent_id AS parent_id,
                     s.title AS title,
                     s.time_created AS created_ms,
                     s.time_updated AS updated_ms,
@@ -166,6 +172,7 @@ impl OpenCodeParser {
                 SELECT
                     s.id AS id,
                     s.directory AS directory,
+                    s.parent_id AS parent_id,
                     s.title AS title,
                     s.time_created AS created_ms,
                     s.time_updated AS updated_ms,
@@ -493,10 +500,14 @@ impl OpenCodeParser {
                             meta: None,
                         });
 
+                        // A sub-agent that failed carries `state.error` and no
+                        // `state.output`; without the fallback the Agent card
+                        // showed nothing at all for the failure.
                         let output_preview = state
                             .and_then(|s| s.get("output"))
                             .and_then(|v| value_to_preview(Some(v)))
-                            .map(|s| extract_task_result_content(&s));
+                            .map(|s| extract_task_result_content(&s))
+                            .or_else(|| pick_str(state, &["error"]).map(str::to_string));
 
                         // Compute duration from time fields
                         let time = state.and_then(|s| s.get("time"));
@@ -532,6 +543,10 @@ impl OpenCodeParser {
                             lines_removed: None,
                             other_tool_count: None,
                             tool_calls,
+                            // OpenCode's sub-agent transcript is already folded
+                            // into this stats block; there is no separate
+                            // session for the card to open.
+                            child_session_id: None,
                         });
 
                         let has_error_field = state.and_then(|s| s.get("error")).is_some();
@@ -543,25 +558,19 @@ impl OpenCodeParser {
                             images: Vec::new(),
                         });
                     } else {
-                        let input_preview = state_input.and_then(|v| value_to_preview(Some(v)));
+                        let normalized = normalize_tool_call(raw_tool_name, state);
 
                         blocks.push(ContentBlock::ToolUse {
                             tool_use_id: call_id.clone(),
-                            tool_name: raw_tool_name.to_string(),
-                            input_preview,
+                            tool_name: normalized.tool_name,
+                            input_preview: normalized.input_preview,
                             meta: None,
                         });
 
-                        let output_preview = state
-                            .and_then(|s| s.get("output"))
-                            .and_then(|v| value_to_preview(Some(v)));
-
-                        let has_error_field = state.and_then(|s| s.get("error")).is_some();
-
                         blocks.push(ContentBlock::ToolResult {
                             tool_use_id: call_id,
-                            output_preview,
-                            is_error: is_error_status(status) || has_error_field,
+                            output_preview: normalized.output_preview,
+                            is_error: is_error_status(status) || normalized.is_error,
                             agent_stats: None,
                             images: Vec::new(),
                         });
@@ -576,26 +585,23 @@ impl OpenCodeParser {
                         });
                     }
                 }
-                "patch" => {
-                    let files = value
-                        .get("files")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|item| item.as_str())
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    if !files.is_empty() {
-                        blocks.push(ContentBlock::Text {
-                            text: format!("Applied patch: {}", files.join(", ")),
-                        });
-                    }
-                }
-                "step-finish" if usage_from_step_finish.is_none() => {
-                    usage_from_step_finish = value
+                // `patch` records the snapshot diff OpenCode took across a
+                // step; it always restates files the `edit`/`write` calls in
+                // the same turn already show, with absolute paths. OpenCode's
+                // own UI filters it out of the transcript alongside
+                // `step-start`/`step-finish`, so rendering it as assistant
+                // prose ("Applied patch: /abs/path") was pure noise.
+                "patch" => {}
+                "step-finish" => {
+                    // Keep the LAST step-finish: a message can contain several
+                    // steps, and OpenCode restates the message's running total
+                    // on each one, so the first is the least complete.
+                    if let Some(usage) = value
                         .get("tokens")
-                        .and_then(extract_opencode_usage_from_tokens);
+                        .and_then(extract_opencode_usage_from_tokens)
+                    {
+                        usage_from_step_finish = Some(usage);
+                    }
                 }
                 _ => {}
             }
@@ -754,6 +760,316 @@ fn extract_opencode_file_image(value: &serde_json::Value) -> Option<ContentBlock
         mime_type,
         uri,
     })
+}
+
+/// One OpenCode tool call rewritten into codeg's shared tool vocabulary.
+struct NormalizedToolCall {
+    tool_name: String,
+    input_preview: Option<String>,
+    output_preview: Option<String>,
+    is_error: bool,
+}
+
+/// First present, non-empty string among `keys`, trimmed. For labels only
+/// (paths, names, error messages) — NEVER for source text, which must stay
+/// byte-exact (see `pick_str_verbatim`).
+fn pick_str<'a>(value: Option<&'a serde_json::Value>, keys: &[&str]) -> Option<&'a str> {
+    let obj = value?;
+    keys.iter().find_map(|key| {
+        obj.get(*key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })
+}
+
+/// First present string among `keys`, byte-for-byte. For source text —
+/// `oldString`/`newString`/`patchText` — where trimming corrupts the payload:
+/// an indentation-only edit trims both sides to the same string and renders as
+/// an empty diff with zero changed-line stats. An empty string is returned
+/// as-is (an empty `oldString` is OpenCode's create-file form of `edit`).
+fn pick_str_verbatim<'a>(value: Option<&'a serde_json::Value>, keys: &[&str]) -> Option<&'a str> {
+    let obj = value?;
+    keys.iter().find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
+}
+
+/// Copy `value[from]` into `out[to]` verbatim when present and not null.
+fn copy_field(
+    out: &mut serde_json::Map<String, serde_json::Value>,
+    value: Option<&serde_json::Value>,
+    from: &str,
+    to: &str,
+) {
+    if let Some(v) = value.and_then(|o| o.get(from)) {
+        if !v.is_null() {
+            out.insert(to.to_string(), v.clone());
+        }
+    }
+}
+
+fn insert_str(out: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: &str) {
+    out.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+}
+
+/// Start line of the first hunk in a unified diff (`@@ -12,7 +12,8 @@` → 12).
+///
+/// OpenCode hands us the real patch it applied, so the Edit card can label its
+/// hunks with true file line numbers instead of restarting at 1. This is the
+/// same `_start_line` hint the live ACP path injects by re-reading the file
+/// from disk (`acp/connection.rs::inject_start_line`) — here it is exact and
+/// needs no filesystem access.
+fn first_hunk_start_line(diff: &str) -> Option<u64> {
+    diff.lines()
+        .find(|line| line.starts_with("@@ -"))
+        .and_then(|line| {
+            let rest = line.strip_prefix("@@ -")?;
+            let end = rest.find([',', ' '])?;
+            rest.get(..end)?.parse::<u64>().ok()
+        })
+        .filter(|n| *n > 0)
+}
+
+/// Unwrap the `<skill_content name="…">…</skill_content>` envelope the `skill`
+/// tool returns, keeping only the skill body. The envelope repeats the skill
+/// name three ways and appends a base-directory blurb plus a sampled
+/// `<skill_files>` listing — a wall of boilerplate in front of every skill
+/// load. Returns the input unchanged when the envelope is absent.
+fn unwrap_skill_content(raw: &str) -> String {
+    let Some(open_end) = raw.find("<skill_content").and_then(|start| {
+        raw[start..]
+            .find('>')
+            .map(|offset| start + offset + 1)
+            .filter(|end| *end <= raw.len())
+    }) else {
+        return raw.to_string();
+    };
+    let close = raw[open_end..]
+        .find("</skill_content>")
+        .map(|i| open_end + i)
+        .unwrap_or(raw.len());
+
+    let mut body = raw[open_end..close].trim();
+    if let Some(files_start) = body.find("\n<skill_files>") {
+        body = body[..files_start].trim_end();
+    }
+    // Drop the trailing "Base directory for this skill: …" preamble block,
+    // which is machine guidance rather than skill content.
+    if let Some(base_dir) = body.find("\nBase directory for this skill:") {
+        body = body[..base_dir].trim_end();
+    }
+
+    if body.is_empty() {
+        raw.to_string()
+    } else {
+        body.to_string()
+    }
+}
+
+/// Rewrite OpenCode's tool call into the canonical names and snake_case input
+/// keys every renderer in codeg dispatches on (`file_path`, `old_string`,
+/// `new_string`, `pattern`, …).
+///
+/// OpenCode names its tool arguments in camelCase (`filePath`, `oldString`),
+/// so without this pass the dedicated cards found none of the fields they look
+/// for: the Edit card rendered an empty diff, the Write/Read cards lost their
+/// file path, and the changed-line tallies in `session-files.ts` came up zero.
+/// Doing it here rather than in the renderer follows `parsers/cursor.rs`, which
+/// likewise maps its agent's wire arguments onto the shared vocabulary.
+fn normalize_tool_call(raw_tool: &str, state: Option<&serde_json::Value>) -> NormalizedToolCall {
+    let input = state.and_then(|s| s.get("input"));
+    let metadata = state.and_then(|s| s.get("metadata"));
+    let name = raw_tool.trim().to_ascii_lowercase();
+
+    // A failed call carries `state.error` and no `state.output`. Reading only
+    // `output` left every failure rendering as an empty red card with no
+    // indication of what went wrong.
+    let error_text = pick_str(state, &["error"]).map(str::to_string);
+    let raw_output = state
+        .and_then(|s| s.get("output"))
+        .and_then(|v| value_to_preview(Some(v)));
+    let mut is_error = error_text.is_some();
+    let mut output_preview = raw_output.clone().or_else(|| error_text.clone());
+
+    let mut obj = serde_json::Map::new();
+    let mut tool_name = raw_tool.to_string();
+    let mut input_preview: Option<String> = None;
+
+    match name.as_str() {
+        "edit" => {
+            // `filePath` is the long-standing argument; `path` is what the
+            // rewritten (v2) edit tool takes. `metadata.filediff.file` is the
+            // absolute path OpenCode resolved, used when neither is present.
+            if let Some(path) = pick_str(input, &["filePath", "path", "file_path"]).or_else(|| {
+                pick_str(
+                    metadata.and_then(|m| m.get("filediff")),
+                    &["file", "filePath"],
+                )
+            }) {
+                insert_str(&mut obj, "file_path", path);
+            }
+            if let Some(old) = pick_str_verbatim(input, &["oldString", "old_string"]) {
+                insert_str(&mut obj, "old_string", old);
+            }
+            if let Some(new) = pick_str_verbatim(input, &["newString", "new_string"]) {
+                insert_str(&mut obj, "new_string", new);
+            }
+            copy_field(&mut obj, input, "replaceAll", "replace_all");
+            copy_field(&mut obj, input, "replace_all", "replace_all");
+
+            if let Some(start_line) = pick_str(metadata, &["diff"])
+                .or_else(|| pick_str(metadata.and_then(|m| m.get("filediff")), &["patch"]))
+                .and_then(first_hunk_start_line)
+            {
+                obj.insert("_start_line".to_string(), serde_json::json!(start_line));
+            }
+        }
+        "write" => {
+            tool_name = "write".to_string();
+            if let Some(path) = pick_str(input, &["filePath", "path", "file_path"])
+                .or_else(|| pick_str(metadata, &["filepath", "filePath"]))
+            {
+                insert_str(&mut obj, "file_path", path);
+            }
+            copy_field(&mut obj, input, "content", "content");
+        }
+        "read" => {
+            tool_name = "read".to_string();
+            if let Some(path) = pick_str(input, &["filePath", "path", "file_path"]) {
+                insert_str(&mut obj, "file_path", path);
+            }
+            copy_field(&mut obj, input, "offset", "offset");
+            copy_field(&mut obj, input, "limit", "limit");
+            if let Some(structured) = structure_read_output(metadata) {
+                output_preview = Some(structured);
+            }
+        }
+        "bash" => {
+            tool_name = "bash".to_string();
+            copy_field(&mut obj, input, "command", "command");
+            copy_field(&mut obj, input, "description", "description");
+            // A command that only writes to stderr leaves `state.output`
+            // empty while `metadata.output` still holds the combined stream.
+            if output_preview.is_none() {
+                output_preview = pick_str(metadata, &["output"]).map(str::to_string);
+            }
+        }
+        "grep" => {
+            tool_name = "grep".to_string();
+            copy_field(&mut obj, input, "pattern", "pattern");
+            copy_field(&mut obj, input, "path", "path");
+            // OpenCode calls the file filter `include`; every renderer and the
+            // `glob`-vs-`grep` classifier read it as `glob` (see cursor.rs).
+            copy_field(&mut obj, input, "include", "glob");
+            copy_field(&mut obj, input, "limit", "limit");
+        }
+        "glob" => {
+            tool_name = "glob".to_string();
+            copy_field(&mut obj, input, "pattern", "pattern");
+            copy_field(&mut obj, input, "path", "path");
+            copy_field(&mut obj, input, "limit", "limit");
+        }
+        // The v1 `patch` tool and the v2 `apply_patch` tool both take one
+        // freeform patch document. The Apply-Patch card takes that text
+        // directly, not a JSON envelope.
+        "patch" | "apply_patch" => {
+            tool_name = "apply_patch".to_string();
+            // Verbatim: patch text is source material — context lines begin
+            // with a significant leading space.
+            input_preview = pick_str_verbatim(input, &["patchText", "patch_text", "patch"])
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+                .or_else(|| input.and_then(|v| value_to_preview(Some(v))));
+        }
+        "skill" => {
+            tool_name = "skill".to_string();
+            if let Some(skill) = pick_str(input, &["name", "skill"])
+                .or_else(|| pick_str(metadata, &["name", "skill"]))
+            {
+                // `skill` is the field the card titles itself from; `name` is
+                // kept so the raw argument still shows in the generic view.
+                insert_str(&mut obj, "skill", skill);
+                insert_str(&mut obj, "name", skill);
+            }
+            if let Some(raw) = raw_output.as_deref() {
+                output_preview = Some(unwrap_skill_content(raw));
+            }
+        }
+        // OpenCode substitutes the `invalid` tool when the model calls a tool
+        // with arguments that fail schema validation. It completes
+        // successfully from OpenCode's point of view, so nothing downstream
+        // would flag it without this.
+        "invalid" => {
+            tool_name = "invalid".to_string();
+            copy_field(&mut obj, input, "tool", "tool");
+            copy_field(&mut obj, input, "error", "error");
+            is_error = true;
+        }
+        "webfetch" => {
+            tool_name = "webfetch".to_string();
+            copy_field(&mut obj, input, "url", "url");
+            copy_field(&mut obj, input, "format", "format");
+        }
+        "websearch" => {
+            tool_name = "websearch".to_string();
+            copy_field(&mut obj, input, "query", "query");
+        }
+        // Already canonical (`todowrite` → `{todos}`, `question` →
+        // `{questions}`, MCP and `lsp_*` tools carry server-defined shapes).
+        _ => {
+            input_preview = input.and_then(|v| value_to_preview(Some(v)));
+        }
+    }
+
+    if input_preview.is_none() {
+        input_preview = if obj.is_empty() {
+            input.and_then(|v| value_to_preview(Some(v)))
+        } else {
+            Some(serde_json::Value::Object(obj).to_string())
+        };
+    }
+
+    NormalizedToolCall {
+        tool_name,
+        input_preview,
+        output_preview,
+        is_error,
+    }
+}
+
+/// Rebuild a `read` result from `state.metadata.display`.
+///
+/// `state.output` wraps the file in `<path>`/`<type>`/`<content>` tags and
+/// prefixes every line with `N: `. `parsers::strip_numbered_lines` only knows
+/// the `→`/tab delimiters, so the envelope and the prefixes both survived into
+/// the card. `display` carries the same content already clean, plus the true
+/// first line number, which is exactly the `{start_line, content}` shape the
+/// shared read-output structurizer produces for the other agents.
+fn structure_read_output(metadata: Option<&serde_json::Value>) -> Option<String> {
+    let display = metadata?.get("display")?;
+    match display.get("type").and_then(|v| v.as_str())? {
+        "file" => {
+            let text = display.get("text").and_then(|v| v.as_str())?;
+            let start_line = display
+                .get("lineStart")
+                .and_then(|v| v.as_u64())
+                .filter(|n| *n > 0)
+                .unwrap_or(1);
+            Some(
+                serde_json::json!({ "start_line": start_line, "content": text })
+                    .to_string(),
+            )
+        }
+        "directory" => {
+            let entries: Vec<&str> = display
+                .get("entries")?
+                .as_array()?
+                .iter()
+                .filter_map(|e| e.as_str())
+                .collect();
+            (!entries.is_empty()).then(|| entries.join("\n"))
+        }
+        _ => None,
+    }
 }
 
 fn is_error_status(status: &str) -> bool {
@@ -967,26 +1283,22 @@ async fn batch_load_subagent_tool_calls(
             continue;
         }
 
+        // Same rewrite as top-level tool blocks (`normalize_tool_call`):
+        // without it the Agent card's nested rows kept camelCase inputs, the
+        // read XML envelope, the skill wrapper, and — worst — dropped
+        // `state.error`, so a failed child tool showed no output at all.
         let state = value.get("state");
-        let input_preview = state
-            .and_then(|s| s.get("input"))
-            .and_then(|v| value_to_preview(Some(v)))
-            .map(|s| truncate_str(&s, 500));
-        let output_preview = state
-            .and_then(|s| s.get("output"))
-            .and_then(|v| value_to_preview(Some(v)))
-            .map(|s| truncate_str(&s, 500));
+        let normalized = normalize_tool_call(&tool_name, state);
         let status = state
             .and_then(|s| s.get("status"))
             .and_then(|s| s.as_str())
             .unwrap_or("");
-        let has_error_field = state.and_then(|s| s.get("error")).is_some();
 
         result.entry(sid).or_default().push(AgentToolCall {
-            tool_name,
-            input_preview,
-            output_preview,
-            is_error: is_error_status(status) || has_error_field,
+            tool_name: normalized.tool_name,
+            input_preview: normalized.input_preview.map(|s| truncate_str(&s, 500)),
+            output_preview: normalized.output_preview.map(|s| truncate_str(&s, 500)),
+            is_error: is_error_status(status) || normalized.is_error,
         });
     }
 
@@ -1029,6 +1341,324 @@ mod tests {
             Some(ContentBlock::Image { data, mime_type, uri })
             if data == "QUJD" && mime_type == "image/jpeg" && uri.as_deref() == Some("avatar.jpg")
         ));
+    }
+
+    // The payloads below are verbatim `part.data` rows captured from a real
+    // opencode 1.18.14 run, trimmed only where a field is irrelevant here.
+
+    fn normalized(raw_tool: &str, state: serde_json::Value) -> super::NormalizedToolCall {
+        super::normalize_tool_call(raw_tool, Some(&state))
+    }
+
+    fn input_of(call: &super::NormalizedToolCall) -> serde_json::Value {
+        serde_json::from_str(call.input_preview.as_deref().expect("input preview"))
+            .expect("input preview is JSON")
+    }
+
+    #[test]
+    fn edit_input_becomes_canonical_and_carries_real_start_line() {
+        let call = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "completed",
+                "input": {
+                    "filePath": "src/app.ts",
+                    "oldString": "hello ${name}",
+                    "newString": "Hello, ${name}!"
+                },
+                "output": "Edit applied successfully.",
+                "metadata": {
+                    "diff": "Index: /p/src/app.ts\n===\n--- /p/src/app.ts\n+++ /p/src/app.ts\n@@ -12,5 +12,5 @@\n-  return `hello ${name}`\n+  return `Hello, ${name}!`\n",
+                    "filediff": {
+                        "file": "/p/src/app.ts",
+                        "patch": "…",
+                        "additions": 1,
+                        "deletions": 1
+                    }
+                }
+            }),
+        );
+
+        assert_eq!(call.tool_name, "edit");
+        assert!(!call.is_error);
+        assert_eq!(
+            input_of(&call),
+            serde_json::json!({
+                "file_path": "src/app.ts",
+                "old_string": "hello ${name}",
+                "new_string": "Hello, ${name}!",
+                "_start_line": 12,
+            })
+        );
+    }
+
+    #[test]
+    fn edit_falls_back_to_metadata_file_path_and_v2_path_key() {
+        let from_v2 = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "path": "src/app.ts", "oldString": "a", "newString": "b", "replaceAll": true },
+            }),
+        );
+        assert_eq!(
+            input_of(&from_v2),
+            serde_json::json!({
+                "file_path": "src/app.ts",
+                "old_string": "a",
+                "new_string": "b",
+                "replace_all": true,
+            })
+        );
+
+        let from_metadata = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "oldString": "a", "newString": "b" },
+                "metadata": { "filediff": { "file": "/abs/src/app.ts" } },
+            }),
+        );
+        assert_eq!(
+            input_of(&from_metadata)["file_path"],
+            serde_json::json!("/abs/src/app.ts")
+        );
+    }
+
+    #[test]
+    fn edit_strings_stay_byte_exact_including_whitespace() {
+        // Indentation-only change: trimming either side would collapse both
+        // to "return value" — an identical pair, i.e. an empty diff.
+        let call = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "completed",
+                "input": {
+                    "filePath": "src/app.ts",
+                    "oldString": "  return value\n",
+                    "newString": "    return value\n"
+                },
+            }),
+        );
+
+        let input = input_of(&call);
+        assert_eq!(input["old_string"], serde_json::json!("  return value\n"));
+        assert_eq!(input["new_string"], serde_json::json!("    return value\n"));
+    }
+
+    #[test]
+    fn empty_old_string_is_kept_as_the_create_file_form() {
+        let call = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "filePath": "src/new.ts", "oldString": "", "newString": "body\n" },
+            }),
+        );
+
+        let input = input_of(&call);
+        assert_eq!(input["old_string"], serde_json::json!(""));
+        assert_eq!(input["new_string"], serde_json::json!("body\n"));
+    }
+
+    #[test]
+    fn patch_text_keeps_significant_leading_context_spaces() {
+        let patch = " context line\n-old\n+new\n";
+        let call = normalized(
+            "apply_patch",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "patchText": patch },
+            }),
+        );
+
+        assert_eq!(call.input_preview.as_deref(), Some(patch));
+    }
+
+    #[test]
+    fn failed_tool_call_reports_its_error_message() {
+        let call = normalized(
+            "edit",
+            serde_json::json!({
+                "status": "error",
+                "input": { "filePath": "src/missing.ts", "oldString": "nope", "newString": "yep" },
+                "error": "File /p/src/missing.ts not found",
+                "time": { "start": 1, "end": 2 }
+            }),
+        );
+
+        assert!(call.is_error);
+        assert_eq!(
+            call.output_preview.as_deref(),
+            Some("File /p/src/missing.ts not found")
+        );
+    }
+
+    #[test]
+    fn invalid_tool_call_is_flagged_as_an_error() {
+        let call = normalized(
+            "invalid",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "tool": "edit", "error": "Missing key at [\"filePath\"]" },
+                "output": "The arguments provided to the tool are invalid: …",
+            }),
+        );
+
+        assert!(call.is_error);
+        assert_eq!(input_of(&call)["tool"], serde_json::json!("edit"));
+    }
+
+    #[test]
+    fn write_and_read_inputs_become_canonical() {
+        let write = normalized(
+            "write",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "filePath": "src/new.ts", "content": "export const A = 1\n" },
+                "output": "Wrote file successfully.",
+                "metadata": { "filepath": "/p/src/new.ts", "exists": false },
+            }),
+        );
+        assert_eq!(
+            input_of(&write),
+            serde_json::json!({ "file_path": "src/new.ts", "content": "export const A = 1\n" })
+        );
+
+        let read = normalized(
+            "read",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "filePath": "src/app.ts" },
+                "output": "<path>/p/src/app.ts</path>\n<type>file</type>\n<content>\n1: export const A = 1\n</content>",
+                "metadata": {
+                    "display": {
+                        "type": "file",
+                        "path": "/p/src/app.ts",
+                        "text": "export const A = 1",
+                        "lineStart": 1,
+                        "lineEnd": 1
+                    }
+                },
+            }),
+        );
+        assert_eq!(
+            input_of(&read),
+            serde_json::json!({ "file_path": "src/app.ts" })
+        );
+        // The `<path>`/`<content>` envelope and the `N: ` prefixes are gone.
+        assert_eq!(
+            read.output_preview.as_deref(),
+            Some(r#"{"content":"export const A = 1","start_line":1}"#)
+        );
+    }
+
+    #[test]
+    fn read_of_a_directory_lists_its_entries() {
+        let call = normalized(
+            "read",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "filePath": "src" },
+                "output": "<path>/p/src</path>\n<type>directory</type>\n<entries>\napp.ts\n</entries>",
+                "metadata": {
+                    "display": { "type": "directory", "path": "/p/src", "entries": ["app.ts", "new.ts"] }
+                },
+            }),
+        );
+
+        assert_eq!(call.output_preview.as_deref(), Some("app.ts\nnew.ts"));
+    }
+
+    #[test]
+    fn grep_include_is_renamed_to_glob() {
+        let call = normalized(
+            "grep",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "pattern": "VERSION", "path": ".", "include": "*.ts" },
+            }),
+        );
+
+        assert_eq!(
+            input_of(&call),
+            serde_json::json!({ "pattern": "VERSION", "path": ".", "glob": "*.ts" })
+        );
+    }
+
+    #[test]
+    fn bash_falls_back_to_metadata_output() {
+        let call = normalized(
+            "bash",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "command": "echo probe", "description": "probe" },
+                "metadata": { "output": "probe\n", "exit": 0 },
+            }),
+        );
+
+        // Trimmed like every other preview (`value_to_preview`).
+        assert_eq!(call.output_preview.as_deref(), Some("probe"));
+        assert_eq!(input_of(&call)["command"], serde_json::json!("echo probe"));
+    }
+
+    #[test]
+    fn skill_call_titles_itself_and_drops_the_envelope() {
+        let call = normalized(
+            "skill",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "name": "demo-skill" },
+                "output": "<skill_content name=\"demo-skill\">\n# Skill: demo-skill\n\n# Demo Skill\n\n1. Read the target file.\n\nBase directory for this skill: /c/skills/demo-skill\nRelative paths in this skill (e.g., scripts/) are relative to this base directory.\nNote: file list is sampled.\n\n<skill_files>\n<file>/c/skills/demo-skill/run.sh</file>\n</skill_files>\n</skill_content>",
+                "title": "Loaded skill: demo-skill",
+                "metadata": { "name": "demo-skill", "dir": "/c/skills/demo-skill" },
+            }),
+        );
+
+        assert_eq!(input_of(&call)["skill"], serde_json::json!("demo-skill"));
+        assert_eq!(
+            call.output_preview.as_deref(),
+            Some("# Skill: demo-skill\n\n# Demo Skill\n\n1. Read the target file.")
+        );
+    }
+
+    #[test]
+    fn skill_output_without_the_envelope_is_left_alone() {
+        assert_eq!(super::unwrap_skill_content("plain body"), "plain body");
+    }
+
+    #[test]
+    fn apply_patch_input_is_the_patch_text_itself() {
+        let call = normalized(
+            "patch",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "patchText": "*** Begin Patch\n*** End Patch" },
+            }),
+        );
+
+        assert_eq!(call.tool_name, "apply_patch");
+        assert_eq!(
+            call.input_preview.as_deref(),
+            Some("*** Begin Patch\n*** End Patch")
+        );
+    }
+
+    #[test]
+    fn canonical_tool_inputs_pass_through_untouched() {
+        let call = normalized(
+            "todowrite",
+            serde_json::json!({
+                "status": "completed",
+                "input": { "todos": [{ "content": "Probe", "status": "completed" }] },
+            }),
+        );
+
+        assert_eq!(call.tool_name, "todowrite");
+        assert_eq!(
+            input_of(&call),
+            serde_json::json!({ "todos": [{ "content": "Probe", "status": "completed" }] })
+        );
     }
 
     #[test]

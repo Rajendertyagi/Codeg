@@ -970,3 +970,85 @@ describe("SidebarConversationList — worktree grouping (Show worktrees)", () =>
     expect(probes.root).toBe(0)
   })
 })
+
+describe("SidebarConversationList — Recent section", () => {
+  function recentTree(showRecent: boolean) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList
+          showCompleted
+          showRecent={showRecent}
+          sortMode="created"
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  const RECENT = enMessages.Folder.sidebar.sectionRecent
+
+  beforeEach(() => {
+    probes.card = 0
+    const folders = [folder(1, "Repo")]
+    store.activeTabId = null
+    store.tabSpec = []
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: [
+        conv(11, 1),
+        // A folderless chat-mode conversation and a conversation whose folder
+        // is NOT open — Recent must take the first and drop the second.
+        conv(12, 99, { kind: "chat" }),
+        conv(13, 42),
+      ],
+    })
+  })
+
+  it("renders nothing for the section when showRecent is off", () => {
+    render(recentTree(false))
+    expect(document.body.textContent).not.toContain(RECENT)
+    // Each conversation renders exactly one card (no Recent duplicates).
+    expect(probes.card).toBe(2)
+  })
+
+  it("lists folder and chat conversations together, without duplicate React keys", () => {
+    // A duplicated key would make React drop one of the two rows and log an
+    // error; assert on the console as well as the card count.
+    const errors: unknown[][] = []
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args)
+      })
+    try {
+      render(recentTree(true))
+      // 2 reachable conversations × (canonical row + Recent row) = 4 cards.
+      expect(probes.card).toBe(4)
+      expect(errors).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(document.body.textContent).toContain(RECENT)
+    // conv-13 lives in a folder that is not open, so it is unreachable in the
+    // Folders section and must stay out of Recent too.
+    expect(document.body.textContent).not.toContain("conv-13")
+  })
+
+  it("collapses independently of the other sections", () => {
+    render(recentTree(true))
+    const header = Array.from(document.querySelectorAll("button")).find(
+      (b) => b.textContent === RECENT
+    )
+    expect(header).toBeTruthy()
+    act(() => {
+      fireEvent.click(header!)
+    })
+    // Its rows are gone; the Folders section's copies remain.
+    expect(probes.card).toBe(4)
+    expect(document.body.textContent).toContain("conv-11")
+    expect(
+      Array.from(document.querySelectorAll("[data-conversation-id]"))
+    ).toHaveLength(2)
+  })
+})

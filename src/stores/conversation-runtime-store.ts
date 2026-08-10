@@ -3,11 +3,12 @@ import type {
   LiveMessage,
   ToolCallInfo,
 } from "@/contexts/acp-connections-context"
-import { getFolderConversation } from "@/lib/api"
+import { getFolderConversation, getFolderConversationTurns } from "@/lib/api"
 import { registerBackendScopedStoreReset } from "@/stores/backend-scoped-store-reset"
 import type {
   AgentExecutionStats,
   AgentTranscriptEntry,
+  ConversationTurnsPage,
   DbConversationDetail,
   MessageTurn,
   PlanEntryInfo,
@@ -15,6 +16,13 @@ import type {
   ToolCallStatus,
   TurnUsage,
 } from "@/lib/types"
+import {
+  extendPrefixFingerprint,
+  FNV_SEED_HEX,
+  isWindowedDetail,
+  turnsOffsetOf,
+  turnsTotalOf,
+} from "@/lib/turn-window"
 import {
   inferLiveToolName,
   parseGoalUpdateTitle,
@@ -99,6 +107,14 @@ export interface PendingBackgroundSettlement {
  * `background_activity` handler).
  */
 export const BACKGROUND_OVERLAY_HARD_CAP = 300
+
+/**
+ * Default tail window for a cold detail load, and the page size for
+ * reverse-infinite-scroll history pages. Rendering is virtualized (virtua), so
+ * the only real constraint is transfer size; the server clamps both to 1..=500.
+ */
+export const TAIL_TURNS_DEFAULT = 120
+export const OLDER_TURNS_PAGE_SIZE = 120
 
 export interface ConversationRuntimeSession {
   conversationId: number
@@ -185,14 +201,44 @@ export interface ConversationRuntimeSession {
 
   // Number of persisted assistant turns that predate this session's `localTurns`
   // — captured at send time (first optimistic turn of a batch), when `detail`
-  // is settled history. The post-turn reparse (`syncTurnMetadata`) slices this
-  // many turns off the front of the fresh parse before aligning the rest to
-  // `localTurns`, so it never folds a historical (or later-refetched partial)
-  // turn's stats into a new reply. `null` when no user-initiated batch is in
-  // flight (e.g. the sub-agent adopt path, which has no optimistic send); the
+  // is settled history. A GLOBAL count over the full transcript
+  // (`assistant_turns_before_offset` + the loaded window's share), so it stays
+  // valid however the loaded window moves. Consumed only on the LEGACY sync
+  // path (old server, full reparse): the reparse slices this many turns off
+  // the front before aligning the rest to `localTurns`. The windowed sync
+  // path replaces it with the fingerprint gate below. `null` when no
+  // user-initiated batch is in flight (e.g. the sub-agent adopt path); the
   // reparse then treats the whole parse as this session's, matching the
   // pre-capture behavior. See `computeTurnMetadataPatches`.
   historyAssistantBaseline: number | null
+
+  // Windowed-sync anchor, captured together with the baseline at batch start:
+  // the batch's first turn will persist at global index `batchBoundaryIndex`,
+  // and `batchBoundaryPrefixHash` fingerprints full[0..batchBoundaryIndex) at
+  // capture time (client-side chain extension of the window fingerprint).
+  // `syncTurnMetadata` refetches `{ fromIndex: batchBoundaryIndex }` and
+  // applies turn patches ONLY when the response's prefix_hash equals the
+  // captured hash — a mismatch means the history the baseline counted was
+  // rewritten (compaction) between capture and sync, where aligning by counts
+  // would pin wrong metadata onto local turns (first-write-wins makes that
+  // permanent). `batchBoundaryPrefixHash` null = captured under a legacy
+  // (non-windowed) detail: the windowed gate cannot run, only the legacy
+  // full-reparse math may patch.
+  batchBoundaryIndex: number | null
+  batchBoundaryPrefixHash: string | null
+
+  // A reverse-infinite-scroll page request is in flight (drives the loader
+  // row and the single-flight guard).
+  loadingOlderTurns: boolean
+
+  // Monotonic counter bumped on every SUCCESSFUL older-page prepend. The
+  // virtualized thread derives virtua's `shift` flag from this explicit
+  // signal instead of guessing from item keys: a window starting mid-way
+  // through a consecutive-assistant run gets MERGED with prepended page
+  // turns into one render item whose key changes, so "is the old first key
+  // still present" would read false on exactly the render that needs
+  // shift=true and the viewport would jump.
+  olderTurnsPrependEpoch: number
 
   // Cleanup
   pendingCleanup: boolean
@@ -232,6 +278,26 @@ type Action =
        * it, and a late-resolving partial could momentarily replace it).
        */
       preserveLive?: boolean
+    }
+  | {
+      type: "LOAD_OLDER_TURNS_START"
+      conversationId: number
+    }
+  | {
+      type: "LOAD_OLDER_TURNS_DONE"
+      conversationId: number
+    }
+  | {
+      type: "PREPEND_OLDER_TURNS"
+      conversationId: number
+      page: ConversationTurnsPage
+      /**
+       * `detail.prefix_hash` at request time. The reducer re-verifies it
+       * against the CURRENT detail before merging — the window may have been
+       * replaced (reset, refetch) while the page was in flight, and a page
+       * from another lineage must never be stitched in.
+       */
+      expectedSeamHash: string
     }
   | {
       type: "SET_LIVE_OWNS_ACTIVE_TURN"
@@ -393,17 +459,21 @@ function createEmptySession(
     delegationKickoffText: null,
     sessionStats: null,
     historyAssistantBaseline: null,
+    batchBoundaryIndex: null,
+    batchBoundaryPrefixHash: null,
+    loadingOlderTurns: false,
+    olderTurnsPrependEpoch: 0,
     pendingCleanup: false,
   }
 }
 
-// Snapshot how many assistant turns are HISTORY when a batch's FIRST turn enters
-// the buffers (no local/optimistic turns yet); otherwise keep the batch-start
-// value so follow-up prompts in the same batch don't move it. BOTH batch-start
-// paths route through this — the owner's own send (APPEND_OPTIMISTIC_TURN) and a
+// Snapshot the batch's history boundary when its FIRST turn enters the buffers
+// (no local/optimistic turns yet); otherwise keep the batch-start values so
+// follow-up prompts in the same batch don't move them. BOTH batch-start paths
+// route through this — the owner's own send (APPEND_OPTIMISTIC_TURN) and a
 // co-controller's echoed prompt (APPEND_VIEWER_USER_TURN, on every exit incl.
-// dedup) — so every disjoint batch that later reaches `syncTurnMetadata` carries
-// a boundary; a `null` baseline then means only the overlap paths (e.g. the
+// dedup) — so every disjoint batch that later reaches `syncTurnMetadata`
+// carries a boundary; `null` values then mean only the overlap paths (e.g. the
 // sub-agent adopt, which promotes via COMPLETE_TURN with no user-turn append),
 // where the whole parse is this session's.
 //
@@ -416,21 +486,90 @@ function createEmptySession(
 // stays out of history. The marker alone is not enough: it can linger stale
 // after completion (see the APPEND_VIEWER content-dedup notes), so trusting it
 // for an owner send / distinct prompt would drop a real prior reply from history.
-function batchStartHistoryBaseline(
+//
+// Three values are captured together (see the session field docs):
+// - `baseline`: GLOBAL assistant count over full[0..boundary) — legacy path.
+// - `boundaryIndex`: the global turn index the batch's first turn lands at.
+// - `boundaryHash`: client-extended fingerprint of full[0..boundaryIndex);
+//   null when `detail` is a legacy full response (no fingerprint to extend)
+//   or the extension failed (unparseable timestamp) — the windowed sync gate
+//   then refuses to patch rather than guess.
+interface BatchStartCapture {
+  baseline: number | null
+  boundaryIndex: number | null
+  boundaryHash: string | null
+}
+
+/**
+ * Watermark-based overlay retirement with window-coverage awareness (see the
+ * FETCH_DETAIL_SUCCESS comment for the full rationale). `uncoveredMaxTs` is
+ * the response's `uncovered_prefix_max_ts`: null means the response covered
+ * the whole transcript (offset 0 or a legacy full response) and the plain
+ * watermark rule applies; otherwise an entry is retired only when its
+ * timestamp is STRICTLY greater (its persisted twin is provably inside the
+ * returned window). Returns the input array identity when nothing retires.
+ */
+function retireCoveredBackgroundTurns(
+  backgroundTurns: BackgroundOverlayEntry[],
+  detailWatermark: number | null,
+  uncoveredMaxTs: string | null
+): BackgroundOverlayEntry[] {
+  if (detailWatermark === null || backgroundTurns.length === 0) {
+    return backgroundTurns
+  }
+  const uncoveredMaxMs =
+    uncoveredMaxTs === null ? null : Date.parse(uncoveredMaxTs)
+  const retained = backgroundTurns.filter((e) => {
+    if (e.watermark > detailWatermark) return true
+    if (uncoveredMaxMs === null) return false
+    if (!Number.isFinite(uncoveredMaxMs)) return true
+    const entryMs = Date.parse(e.turn.timestamp)
+    if (!Number.isFinite(entryMs)) return true
+    return entryMs <= uncoveredMaxMs
+  })
+  return retained.length === backgroundTurns.length ? backgroundTurns : retained
+}
+
+function batchStartCapture(
   current: ConversationRuntimeSession,
   promptId: string
-): number | null {
+): BatchStartCapture {
   if (current.localTurns.length > 0 || current.optimisticTurns.length > 0) {
-    return current.historyAssistantBaseline
+    return {
+      baseline: current.historyAssistantBaseline,
+      boundaryIndex: current.batchBoundaryIndex,
+      boundaryHash: current.batchBoundaryPrefixHash,
+    }
   }
-  const turns = current.detail?.turns ?? []
-  const inFlightId = current.detail?.in_flight_user_turn_id ?? null
+  const detail = current.detail
+  const turns = detail?.turns ?? []
+  const inFlightId = detail?.in_flight_user_turn_id ?? null
   const cutoff =
     inFlightId !== null && inFlightId === promptId
       ? turns.findIndex((t) => t.role === "user" && t.id === inFlightId)
       : -1
-  const history = cutoff === -1 ? turns : turns.slice(0, cutoff + 1)
-  return history.filter((t) => t.role === "assistant").length
+  // History within the window: everything, or up to and including the
+  // in-flight prompt (a user turn — it never moves the assistant count).
+  const boundaryRel = cutoff === -1 ? turns.length : cutoff + 1
+  const offset = turnsOffsetOf(detail)
+  const assistantsBefore = detail?.assistant_turns_before_offset ?? 0
+  const baseline =
+    assistantsBefore +
+    turns.slice(0, boundaryRel).filter((t) => t.role === "assistant").length
+  // No detail at all (first send of a fresh chat): the transcript is empty,
+  // so the boundary is index 0 with the empty-prefix fingerprint — the
+  // windowed sync gate then verifies against the seed.
+  const seedHash =
+    detail === null
+      ? FNV_SEED_HEX
+      : isWindowedDetail(detail)
+        ? (detail.prefix_hash ?? null)
+        : null
+  const boundaryHash =
+    seedHash === null
+      ? null
+      : extendPrefixFingerprint(seedHash, turns.slice(0, boundaryRel))
+  return { baseline, boundaryIndex: offset + boundaryRel, boundaryHash }
 }
 
 interface BuiltStreamingTurns {
@@ -1427,20 +1566,27 @@ function reducer(
 
       // Retire overlay turns the refetched detail now covers: both sides
       // measure byte offsets of the SAME transcript, so `entry.watermark <=
-      // detail.transcript_watermark` means this detail literally contains
-      // those bytes. Entries beyond the detail's watermark stay (they were
-      // parsed from bytes appended after this fetch read the file). A detail
-      // without a watermark (non-Claude parser) retires nothing — its overlay
-      // is never populated anyway.
-      const detailWatermark = action.detail.transcript_watermark ?? null
-      const retainedBackground =
-        detailWatermark === null
-          ? current.backgroundTurns
-          : current.backgroundTurns.filter((e) => e.watermark > detailWatermark)
-      const nextBackgroundTurns =
-        retainedBackground.length === current.backgroundTurns.length
-          ? current.backgroundTurns
-          : retainedBackground
+      // detail.transcript_watermark` means those bytes were parsed by this
+      // fetch. Entries beyond the detail's watermark stay (they were parsed
+      // from bytes appended after this fetch read the file). A detail without
+      // a watermark (non-Claude parser) retires nothing — its overlay is
+      // never populated anyway.
+      //
+      // WINDOWED responses add a second condition: the watermark says the
+      // bytes were parsed, but only the requested window was RETURNED — an
+      // overlay whose persisted twin fell before the window start would be
+      // retired without its content being anywhere in `detail.turns`, i.e.
+      // the message would vanish from the timeline. Retire only when the
+      // overlay turn's timestamp is STRICTLY greater than the max timestamp
+      // of the uncovered prefix (its twin is then provably inside the
+      // window). Equal / unparseable timestamps keep the overlay: the failure
+      // direction is a recoverable transient duplicate, never a vanished
+      // message.
+      const nextBackgroundTurns = retireCoveredBackgroundTurns(
+        current.backgroundTurns,
+        action.detail.transcript_watermark ?? null,
+        action.detail.uncovered_prefix_max_ts ?? null
+      )
 
       const nextSession: ConversationRuntimeSession = {
         ...current,
@@ -1478,6 +1624,85 @@ function reducer(
         detailLoading: false,
         detailError: action.error,
       }))
+
+    // The three LOAD_OLDER/PREPEND cases guard on session existence instead
+    // of using the create-if-missing update helper: a page response landing
+    // after the tab closed must not resurrect a ghost session.
+    case "LOAD_OLDER_TURNS_START": {
+      if (!state.byConversationId.has(action.conversationId)) return state
+      return updateSessionInState(state, action.conversationId, (current) => ({
+        ...current,
+        loadingOlderTurns: true,
+      }))
+    }
+
+    case "LOAD_OLDER_TURNS_DONE": {
+      if (!state.byConversationId.has(action.conversationId)) return state
+      return updateSessionInState(state, action.conversationId, (current) => ({
+        ...current,
+        loadingOlderTurns: false,
+      }))
+    }
+
+    case "PREPEND_OLDER_TURNS": {
+      const current = state.byConversationId.get(action.conversationId)
+      if (!current) return state
+      const detail = current.detail
+      const page = action.page
+      // Merge only when the loaded window is still the one the page was
+      // requested against AND the page provably joins it: the seam proof
+      // (H(0..beforeIndex) from the same parse that produced the page) must
+      // equal the window fingerprint both at request time and now. Any
+      // mismatch — window replaced mid-flight, prefix rewritten between
+      // requests — drops the page; the action layer falls back to a tail
+      // reset for the rewrite case.
+      if (
+        !detail ||
+        !isWindowedDetail(detail) ||
+        detail.prefix_hash !== action.expectedSeamHash ||
+        page.prefix_hash_before_index !== detail.prefix_hash ||
+        page.turns_offset > turnsOffsetOf(detail)
+      ) {
+        return updateSessionInState(state, action.conversationId, (s) => ({
+          ...s,
+          loadingOlderTurns: false,
+        }))
+      }
+      // Defensive id-dedup at the seam (ranges are disjoint by construction;
+      // an in-flight id stamp only ever touches the tail, never a page).
+      const existingIds = new Set(detail.turns.map((t) => t.id))
+      const prependTurns = page.turns.filter((t) => !existingIds.has(t.id))
+      // A NEW detail object on purpose: `timelinePrefixCache` is keyed by
+      // detail identity, so an in-place turns mutation would render stale.
+      const nextDetail: DbConversationDetail = {
+        ...detail,
+        turns: [...prependTurns, ...detail.turns],
+        turns_offset: page.turns_offset,
+        assistant_turns_before_offset: page.assistant_turns_before_offset,
+        prefix_hash: page.prefix_hash,
+        uncovered_prefix_max_ts: page.uncovered_prefix_max_ts ?? null,
+        // `turns_total` stays the window's own (newer) value: the page's
+        // total reflects the same parse but the loaded tail wasn't refreshed
+        // by it, and total only drives hasMore/convergence checks.
+      }
+      // The revealed region may contain persisted twins of overlay turns the
+      // narrower coverage previously had to keep — re-run retirement against
+      // the widened coverage with the last known watermark.
+      const nextBackgroundTurns = retireCoveredBackgroundTurns(
+        current.backgroundTurns,
+        detail.transcript_watermark ?? null,
+        page.uncovered_prefix_max_ts ?? null
+      )
+      return updateSessionInState(state, action.conversationId, (s) => ({
+        ...s,
+        detail: nextDetail,
+        backgroundTurns: nextBackgroundTurns,
+        loadingOlderTurns: false,
+        // Explicit prepend signal for the virtualized thread's `shift`
+        // derivation — see the field doc.
+        olderTurnsPrependEpoch: s.olderTurnsPrependEpoch + 1,
+      }))
+    }
 
     case "COMPLETE_TURN": {
       const current = state.byConversationId.get(action.conversationId)
@@ -1708,16 +1933,18 @@ function reducer(
     }
 
     case "APPEND_OPTIMISTIC_TURN":
-      return updateSessionInState(state, action.conversationId, (current) => ({
-        ...current,
-        optimisticTurns: [...current.optimisticTurns, action.turn],
-        syncState: "awaiting_persist",
-        activeTurnToken: action.turnToken,
-        historyAssistantBaseline: batchStartHistoryBaseline(
-          current,
-          action.turn.id
-        ),
-      }))
+      return updateSessionInState(state, action.conversationId, (current) => {
+        const capture = batchStartCapture(current, action.turn.id)
+        return {
+          ...current,
+          optimisticTurns: [...current.optimisticTurns, action.turn],
+          syncState: "awaiting_persist",
+          activeTurnToken: action.turnToken,
+          historyAssistantBaseline: capture.baseline,
+          batchBoundaryIndex: capture.boundaryIndex,
+          batchBoundaryPrefixHash: capture.boundaryHash,
+        }
+      })
 
     case "REMOVE_OPTIMISTIC_TURN": {
       const current = state.byConversationId.get(action.conversationId)
@@ -1748,15 +1975,19 @@ function reducer(
       // sees the prompt already in `detail`, so both dedup guards fire, yet the
       // reply still promotes (COMPLETE_TURN) and syncs. Without capturing here
       // the boundary stays `null`/stale and `syncTurnMetadata` folds history in.
-      // `batchStartHistoryBaseline` is a no-op once the batch has turns, so a
-      // dup echo mid-batch doesn't move it.
-      const nextBaseline = batchStartHistoryBaseline(current, id)
+      // `batchStartCapture` is a no-op once the batch has turns, so a dup echo
+      // mid-batch doesn't move it.
+      const capture = batchStartCapture(current, id)
       const captureOnly = (): ConversationRuntimeState =>
-        nextBaseline === current.historyAssistantBaseline
+        capture.baseline === current.historyAssistantBaseline &&
+        capture.boundaryIndex === current.batchBoundaryIndex &&
+        capture.boundaryHash === current.batchBoundaryPrefixHash
           ? state
           : updateSessionInState(state, action.conversationId, (s) => ({
               ...s,
-              historyAssistantBaseline: nextBaseline,
+              historyAssistantBaseline: capture.baseline,
+              batchBoundaryIndex: capture.boundaryIndex,
+              batchBoundaryPrefixHash: capture.boundaryHash,
             }))
       // EXACT-id dedup (not a heuristic): the sender's OWN optimistic turn
       // shares this id — the UI threaded its optimistic turn id to the backend,
@@ -1836,7 +2067,9 @@ function reducer(
       return updateSessionInState(state, action.conversationId, (s) => ({
         ...s,
         optimisticTurns: [...s.optimisticTurns, action.turn],
-        historyAssistantBaseline: nextBaseline,
+        historyAssistantBaseline: capture.baseline,
+        batchBoundaryIndex: capture.boundaryIndex,
+        batchBoundaryPrefixHash: capture.boundaryHash,
       }))
     }
 
@@ -1951,6 +2184,9 @@ function reducer(
         // baseline; fall back to the target's if the draft never captured one.
         historyAssistantBaseline:
           from.historyAssistantBaseline ?? to.historyAssistantBaseline,
+        batchBoundaryIndex: from.batchBoundaryIndex ?? to.batchBoundaryIndex,
+        batchBoundaryPrefixHash:
+          from.batchBoundaryPrefixHash ?? to.batchBoundaryPrefixHash,
       }
 
       const nextByConversationId = new Map(state.byConversationId)
@@ -2084,6 +2320,12 @@ export interface RuntimeActions {
     conversationId: number,
     options?: { preserveLive?: boolean }
   ) => void
+  /**
+   * Load one page of older history above the current window and prepend it
+   * (reverse infinite scroll). No-op unless the loaded detail is windowed
+   * with `turns_offset > 0`; single-flight per session.
+   */
+  loadOlderTurns: (conversationId: number) => void
   /**
    * Poll a passively-viewed conversation's persisted detail into sync after its
    * turn completed on another client. No-op unless the session is open and this
@@ -2545,9 +2787,13 @@ function computeTimelinePrefix(
           (t, i) => i <= inFlightPromptIdx || t.role !== "assistant"
         )
 
+  // Keys carry NO positional index: prepending older history (reverse
+  // infinite scroll) must not shift the identity of already-present turns.
+  // Post-dedup the (role, id) pair is unique per phase, so `phase + id` is
+  // collision-free here.
   const persisted: ConversationTimelineTurn[] = visiblePersistedTurns.map(
-    (turn, index) => ({
-      key: `persisted-${conversationId}-${turn.id}-${index}`,
+    (turn) => ({
+      key: `persisted-${conversationId}-${turn.id}`,
       turn,
       phase: "persisted" as const,
     })
@@ -2589,13 +2835,11 @@ function computeTimelinePrefix(
   }
 
   // Phase 2: Locally completed turns (promoted optimistic + completed streaming)
-  const local: ConversationTimelineTurn[] = session.localTurns.map(
-    (turn, index) => ({
-      key: `local-${conversationId}-${turn.id}-${index}`,
-      turn,
-      phase: "persisted",
-    })
-  )
+  const local: ConversationTimelineTurn[] = session.localTurns.map((turn) => ({
+    key: `local-${conversationId}-${turn.id}`,
+    turn,
+    phase: "persisted",
+  }))
 
   // Phase 2.5: background overlay turns — out-of-turn activity (async task
   // completions, the agent's continued work after them, cron//loop turns)
@@ -2619,8 +2863,8 @@ function computeTimelinePrefix(
 
   // Phase 3: Optimistic turns (pending user messages)
   const optimistic: ConversationTimelineTurn[] = session.optimisticTurns.map(
-    (turn, index) => ({
-      key: `optimistic-${conversationId}-${turn.id}-${index}`,
+    (turn) => ({
+      key: `optimistic-${conversationId}-${turn.id}`,
       turn,
       phase: "optimistic",
     })
@@ -2708,6 +2952,42 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     set((state) => reducer(state, action))
   }
 
+  /**
+   * Fetch the detail as a WINDOW scoped to what this session has loaded:
+   * - no windowed detail yet → the default tail window;
+   * - a windowed detail → `{ fromIndex: turns_offset }`, i.e. refresh the
+   *   whole loaded region (older, unloaded prefix untouched). Anchoring at
+   *   the window start — not the active round — is deliberate: turns INSIDE
+   *   the loaded region can be rewritten later (a background task completing
+   *   rewrites its multi-rounds-old ack preview; delegation meta advances),
+   *   and today's full refetch repainted them. The unloaded prefix picks up
+   *   such rewrites whenever the user pages it in.
+   *
+   * The response is verified against the current window fingerprint: a
+   * mismatch (or a total that collapsed below the window start) means the
+   * prefix was rewritten — compaction — so the loaded window's coordinates
+   * are garbage; retry once as a fresh tail window (dropping paged-in
+   * history) instead of stitching incompatible parses together. A legacy
+   * full response (old server: no window fields) passes through untouched.
+   */
+  const fetchDetailWindowed = async (
+    fetchId: number,
+    currentDetail: DbConversationDetail | null
+  ): Promise<DbConversationDetail> => {
+    if (!isWindowedDetail(currentDetail)) {
+      return getFolderConversation(fetchId, { tailTurns: TAIL_TURNS_DEFAULT })
+    }
+    const offset = currentDetail.turns_offset
+    const detail = await getFolderConversation(fetchId, { fromIndex: offset })
+    if (!isWindowedDetail(detail)) return detail
+    const consistent =
+      detail.turns_offset === offset &&
+      detail.prefix_hash === currentDetail.prefix_hash &&
+      detail.turns_total >= offset
+    if (consistent) return detail
+    return getFolderConversation(fetchId, { tailTurns: TAIL_TURNS_DEFAULT })
+  }
+
   const fetchDetail = (conversationId: number): void => {
     const session = get().byConversationId.get(conversationId)
     if (session?.detail || session?.detailLoading) return
@@ -2724,7 +3004,7 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
 
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
-    getFolderConversation(conversationId)
+    getFolderConversation(conversationId, { tailTurns: TAIL_TURNS_DEFAULT })
       .then((detail) => {
         if (!isLatestGeneration(conversationId, generation)) return
         dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
@@ -2751,12 +3031,11 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     // backend for a nonexistent conversation, errors silently, and the stale
     // live buffers — e.g. an async sub-agent card frozen on its launch ack —
     // never flip to their persisted terminal state.
-    const fetchId =
-      get().byConversationId.get(conversationId)?.dbConversationId ??
-      conversationId
+    const session = get().byConversationId.get(conversationId)
+    const fetchId = session?.dbConversationId ?? conversationId
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
-    getFolderConversation(fetchId)
+    fetchDetailWindowed(fetchId, session?.detail ?? null)
       .then((detail) => {
         if (!isLatestGeneration(conversationId, generation)) return
         dispatch({
@@ -2773,6 +3052,54 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
           conversationId,
           error: toErrorMessage(error),
         })
+      })
+  }
+
+  /**
+   * Load one page of older history above the current window and prepend it.
+   * No-op unless the detail is windowed with `turns_offset > 0`, and single-
+   * flight per session. Participates in the SAME fetch-generation total order
+   * as every other detail fetch: issuing a page invalidates any in-flight
+   * window refresh (whose response predates the page and would clobber it),
+   * and any fetch issued after the page invalidates the page.
+   */
+  const loadOlderTurns = (conversationId: number): void => {
+    const session = get().byConversationId.get(conversationId)
+    const detail = session?.detail ?? null
+    if (!session || !detail || !isWindowedDetail(detail)) return
+    const beforeIndex = detail.turns_offset
+    if (beforeIndex <= 0 || session.loadingOlderTurns) return
+    const expectedSeamHash = detail.prefix_hash
+    const fetchId = session.dbConversationId ?? conversationId
+    const generation = bumpFetchGeneration(conversationId)
+    dispatch({ type: "LOAD_OLDER_TURNS_START", conversationId })
+    getFolderConversationTurns(fetchId, beforeIndex, OLDER_TURNS_PAGE_SIZE)
+      .then((page) => {
+        if (!isLatestGeneration(conversationId, generation)) {
+          dispatch({ type: "LOAD_OLDER_TURNS_DONE", conversationId })
+          return
+        }
+        // Seam broken by a prefix rewrite between requests: the loaded
+        // window's coordinates are garbage now. Reset to a fresh tail
+        // (dropping paged-in history) via the standard refetch path — its
+        // own verification lands the tail reset.
+        if (page.prefix_hash_before_index !== expectedSeamHash) {
+          dispatch({ type: "LOAD_OLDER_TURNS_DONE", conversationId })
+          refetchDetail(conversationId, { preserveLive: true })
+          return
+        }
+        dispatch({
+          type: "PREPEND_OLDER_TURNS",
+          conversationId,
+          page,
+          expectedSeamHash,
+        })
+      })
+      .catch(() => {
+        // Transient (old server: the endpoint 501s — unreachable in practice
+        // because a legacy detail never reports turns_offset > 0). Clear the
+        // flag; the top sentinel retriggers on the next scroll.
+        dispatch({ type: "LOAD_OLDER_TURNS_DONE", conversationId })
       })
   }
 
@@ -2829,7 +3156,7 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
       // times and the attempt cap bounds each run — but it's why this is the one
       // detail fetcher that both triggers and can re-trigger itself.
       const generation = bumpFetchGeneration(conversationId)
-      getFolderConversation(fetchId)
+      fetchDetailWindowed(fetchId, cur.detail)
         .then((detail) => {
           if (cancelled) return
           const cur2 = get().byConversationId.get(conversationId)
@@ -2858,7 +3185,9 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
             detail.in_flight_user_turn_id != null || lastTurn?.role === "user"
           // Skip a no-op dispatch (identical transcript) so a multi-tick poll
           // doesn't re-render the message list on every attempt. Compare the
-          // cheap byte watermark + turn count rather than deep-diffing turns.
+          // cheap byte watermark + FULL-transcript turn count rather than
+          // deep-diffing turns — with windowed responses the loaded length
+          // depends on the window, so the global total is the stable signal.
           // A FETCH_DETAIL_SUCCESS carrying the backend's in-flight stamp keeps
           // the synthesized viewer prompt (`keepAllLiveBuffers`); a settled load
           // replaces it — so "hi" only transiently disappears in the narrow case
@@ -2869,7 +3198,7 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
             !prev ||
             (prev.transcript_watermark ?? null) !==
               (detail.transcript_watermark ?? null) ||
-            prev.turns.length !== detail.turns.length
+            turnsTotalOf(prev) !== turnsTotalOf(detail)
           // Commit when the transcript advanced (`changed`) OR when the reply
           // just settled (`!replyPending`). The settle case lands the FINAL
           // content for a no-watermark agent that grows its partial assistant
@@ -2928,7 +3257,16 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
         if (!session || session.localTurns.length === 0) return
         if (session.syncState === "awaiting_persist") return
 
-        getFolderConversation(dbConversationId)
+        // Windowed fetch anchored at the batch boundary: the response then
+        // holds exactly this batch's turns (plus anything appended after),
+        // never the history the baseline counted — so no per-fetch transfer
+        // of the whole transcript just to patch usage metadata. An old
+        // server ignores the selector and returns the legacy full parse.
+        const boundaryIndex = session.batchBoundaryIndex
+        getFolderConversation(
+          dbConversationId,
+          boundaryIndex != null ? { fromIndex: boundaryIndex } : undefined
+        )
           .then((parsed) => {
             if (cancelled) return
             const cur = get().byConversationId.get(runtimeId)
@@ -2945,20 +3283,43 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
             const parsedAssistantTurns = parsed.turns.filter(
               (t) => t.role === "assistant"
             )
-            // Persisted history lives in `detail`, not `localTurns`; the fresh
-            // parse returns history + this session's turns. The boundary,
-            // captured at send time, tells the alignment how many leading
-            // parsed turns are history so it never folds one into the first
-            // resumed reply. `null` (no optimistic-initiated batch, e.g. the
-            // sub-agent adopt path) means treat the whole parse as this
-            // session's — the pre-capture behavior, correct when `localTurns`
-            // overlaps the parse tail.
-            const persistedAssistantCount = cur.historyAssistantBaseline ?? 0
-            const patches = computeTurnMetadataPatches({
-              localAssistantIndices,
-              parsedAssistantTurns,
-              persistedAssistantCount,
-            })
+            // Persisted history precedes this batch in the parse; the count
+            // of leading parsed assistant turns that are history tells the
+            // alignment where the batch starts so it never folds a historical
+            // turn's stats into the first reply.
+            //
+            // WINDOWED response: the fingerprint gate decides. The window was
+            // requested at the batch boundary, so on a verified prefix the
+            // count is simply 0 (the whole window is this session's — the
+            // same semantics as the adopt path). A mismatch — boundary hash
+            // absent (captured under a legacy detail), offset not honored,
+            // or the prefix rewritten by compaction between capture and sync
+            // — means count-based alignment could pin WRONG metadata onto
+            // local turns, and first-write-wins would make that permanent.
+            // Metadata absence is recoverable; a mis-patch is not. So skip
+            // the turn patches entirely (session stats are still safe: they
+            // describe the full transcript regardless of the window).
+            //
+            // LEGACY response (old server): today's math, verbatim — the
+            // global baseline over the full parse.
+            const responseWindowed = isWindowedDetail(parsed)
+            const boundaryHash = cur.batchBoundaryPrefixHash
+            const windowVerified =
+              responseWindowed &&
+              boundaryHash != null &&
+              parsed.turns_offset === boundaryIndex &&
+              parsed.prefix_hash === boundaryHash
+            const persistedAssistantCount = responseWindowed
+              ? 0
+              : (cur.historyAssistantBaseline ?? 0)
+            const patches =
+              responseWindowed && !windowVerified
+                ? []
+                : computeTurnMetadataPatches({
+                    localAssistantIndices,
+                    parsedAssistantTurns,
+                    persistedAssistantCount,
+                  })
 
             if (patches.length > 0 || parsed.session_stats) {
               dispatch({
@@ -3005,6 +3366,7 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
   const actions: RuntimeActions = {
     fetchDetail,
     refetchDetail,
+    loadOlderTurns,
     syncViewerDetail,
     syncTurnMetadata,
     completeTurn: (conversationId, liveMessage) => {

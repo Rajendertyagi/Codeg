@@ -596,10 +596,18 @@ pub struct SessionConfigSelectInfo {
     pub groups: Vec<SessionConfigSelectGroupInfo>,
 }
 
+/// An on/off toggle config option (ACP's `unstable_boolean_config`). Cline
+/// 3.0.50+ ships one as `auto_approve` ("Auto-approve tools").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfigBooleanInfo {
+    pub current_value: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionConfigKindInfo {
     Select(SessionConfigSelectInfo),
+    Boolean(SessionConfigBooleanInfo),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,6 +655,13 @@ pub struct AgentOptionsSnapshot {
     /// `#[serde(default)]` keeps older snapshots deserializable.
     #[serde(default)]
     pub available_commands: Vec<AvailableCommandInfo>,
+    /// What the agent accepts in a prompt, captured from the same probe. A
+    /// composer with no live session (the to-do task boxes) needs this to
+    /// encode an attached image the way THIS agent takes it — natively, or as
+    /// an embedded resource blob for the agents that reject image content.
+    /// `None` when the agent advertised nothing within the probe window.
+    #[serde(default)]
+    pub prompt_capabilities: Option<PromptCapabilitiesInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

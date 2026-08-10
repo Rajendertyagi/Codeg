@@ -14,6 +14,10 @@ import { cn } from "@/lib/utils"
  * `bg-muted/40` rather than `bg-card`: in the light theme `--card` is the same
  * white as `--background`, so a card would only be an outline; muted gives a
  * faint fill in light mode and a slight lift over the dialog in dark mode.
+ *
+ * Lives in `shared/` because it is the house style for a settings surface, not
+ * a task-board component: the task settings dialog was simply the first to use
+ * it, and the custom-agent panel in Settings now shares it.
  */
 export function SettingCard({
   className,

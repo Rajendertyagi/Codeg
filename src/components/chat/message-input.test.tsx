@@ -387,6 +387,70 @@ const MODEL_OPTION: SessionConfigOptionInfo = {
   },
 }
 
+const MSGS = enMessages.Folder.chat.messageInput
+
+// Cline 3.0.50's `auto_approve` — the first boolean config option any pinned
+// agent ships. Both the wide inline row and the collapsed popover are always in
+// the DOM (a container query, which jsdom does not evaluate, picks one), so a
+// single render exercises both surfaces.
+const AUTO_APPROVE_OPTION: SessionConfigOptionInfo = {
+  id: "auto_approve",
+  name: "Auto-approve tools",
+  description: "Automatically approve all tool calls without asking",
+  category: null,
+  kind: { type: "boolean", current_value: false },
+}
+
+describe("MessageInput boolean config options", () => {
+  afterEach(() => cleanup())
+
+  it("renders the inline chip as a toggle and flips it on click", async () => {
+    const user = userEvent.setup()
+    const onConfigOptionChange = vi.fn()
+    const { container } = renderInput({
+      configOptions: [AUTO_APPROVE_OPTION],
+      onConfigOptionChange,
+    })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const toggle = screen.getByRole("button", {
+      name: `Auto-approve tools: ${MSGS.toggleOff}`,
+    })
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+
+    await user.click(toggle)
+    expect(onConfigOptionChange).toHaveBeenCalledWith("auto_approve", "true")
+  })
+
+  it("offers On/Off rows in the collapsed cog popover", async () => {
+    const user = userEvent.setup()
+    const onConfigOptionChange = vi.fn()
+    const { container } = renderInput({
+      configOptions: [AUTO_APPROVE_OPTION],
+      onConfigOptionChange,
+    })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const settingsLabel = MSGS.agentSettings
+    await user.click(screen.getByRole("button", { name: settingsLabel }))
+    const popover = await screen.findByRole("dialog", { name: settingsLabel })
+
+    // The left rail summarizes the current state…
+    expect(
+      within(popover).getByRole("button", { name: /Auto-approve tools/ })
+    ).toBeInTheDocument()
+    // …and the detail pane is a plain two-item choice.
+    await user.click(
+      within(popover).getByRole("button", { name: MSGS.toggleOn })
+    )
+    expect(onConfigOptionChange).toHaveBeenCalledWith("auto_approve", "true")
+  })
+})
+
 describe("MessageInput collapsed selectors popover", () => {
   afterEach(() => cleanup())
 

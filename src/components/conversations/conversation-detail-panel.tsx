@@ -10,12 +10,15 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react"
 import {
+  AlertCircle,
   Copy,
   Download,
   FileCode,
   FileImage,
   FileText,
   Info,
+  Loader2,
+  Plus,
   RefreshCw,
   SquarePen,
   X,
@@ -73,8 +76,10 @@ import {
   createChatConversation,
   createChatDir,
   createConversation,
+  getFolderConversation,
   openSettingsWindow,
 } from "@/lib/api"
+import { isWindowedDetail } from "@/lib/turn-window"
 import {
   flushRetryDelayMs,
   forkSendBlockedByQueue,
@@ -232,6 +237,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const tWelcome = useTranslations("Folder.chat.welcomeInputPanel")
   const tDiag = useTranslations("DiagnosticsSettings")
   const sharedT = useTranslations("Folder.chat.shared")
+  const tMessageList = useTranslations("Folder.chat.messageList")
   const refreshConversations = useAppWorkspaceStore(
     (s) => s.refreshConversations
   )
@@ -1554,6 +1560,53 @@ const ConversationTabView = memo(function ConversationTabView({
     closeTab(tabId)
   }, [closeTab, folder, openNewConversationTab, tabId, workingDirForConnection])
 
+  // A session/load failure no longer hijacks the whole message area (the
+  // transcript stays readable — see message-list-view's blockingLoadError);
+  // instead the failure lands here, as a banner docked where the composer
+  // sits, carrying the same Reload / New session recovery actions. Persisted
+  // conversations only: drafts never session/load.
+  const acpLoadErrorBanner =
+    hasPersistedConversation && acpLoadError ? (
+      <div
+        role="alert"
+        className="flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+      >
+        <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <span
+          className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+          title={acpLoadError}
+        >
+          {acpLoadError}
+        </span>
+        {canShowDetailErrorActions && (
+          <>
+            <button
+              type="button"
+              onClick={handleReloadDetail}
+              disabled={detailLoading}
+              aria-busy={detailLoading}
+              className="flex shrink-0 items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 font-medium transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {detailLoading ? (
+                <Loader2 aria-hidden="true" className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw aria-hidden="true" className="h-3 w-3" />
+              )}
+              {tMessageList("errorActionReload")}
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenNewSession}
+              className="flex shrink-0 items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 font-medium transition-colors hover:bg-destructive/10"
+            >
+              <Plus aria-hidden="true" className="h-3 w-3" />
+              {tMessageList("errorActionNewSession")}
+            </button>
+          </>
+        )}
+      </div>
+    ) : null
+
   // Goal pause/clear is a live, owner-only action, so decide availability once
   // here (where the connection is owned) rather than in the deep goal card.
   // `null` when the session isn't live or the user is a viewer → the card hides
@@ -1666,6 +1719,7 @@ const ConversationTabView = memo(function ConversationTabView({
       attachmentTabId={tabId}
       draftStorageKey={draftStorageKey}
       hideInput={isWelcomeMode || Boolean(acpLoadError)}
+      composerBanner={acpLoadErrorBanner}
       feedbackList={
         feedback.showList ? (
           <FeedbackNotesDisplay notes={feedback.notes} />
@@ -2151,22 +2205,31 @@ export function ConversationDetailPanel() {
     conversations
   )
 
-  const getExportData = useCallback(() => {
+  const getExportData = useCallback(async () => {
     if (!activeConversationTab?.conversationId) return null
     const session = getRuntimeSession(activeConversationTab.conversationId)
     if (!session?.detail) return null
+    let detail = session.detail
+    // The loaded detail may be a tail WINDOW (paginated loading); an export
+    // must cover the whole transcript, so fetch the legacy full response on
+    // demand. The window is full when it starts at offset 0.
+    if (isWindowedDetail(detail) && detail.turns_offset > 0) {
+      detail = await getFolderConversation(
+        session.dbConversationId ?? activeConversationTab.conversationId
+      )
+    }
     return {
-      summary: session.detail.summary,
-      turns: session.detail.turns,
-      sessionStats: session.detail.session_stats,
+      summary: detail.summary,
+      turns: detail.turns,
+      sessionStats: detail.session_stats,
       labels: exportLabels,
     }
   }, [activeConversationTab, exportLabels])
 
   const handleExportMarkdown = useCallback(async () => {
-    const data = getExportData()
-    if (!data) return
     try {
+      const data = await getExportData()
+      if (!data) return
       const result = await exportAsMarkdown(data)
       if (result === "saved") toast.success(t("exportSuccess"))
       // "cancelled": user dismissed the Save dialog — stay silent,
@@ -2178,9 +2241,9 @@ export function ConversationDetailPanel() {
   }, [getExportData, t])
 
   const handleExportHtml = useCallback(async () => {
-    const data = getExportData()
-    if (!data) return
     try {
+      const data = await getExportData()
+      if (!data) return
       const result = await exportAsHtml(data)
       if (result === "saved") toast.success(t("exportSuccess"))
     } catch (err) {
@@ -2190,12 +2253,15 @@ export function ConversationDetailPanel() {
   }, [getExportData, t])
 
   const handleExportImage = useCallback(async () => {
-    const data = getExportData()
-    if (!data) return
     const taskId = `export-image-${Date.now()}`
     addTask(taskId, t("exportImage"))
     updateTask(taskId, { status: "running" })
     try {
+      const data = await getExportData()
+      if (!data) {
+        updateTask(taskId, { status: "completed" })
+        return
+      }
       const result = await exportAsImage(data)
       updateTask(taskId, { status: "completed" })
       if (result === "saved") toast.success(t("exportSuccess"))

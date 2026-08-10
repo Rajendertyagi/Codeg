@@ -157,3 +157,38 @@ describe("TaskCard secondaries", () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 })
+
+describe("TaskCard worktree-removed badge", () => {
+  it("flags a deleted worktree in any status — done and canceled included", () => {
+    // Detached after removal: the pointer is gone, the branch remains.
+    renderCard(task({ status: "done", worktree_folder_id: null }))
+    expect(screen.getByText("Worktree removed")).toBeInTheDocument()
+  })
+
+  it("flags a worktree whose directory vanished behind the app", () => {
+    renderCard(task({ status: "canceled", worktree_missing: true }))
+    expect(screen.getByText("Worktree removed")).toBeInTheDocument()
+    // "Worktree kept" claims the opposite — it must stay silent here.
+    expect(screen.queryByText("Worktree kept")).toBeNull()
+  })
+
+  it("keeps the kept-badge for a canceled task whose worktree is intact", () => {
+    renderCard(task({ status: "canceled" }))
+    expect(screen.getByText("Worktree kept")).toBeInTheDocument()
+    expect(screen.queryByText("Worktree removed")).toBeNull()
+  })
+
+  it("says nothing on a just-created task that never initialized", () => {
+    renderCard(
+      task({
+        status: "todo",
+        files_changed: null,
+        worktree_folder_id: null,
+        work_branch: null,
+        base_branch: null,
+        base_sha: null,
+      })
+    )
+    expect(screen.queryByText("Worktree removed")).toBeNull()
+  })
+})

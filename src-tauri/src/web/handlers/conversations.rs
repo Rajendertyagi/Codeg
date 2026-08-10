@@ -125,6 +125,12 @@ pub async fn get_conversation(
 #[serde(rename_all = "camelCase")]
 pub struct GetFolderConversationParams {
     pub conversation_id: i32,
+    /// Optional turn-window selectors (mutually exclusive). Absent = legacy
+    /// full response.
+    #[serde(default)]
+    pub tail_turns: Option<usize>,
+    #[serde(default)]
+    pub from_index: Option<usize>,
 }
 
 pub async fn get_folder_conversation(
@@ -132,12 +138,36 @@ pub async fn get_folder_conversation(
     Json(params): Json<GetFolderConversationParams>,
 ) -> Result<Json<DbConversationDetail>, AppCommandError> {
     let db = &state.db;
+    let window = conv_commands::resolve_turn_window_req(params.tail_turns, params.from_index)?;
     let result = conv_commands::get_folder_conversation_with_live_core(
         &db.conn,
         &state.connection_manager,
         &state.chat_channel_manager,
         &state.emitter,
         params.conversation_id,
+        window,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFolderConversationTurnsParams {
+    pub conversation_id: i32,
+    pub before_index: usize,
+    pub limit: usize,
+}
+
+pub async fn get_folder_conversation_turns(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<GetFolderConversationTurnsParams>,
+) -> Result<Json<ConversationTurnsPage>, AppCommandError> {
+    let result = conv_commands::get_folder_conversation_turns_core(
+        &state.db.conn,
+        params.conversation_id,
+        params.before_index,
+        params.limit,
     )
     .await?;
     Ok(Json(result))

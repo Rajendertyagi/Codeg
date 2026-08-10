@@ -74,6 +74,7 @@ function settings(
     auto_process: false,
     max_concurrent: 2,
     merge_strategy: "squash",
+    auto_merge: false,
     delete_worktree_default: true,
     ...overrides,
   }
@@ -192,6 +193,37 @@ describe("TaskSettingsDialog stage prompts", () => {
     await waitFor(() => expect(setMock).toHaveBeenCalled())
     const [, saved] = setMock.mock.calls[0] as [number, WorkTaskFolderSettings]
     expect(saved.stage_prompts).toEqual({})
+  })
+})
+
+describe("TaskSettingsDialog workflow", () => {
+  it("saves the auto-merge switch alongside the other landing options", async () => {
+    const user = userEvent.setup()
+    renderDialog(1)
+    const save = await saveButton()
+
+    await user.click(screen.getByRole("tab", { name: "Workflow" }))
+    const toggle = screen.getByRole("switch", { name: "Merge automatically" })
+    expect(toggle).toHaveAttribute("data-state", "unchecked")
+    await user.click(toggle)
+    await user.click(save)
+
+    await waitFor(() => expect(setMock).toHaveBeenCalled())
+    const [, saved] = setMock.mock.calls[0] as [number, WorkTaskFolderSettings]
+    expect(saved.auto_merge).toBe(true)
+    expect(saved.delete_worktree_default).toBe(true)
+  })
+
+  it("seeds the auto-merge switch from the stored row", async () => {
+    getOwnMock.mockResolvedValue(settings({ auto_merge: true }))
+    const user = userEvent.setup()
+    renderDialog(1)
+    await saveButton()
+
+    await user.click(screen.getByRole("tab", { name: "Workflow" }))
+    expect(
+      screen.getByRole("switch", { name: "Merge automatically" })
+    ).toHaveAttribute("data-state", "checked")
   })
 })
 

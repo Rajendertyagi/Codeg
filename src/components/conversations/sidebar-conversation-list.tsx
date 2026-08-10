@@ -18,6 +18,7 @@ import { Virtualizer, type VirtualizerHandle } from "virtua"
 import {
   Bot,
   Check,
+  ChevronDown,
   ChevronRight,
   Download,
   ExternalLink,
@@ -43,6 +44,7 @@ import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useThemeColor, useZoomLevel } from "@/hooks/use-appearance"
 import { useSortedAvailableAgents } from "@/hooks/use-sorted-available-agents"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   openImportSessionsWindow,
   openProjectBootWindow,
@@ -70,7 +72,9 @@ import {
   saveSectionCollapsed,
   loadConversationExpanded,
   saveConversationExpanded,
+  DEFAULT_SECTION_ORDER,
   type SidebarSectionCollapsed,
+  type SidebarSectionKey,
   type SidebarSortMode,
   type SidebarSectionOrder,
 } from "@/lib/sidebar-view-mode-storage"
@@ -104,6 +108,7 @@ import {
   reuseSet,
   selectChatConversationsWithReuse,
   selectPinnedWithReuse,
+  selectRecentConversationsWithReuse,
   worktreeChildrenByParent,
   type SidebarRow,
 } from "./sidebar-conversation-grouping"
@@ -163,6 +168,12 @@ const EMPTY_CHILD_TO_PARENT: ReadonlyMap<number, number> = new Map()
 // `containerChildren` memo (and buildRows through it) doesn't churn.
 const EMPTY_CONTAINER_CHILDREN: ReadonlyMap<number, readonly number[]> =
   new Map()
+
+// How many conversations the "Recent" section shows before its "show more" row,
+// and how many each click adds. Recent deliberately re-lists what the Folders /
+// Chat sections already show, so an unbounded one pushes every section below it
+// off the screen — a page keeps it a glance-able "where was I" list.
+const RECENT_PAGE_SIZE = 15
 
 const FolderHeader = memo(function FolderHeader({
   folderId,
@@ -271,6 +282,7 @@ const FolderHeader = memo(function FolderHeader({
   // returns a fresh `t` on every parent render, so passing it down would defeat
   // this component's memo and re-render every header on each status event.
   const t = useTranslations("Folder.sidebar")
+  const ime = useImeGuard()
   // Only flag a stale default once the live list is known; before fresh,
   // `availableAgents` is the localStorage seed and may legitimately omit a
   // newly-enabled agent.
@@ -675,8 +687,9 @@ const FolderHeader = memo(function FolderHeader({
           <Input
             value={aliasValue}
             onChange={(e) => setAliasValue(e.target.value)}
+            {...ime.props}
             onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing || e.key === "Process") return
+              if (ime.isComposing(e)) return
               if (e.key === "Enter") confirmAlias()
             }}
             placeholder={t("folderHeaderMenu.setAliasPlaceholder")}
@@ -709,14 +722,19 @@ export interface SidebarConversationListProps {
   /** When on, each repo's worktree child folders render as indented sub-groups
    *  instead of being merged flat into the parent group. Defaults to off. */
   showWorktrees?: boolean
+  /** When on, the flat "Recent" section is rendered at its slot in
+   *  `sectionOrder`. Defaults to off here; the Sidebar passes the user's
+   *  preference, whose product default is ON. */
+  showRecent?: boolean
 }
 
 export function SidebarConversationList({
   ref,
   showCompleted = true,
   sortMode = "created",
-  sectionOrder = "folders-first",
+  sectionOrder = DEFAULT_SECTION_ORDER,
   showWorktrees = false,
+  showRecent = false,
 }: SidebarConversationListProps & {
   ref?: Ref<SidebarConversationListHandle>
 }) {
@@ -832,6 +850,15 @@ export function SidebarConversationList({
   const pinnedExpanded = !sectionCollapsed.pinned
   const foldersExpanded = !sectionCollapsed.folders
   const chatsExpanded = !sectionCollapsed.chats
+  const recentExpanded = !sectionCollapsed.recent
+  // How many Recent rows are currently revealed. Session-only (not persisted):
+  // "show me more of this list right now" is a reading gesture, not a setting —
+  // and a fresh sidebar should open short again.
+  const [recentLimit, setRecentLimit] = useState(RECENT_PAGE_SIZE)
+  const revealMoreRecent = useCallback(
+    () => setRecentLimit((n) => n + RECENT_PAGE_SIZE),
+    []
+  )
   // ── Per-conversation delegation sub-session expansion ───────────────────
   // Default COLLAPSED (unlike folders): only ids the user opened are tracked
   // and persisted. Hydrated from localStorage after mount. `childrenByParent`
@@ -920,16 +947,13 @@ export function SidebarConversationList({
     setConversationExpanded(new Set(loadConversationExpanded()))
   }, [])
 
-  const toggleSection = useCallback(
-    (section: "pinned" | "folders" | "chats") => {
-      setSectionCollapsed((prev) => {
-        const next = { ...prev, [section]: !prev[section] }
-        saveSectionCollapsed(next)
-        return next
-      })
-    },
-    []
-  )
+  const toggleSection = useCallback((section: SidebarSectionKey) => {
+    setSectionCollapsed((prev) => {
+      const next = { ...prev, [section]: !prev[section] }
+      saveSectionCollapsed(next)
+      return next
+    })
+  }, [])
 
   const handleChangeFolderColor = useCallback(
     async (folderId: number, color: FolderThemeColor) => {
@@ -1055,20 +1079,44 @@ export function SidebarConversationList({
     return next
   }, [conversations])
 
+  // Every folder currently open in the workspace (repos and their worktree
+  // children alike). Depends only on `folders`, so status events never rebuild
+  // it — the Recent bucket below leans on that.
+  const openFolderIds = useMemo(
+    () => new Set(folders.map((f) => f.id)),
+    [folders]
+  )
+
+  // Flat "Recent" bucket: every reachable conversation — folder-bound and chat
+  // alike — newest first, gated on the folder still being open so closing a
+  // folder also removes its sessions here. Reference reuse keeps an unrelated
+  // status event from rebuilding it and defeating the section's card memos.
+  const recentConvsRef = useRef<DbConversationSummary[]>([])
+  const recentConversations = useMemo(() => {
+    const next = selectRecentConversationsWithReuse(
+      conversations,
+      showCompleted,
+      sortMode,
+      openFolderIds,
+      recentConvsRef.current
+    )
+    recentConvsRef.current = next
+    return next
+  }, [conversations, showCompleted, sortMode, openFolderIds])
+
   // Maps each open worktree child folder → its (open) root folder. A child is
   // only redirected when its parent is also open, so a worktree whose root was
   // closed/removed falls back to standing on its own (its conversations stay
   // reachable). The merge is display-only: it never rewrites `conversation.folder_id`.
   const childToParent = useMemo(() => {
-    const openIds = new Set(folders.map((f) => f.id))
     const map = new Map<number, number>()
     for (const f of folders) {
-      if (f.parent_id != null && openIds.has(f.parent_id)) {
+      if (f.parent_id != null && openFolderIds.has(f.parent_id)) {
         map.set(f.id, f.parent_id)
       }
     }
     return map
-  }, [folders])
+  }, [folders, openFolderIds])
 
   // The merge map used for DISPLAY (grouping, counts, theming). When "Show
   // worktrees" is on it is empty, so each worktree child keeps its own bucket /
@@ -1213,6 +1261,10 @@ export function SidebarConversationList({
         foldersExpanded,
         chatConversations,
         chatsExpanded,
+        recentConversations,
+        recentExpanded,
+        showRecent,
+        recentLimit,
         sectionOrder,
         conversationExpanded,
         childrenByParent,
@@ -1230,6 +1282,10 @@ export function SidebarConversationList({
       foldersExpanded,
       chatConversations,
       chatsExpanded,
+      recentConversations,
+      recentExpanded,
+      showRecent,
+      recentLimit,
       sectionOrder,
       conversationExpanded,
       childrenByParent,
@@ -1759,12 +1815,19 @@ export function SidebarConversationList({
   )
 
   const handleNewConversation = useCallback(() => {
-    if (!activeFolder) return
     // Starting a conversation returns to the conversation workspace if a
     // workbench route (e.g. Automations) was taking over the content region.
     openConversations()
+    // With no active folder (all folders closed, or a cold start that recovered
+    // to nothing) fall back to folderless chat mode rather than no-op — the
+    // same defense the sidebar's own "New chat" row takes, so neither entry
+    // point is ever a dead end.
+    if (!activeFolder) {
+      openChatModeTab()
+      return
+    }
     openNewConversationTab(activeFolder.id, activeFolder.path)
-  }, [activeFolder, openNewConversationTab, openConversations])
+  }, [activeFolder, openChatModeTab, openNewConversationTab, openConversations])
 
   const handleNewConversationForFolder = useCallback(
     (folderId: number) => {
@@ -2170,8 +2233,17 @@ export function SidebarConversationList({
           onToggle={toggleSection}
           // The chats section gets an always-visible New-chat button (its primary
           // entry point, reachable even when empty). `openChatModeTab` is a stable
-          // context callback, so the memo holds.
-          onNewChat={row.section === "chats" ? openChatModeTab : undefined}
+          // context callback, so the memo holds. Recent gets the same
+          // affordance, but starting a conversation in the ACTIVE FOLDER — the
+          // section spans folders and chats alike, and the folder is where a
+          // "continue where I left off" list lands you.
+          onNewChat={
+            row.section === "chats"
+              ? openChatModeTab
+              : row.section === "recent"
+                ? handleNewConversation
+                : undefined
+          }
           // The folders section gets two right-edge hover actions mirroring the
           // top-of-page NewFolderDropdown: Open Folder and Clone Repository.
           // Both handlers are stable, so the memo holds.
@@ -2274,6 +2346,53 @@ export function SidebarConversationList({
         </div>
       )
     }
+    if (row.kind === "recent-empty") {
+      // Empty "Recent" section hint — same folderless, rail-less treatment as
+      // the other two. Only reachable in a workspace with no conversations at
+      // all, since Recent spans every section.
+      return (
+        <div className="px-[0.5rem] py-[0.375rem] text-[0.75rem] text-muted-foreground/70">
+          {t("noRecent")}
+        </div>
+      )
+    }
+    if (row.kind === "recent-more") {
+      // Footer of the paged Recent section — a row, not a hint: each click
+      // reveals another page. Its geometry is the conversation card's, so the
+      // section reads as one column — the chevron sits ON the rail axis exactly
+      // where a card's agent icon does (same 0.75rem glyph in the same 0.875rem
+      // box, centred on the var), and the label starts at the card's title
+      // inset (`axis + 0.875rem`). Same row height and full rounding too, so
+      // its hover pill is the one the rows above it use.
+      return (
+        <div className="relative h-[2rem]">
+          <button
+            type="button"
+            onClick={revealMoreRecent}
+            className="relative flex h-[1.9375rem] w-full items-center rounded-full pr-[0.25rem] text-left text-[0.75rem] text-muted-foreground/80 outline-none transition-colors duration-[120ms] hover:bg-[color-mix(in_oklab,var(--sidebar-accent),var(--sidebar-foreground)_2%)] hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            style={{
+              paddingLeft: "calc(var(--conv-rail-axis, 0.875rem) + 0.875rem)",
+            }}
+          >
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 flex items-center justify-center"
+              style={{
+                left: "var(--conv-rail-axis, 0.875rem)",
+                width: "0.875rem",
+                height: "0.875rem",
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              <ChevronDown className="h-[0.75rem] w-[0.75rem]" />
+            </span>
+            <span className="truncate">
+              {t("showMoreRecent", { count: row.remaining })}
+            </span>
+          </button>
+        </div>
+      )
+    }
     if (row.kind === "subsession-loading") {
       // Transient spinner at the child indent while children are fetched. The
       // left inset matches a depth-`row.depth` card's text start: rail axis
@@ -2329,6 +2448,10 @@ export function SidebarConversationList({
     )
   }
 
+  // Keys must be unique across the WHOLE flat array, and the Recent section
+  // deliberately re-lists conversations that also appear under their folder or
+  // in Chat — so every row a Recent parent can produce carries a `recent-`
+  // prefix to stay distinct from its canonical twin.
   const rowKey = (row: SidebarRow): string => {
     if (row.kind === "section") return `section-${row.section}`
     if (row.kind === "folder") return `folder-${row.folderId}`
@@ -2336,8 +2459,13 @@ export function SidebarConversationList({
     if (row.kind === "empty") return `empty-${row.folderId}`
     if (row.kind === "chats-empty") return "chats-empty"
     if (row.kind === "folders-empty") return "folders-empty"
-    if (row.kind === "subsession-loading") return `subloading-${row.parentId}`
-    return `conv-${row.conversation.agent_type}-${row.conversation.id}`
+    if (row.kind === "recent-empty") return "recent-empty"
+    if (row.kind === "recent-more") return "recent-more"
+    const prefix = row.recent ? "recent-" : ""
+    if (row.kind === "subsession-loading") {
+      return `${prefix}subloading-${row.parentId}`
+    }
+    return `${prefix}conv-${row.conversation.agent_type}-${row.conversation.id}`
   }
 
   return (

@@ -1220,6 +1220,7 @@ export function FileTreeTab() {
     local: [],
     remote: [],
     worktree_branches: [],
+    main_worktree_branch: null,
   })
   const [compareBranchLoading, setCompareBranchLoading] = useState(false)
   const [compareRecentOpen, setCompareRecentOpen] = useState(true)
@@ -2266,7 +2267,12 @@ export function FileTreeTab() {
     // Also drop the loaded branch list so a compare dialog reopened under the
     // new folder starts empty (loading) rather than briefly showing — and
     // letting the user act on — the previous folder's branches.
-    setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
+    setCompareBranchList({
+      local: [],
+      remote: [],
+      worktree_branches: [],
+      main_worktree_branch: null,
+    })
     setCompareCurrentBranch(null)
     setCompareBranchLoading(false)
     resetDirectoryGitActionDialog()
@@ -2360,7 +2366,12 @@ export function FileTreeTab() {
 
   const loadCompareBranches = useCallback(async () => {
     if (!folder?.path) {
-      setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
+      setCompareBranchList({
+        local: [],
+        remote: [],
+        worktree_branches: [],
+        main_worktree_branch: null,
+      })
       setCompareCurrentBranch(null)
       return
     }
@@ -2379,7 +2390,12 @@ export function FileTreeTab() {
       if (branchesResult.status === "fulfilled") {
         setCompareBranchList(branchesResult.value)
       } else {
-        setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
+        setCompareBranchList({
+          local: [],
+          remote: [],
+          worktree_branches: [],
+          main_worktree_branch: null,
+        })
         const message =
           branchesResult.reason instanceof Error
             ? branchesResult.reason.message
@@ -2397,7 +2413,12 @@ export function FileTreeTab() {
       // not clobber (nor toggle the loading of) a compare dialog reopened under
       // folder B.
       if (gen !== loadGenRef.current) return
-      setCompareBranchList({ local: [], remote: [], worktree_branches: [] })
+      setCompareBranchList({
+        local: [],
+        remote: [],
+        worktree_branches: [],
+        main_worktree_branch: null,
+      })
       setCompareCurrentBranch(null)
       const message = toErrorMessage(error)
       toast.error(t("toasts.loadBranchesFailed"), { description: message })

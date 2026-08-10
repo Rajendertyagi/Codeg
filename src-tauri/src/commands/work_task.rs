@@ -42,17 +42,75 @@ fn nudge_schedule() {
     }
 }
 
+/// Best-effort auto-merge nudge after a settings change: switching auto-merge
+/// on should drain the review backlog now, not at the next reconcile tick.
+/// Scope 0 is the global row, which any folder without its own row follows —
+/// that one sweeps every folder holding reviewed tasks.
+fn nudge_auto_merge(folder_id: i32) {
+    if let Some(engine) = crate::work_task::engine() {
+        let scope = (folder_id != 0).then_some(folder_id);
+        tokio::spawn(async move { engine.sweep_auto_merge_backlog(scope).await });
+    }
+}
+
 // ── shared business logic (both modes) ──────────────────────────────────────
 
 pub async fn work_task_list_core(
     db: &AppDatabase,
     folder_id: Option<i32>,
 ) -> Result<Vec<WorkTaskInfo>, DbError> {
-    work_task_service::list(&db.conn, folder_id).await
+    let mut infos = work_task_service::list(&db.conn, folder_id).await?;
+    annotate_worktree_missing(db, &mut infos).await?;
+    Ok(infos)
 }
 
 pub async fn work_task_get_core(db: &AppDatabase, id: i32) -> Result<WorkTaskInfo, DbError> {
-    work_task_service::get(&db.conn, id).await
+    let mut infos = vec![work_task_service::get(&db.conn, id).await?];
+    annotate_worktree_missing(db, &mut infos).await?;
+    Ok(infos.pop().expect("annotated the one row"))
+}
+
+/// Stamp `worktree_missing` on every row whose recorded worktree can no longer
+/// serve a merge: its folder row was removed, or its directory is gone from
+/// disk. One batched folder query plus a stat per distinct worktree — cheap
+/// enough for every list, and the board needs it live: a reviewed task whose
+/// worktree vanished must offer "complete" instead of a merge that can only
+/// fail.
+async fn annotate_worktree_missing(
+    db: &AppDatabase,
+    infos: &mut [WorkTaskInfo],
+) -> Result<(), DbError> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let ids: std::collections::BTreeSet<i32> =
+        infos.iter().filter_map(|t| t.worktree_folder_id).collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let live_paths: std::collections::HashMap<i32, String> =
+        crate::db::entities::folder::Entity::find()
+            .filter(crate::db::entities::folder::Column::Id.is_in(ids.iter().copied()))
+            .filter(crate::db::entities::folder::Column::DeletedAt.is_null())
+            .all(&db.conn)
+            .await?
+            .into_iter()
+            .map(|f| (f.id, f.path))
+            .collect();
+    let on_disk: std::collections::HashMap<i32, bool> = ids
+        .iter()
+        .map(|id| {
+            let present = live_paths
+                .get(id)
+                .is_some_and(|path| std::path::Path::new(path).exists());
+            (*id, present)
+        })
+        .collect();
+    for info in infos.iter_mut() {
+        if let Some(wt_id) = info.worktree_folder_id {
+            info.worktree_missing = !on_disk.get(&wt_id).copied().unwrap_or(false);
+        }
+    }
+    Ok(())
 }
 
 pub async fn work_task_events_core(
@@ -196,8 +254,17 @@ pub async fn work_task_start_all_core(folder_id: Option<i32>) -> Result<u32, DbE
 }
 
 /// failed → queued, optionally with a note explaining what to do differently.
-pub async fn work_task_retry_core(id: i32, note: Option<String>) -> Result<(), DbError> {
-    engine()?.retry(id, note).await.map_err(DbError::Validation)
+/// `blocks` carries whatever the note box attached out of band (images, pasted
+/// bytes) as raw prompt blocks.
+pub async fn work_task_retry_core(
+    id: i32,
+    note: Option<String>,
+    blocks: Vec<serde_json::Value>,
+) -> Result<(), DbError> {
+    engine()?
+        .retry(id, note, blocks)
+        .await
+        .map_err(DbError::Validation)
 }
 
 /// canceled → todo. Pure DB (no engine needed) — the user starts it again
@@ -208,8 +275,9 @@ pub async fn work_task_requeue_core(
     db: &AppDatabase,
     id: i32,
     note: Option<String>,
+    blocks: Vec<serde_json::Value>,
 ) -> Result<(), DbError> {
-    if !work_task_service::requeue_canceled(&db.conn, id, note.as_deref()).await? {
+    if !work_task_service::requeue_canceled(&db.conn, id, note.as_deref(), &blocks).await? {
         return Err(DbError::Validation("task is not canceled".to_string()));
     }
     emit_event(
@@ -263,16 +331,17 @@ pub async fn work_task_return_core(
     id: i32,
     feedback: String,
     intent: Option<String>,
+    blocks: Vec<serde_json::Value>,
 ) -> Result<(), DbError> {
     let intent = FollowUpIntent::from_wire(intent.as_deref()).map_err(DbError::Validation)?;
     let feedback = feedback.trim().to_string();
-    // A self-check is a complete instruction on its own; everything else is
-    // only as good as what the user typed.
-    if feedback.is_empty() && !intent.allows_empty() {
+    // A self-check is a complete instruction on its own, and so is an attached
+    // screenshot; everything else is only as good as what the user typed.
+    if feedback.is_empty() && blocks.is_empty() && !intent.allows_empty() {
         return Err(DbError::Validation("feedback is required".to_string()));
     }
     engine()?
-        .return_task(id, intent, feedback)
+        .return_task(id, intent, feedback, blocks)
         .await
         .map_err(DbError::Validation)
 }
@@ -297,7 +366,7 @@ pub async fn work_task_merge_core(
     delete_worktree: bool,
 ) -> Result<(), DbError> {
     engine()?
-        .merge_task(id, message, delete_worktree)
+        .merge_task(id, message, delete_worktree, false)
         .await
         .map_err(DbError::Validation)
 }
@@ -421,6 +490,7 @@ pub async fn work_task_settings_set_core(
         WorkTaskChange::Settings { folder_id },
     );
     nudge_pump(folder_id);
+    nudge_auto_merge(folder_id);
     Ok(())
 }
 
@@ -438,6 +508,9 @@ pub async fn work_task_settings_delete_core(
         WorkTaskChange::Settings { folder_id },
     );
     nudge_pump(folder_id);
+    // Reverting to the global row can also switch auto-merge ON for this
+    // folder (the global row may carry it) — same drain-now semantics.
+    nudge_auto_merge(folder_id);
     Ok(())
 }
 
@@ -559,8 +632,12 @@ pub async fn work_task_start_all(folder_id: Option<i32>) -> Result<u32, DbError>
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn work_task_retry(id: i32, note: Option<String>) -> Result<(), DbError> {
-    work_task_retry_core(id, note).await
+pub async fn work_task_retry(
+    id: i32,
+    note: Option<String>,
+    blocks: Option<Vec<serde_json::Value>>,
+) -> Result<(), DbError> {
+    work_task_retry_core(id, note, blocks.unwrap_or_default()).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -570,8 +647,16 @@ pub async fn work_task_requeue(
     db: tauri::State<'_, AppDatabase>,
     id: i32,
     note: Option<String>,
+    blocks: Option<Vec<serde_json::Value>>,
 ) -> Result<(), DbError> {
-    work_task_requeue_core(&EventEmitter::Tauri(app), &db, id, note).await
+    work_task_requeue_core(
+        &EventEmitter::Tauri(app),
+        &db,
+        id,
+        note,
+        blocks.unwrap_or_default(),
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -591,8 +676,9 @@ pub async fn work_task_return(
     id: i32,
     feedback: String,
     intent: Option<String>,
+    blocks: Option<Vec<serde_json::Value>>,
 ) -> Result<(), DbError> {
-    work_task_return_core(id, feedback, intent).await
+    work_task_return_core(id, feedback, intent, blocks.unwrap_or_default()).await
 }
 
 #[cfg(feature = "tauri-runtime")]

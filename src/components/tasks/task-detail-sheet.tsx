@@ -62,13 +62,15 @@ import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { AgentIcon } from "@/components/agent-icon"
-import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { hasNothingToMerge } from "./task-acceptance"
 import { StatusChip, statusLabelKey } from "./task-card"
-import { TaskFollowUpComposer } from "./task-follow-up-composer"
+import {
+  TaskMessageComposer,
+  type TaskMessageComposerHandle,
+} from "./task-message-composer"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -106,6 +108,7 @@ import {
 import { cn } from "@/lib/utils"
 import type {
   AgentType,
+  PromptInputBlock,
   WorkTask,
   WorkTaskChangedFile,
   WorkTaskEvent,
@@ -185,6 +188,9 @@ export function TaskDetailSheet({
   onSchedule,
 }: TaskDetailSheetProps) {
   const t = useTranslations("Tasks")
+  // The upload-in-flight toast is the conversation composer's own message —
+  // same box, same wording.
+  const tChat = useTranslations("Folder.chat.messageInput")
   // Backs the follow-up composer's `@` references and `/` command probe. The
   // whole list, not the opened one: a task's worktree folder is normally not
   // among the folders the user has open.
@@ -197,7 +203,10 @@ export function TaskDetailSheet({
   // Either way it carries its own send — the button above only unfolds it.
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerText, setComposerText] = useState("")
-  const composerRef = useRef<RichComposerHandle>(null)
+  const composerRef = useRef<TaskMessageComposerHandle>(null)
+  // Mirrors the composer's attached-file count so an image-only follow-up (or
+  // restart note) still enables the send — the text alone would read as empty.
+  const [composerAttachments, setComposerAttachments] = useState(0)
   const [intent, setIntent] = useState<FollowUpIntent>(DEFAULT_FOLLOW_UP_INTENT)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteWorktree, setDeleteWorktree] = useState(false)
@@ -209,6 +218,10 @@ export function TaskDetailSheet({
 
   const taskId = task?.id ?? null
   const hasWorktree = task?.worktree_folder_id != null
+  // Recorded AND still on disk — the only state a diff can be read in. The
+  // cleanup / delete entries below stay on `hasWorktree`: converging the
+  // leftovers of a vanished worktree is exactly what they are for.
+  const worktreeUsable = hasWorktree && task?.worktree_missing !== true
   const conversationId = task?.conversation_id ?? null
   const taskStatus = task?.status ?? null
   // Total token usage of the task's conversation — parsed from the agent's own
@@ -256,7 +269,7 @@ export function TaskDetailSheet({
     try {
       const [evs, fls] = await Promise.all([
         workTaskEvents(taskId),
-        hasWorktree ? workTaskChangedFiles(taskId) : Promise.resolve([]),
+        worktreeUsable ? workTaskChangedFiles(taskId) : Promise.resolve([]),
       ])
       if (id === reqRef.current) {
         setEvents(evs)
@@ -265,7 +278,7 @@ export function TaskDetailSheet({
     } catch {
       // keep previous data on transient error
     }
-  }, [taskId, hasWorktree])
+  }, [taskId, worktreeUsable])
 
   useEffect(() => {
     if (!open || taskId == null) return
@@ -274,6 +287,7 @@ export function TaskDetailSheet({
     setFiles([])
     setComposerOpen(false)
     setComposerText("")
+    setComposerAttachments(0)
     setIntent(DEFAULT_FOLLOW_UP_INTENT)
     void reload()
     let unsub: (() => void) | undefined
@@ -313,6 +327,7 @@ export function TaskDetailSheet({
         await fn()
         setComposerOpen(false)
         setComposerText("")
+        setComposerAttachments(0)
       }),
     [run]
   )
@@ -372,6 +387,9 @@ export function TaskDetailSheet({
     if (!composerOpen) return null
     return (composerRef.current?.getText() ?? composerText).trim() || null
   }
+  /** Images / pasted bytes attached to the open box, as their own blocks. */
+  const composerBlocks = (): PromptInputBlock[] =>
+    composerOpen ? (composerRef.current?.getAttachmentBlocks() ?? []) : []
   if (isReview) {
     // A task that changed nothing has no merge to offer — accepting it IS the
     // primary action (same swap the board card makes).
@@ -483,7 +501,14 @@ export function TaskDetailSheet({
       // Straight from the editor: reference badges serialize to their inline
       // token here, and this can't lag a keystroke behind the state.
       const feedback = (composerRef.current?.getText() ?? composerText).trim()
-      if (!canSubmitFollowUp(intent, feedback)) return
+      const blocks = composerBlocks()
+      if (!canSubmitFollowUp(intent, feedback, blocks.length > 0)) return
+      // An unsettled upload has no server-side uri yet, so its block would
+      // reach the agent empty. The draft stays intact — this is "wait a moment".
+      if (composerRef.current?.hasUploadingImage()) {
+        toast.error(tChat("attachUploadInProgress"))
+        return
+      }
       // A ref, not `busy`: the send key is read out of a ref inside the
       // editor's own keydown handler, so a second Enter can arrive before
       // React has re-rendered with `busy` set. The backend's CAS would reject
@@ -492,7 +517,7 @@ export function TaskDetailSheet({
       if (submittingRef.current) return
       submittingRef.current = true
       try {
-        await workTaskReturn(task.id, feedback, intent)
+        await workTaskReturn(task.id, feedback, intent, blocks)
       } finally {
         submittingRef.current = false
       }
@@ -513,13 +538,19 @@ export function TaskDetailSheet({
     // re-rendered with `busy` set. The backend's CAS rejects the loser, but the
     // user would see an error toast for a keypress they are entitled to repeat.
     if (submittingRef.current) return
+    if (composerRef.current?.hasUploadingImage()) {
+      toast.error(tChat("attachUploadInProgress"))
+      return
+    }
     submittingRef.current = true
+    const note = composerNote()
+    const blocks = composerBlocks()
     return runRestart(async () => {
       try {
         if (task.status === "failed") {
-          await workTaskRetry(task.id, composerNote())
+          await workTaskRetry(task.id, note, blocks)
         } else {
-          await workTaskRequeue(task.id, composerNote())
+          await workTaskRequeue(task.id, note, blocks)
         }
       } finally {
         submittingRef.current = false
@@ -784,8 +815,8 @@ export function TaskDetailSheet({
                           anything read here could be a render behind the
                           keystroke that triggered it — each submit validates
                           the live document itself. */}
-                      <TaskFollowUpComposer
-                        editorRef={composerRef}
+                      <TaskMessageComposer
+                        ref={composerRef}
                         agentType={composerTarget.agentType}
                         folderPath={composerTarget.folderPath}
                         defaultText={composerText}
@@ -797,6 +828,7 @@ export function TaskDetailSheet({
                         submitShortcut={shortcuts.send_message}
                         newlineShortcut={shortcuts.newline_in_message}
                         onChange={setComposerText}
+                        onAttachmentsChange={setComposerAttachments}
                         onSubmit={() => {
                           void (isReview ? submitFollowUp() : submitRestart())
                         }}
@@ -851,7 +883,11 @@ export function TaskDetailSheet({
                           disabled={
                             busy ||
                             (isReview &&
-                              !canSubmitFollowUp(intent, composerText))
+                              !canSubmitFollowUp(
+                                intent,
+                                composerText,
+                                composerAttachments > 0
+                              ))
                           }
                           onClick={isReview ? submitFollowUp : submitRestart}
                         >
@@ -941,7 +977,7 @@ export function TaskDetailSheet({
               </section>
 
               {/* Changed files vs the recorded base. */}
-              {hasWorktree ? (
+              {worktreeUsable ? (
                 <section className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">

@@ -51,6 +51,7 @@ import {
   renameFolderLink,
   repairFolderLink,
 } from "@/lib/api"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import { isDesktop, openFileDialog } from "@/lib/platform"
 import { parentFsPath } from "@/lib/path-utils"
 import { getActiveRemoteConnectionId } from "@/lib/transport"
@@ -740,6 +741,7 @@ function LinkRow({
   onRepair: () => void
 }) {
   const t = useTranslations("Folder.workspaceDialog")
+  const ime = useImeGuard()
 
   return (
     <div className="flex items-center gap-2 px-3 py-2">
@@ -753,8 +755,9 @@ function LinkRow({
             <Input
               value={renameValue}
               onChange={(e) => onRenameChange(e.target.value)}
+              {...ime.props}
               onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing || e.key === "Process") return
+                if (ime.isComposing(e)) return
                 if (e.key === "Enter") onCommitRename()
                 if (e.key === "Escape") onCancelRename()
               }}

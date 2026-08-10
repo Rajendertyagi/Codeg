@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { isWorktreeGone } from "./task-acceptance"
 import type { WorkTask } from "@/lib/types"
 
 interface TaskCompleteDialogProps {
@@ -25,11 +26,14 @@ interface TaskCompleteDialogProps {
 }
 
 /**
- * Accept a reviewed task that changed nothing. There is no merge to dispatch
- * and no commit message to write, so the only decision left is what happens to
- * the (empty) worktree — hence one checkbox and a confirm. Unlike the merge
- * dialog this settles synchronously: the command returns once the task is
- * `done`, so a failure belongs in the dialog rather than on the card.
+ * Accept a reviewed task without a merge — because it changed nothing, or
+ * because its worktree is gone and no merge could run. There is no commit
+ * message to write, so the only decision left is what happens to the (empty)
+ * worktree — one checkbox and a confirm; with the worktree gone even that
+ * choice disappears (the engine converges the leftovers itself, sparing a
+ * branch that still holds work). Unlike the merge dialog this settles
+ * synchronously: the command returns once the task is `done`, so a failure
+ * belongs in the dialog rather than on the card.
  */
 export function TaskCompleteDialog({
   open,
@@ -39,7 +43,8 @@ export function TaskCompleteDialog({
   const t = useTranslations("Tasks")
   const [deleteWorktree, setDeleteWorktree] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const hasWorktree = task?.worktree_folder_id != null
+  const worktreeGone = task != null && isWorktreeGone(task)
+  const hasWorktree = task?.worktree_folder_id != null && !worktreeGone
 
   useEffect(() => {
     if (!open || !task) return
@@ -79,7 +84,11 @@ export function TaskCompleteDialog({
       <DialogContent className="sm:max-w-[28rem]">
         <DialogHeader>
           <DialogTitle>{t("completeTitle")}</DialogTitle>
-          <DialogDescription>{t("completeDescription")}</DialogDescription>
+          <DialogDescription>
+            {worktreeGone
+              ? t("completeDescriptionNoWorktree")
+              : t("completeDescription")}
+          </DialogDescription>
         </DialogHeader>
 
         {hasWorktree ? (

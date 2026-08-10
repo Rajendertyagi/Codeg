@@ -3,8 +3,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   selectTimelineTurns,
+  useConversationRuntimeActions,
   useConversationRuntimeStore,
 } from "@/stores/conversation-runtime-store"
+import { isWindowedDetail } from "@/lib/turn-window"
 import { ContentPartsRenderer } from "./content-parts-renderer"
 import { ContextCompactionCard } from "./context-compaction-card"
 import { CollapsibleUserMessage } from "./collapsible-user-message"
@@ -81,10 +83,11 @@ interface MessageListViewProps {
   detailError?: string | null
   /**
    * Set when the agent rejected `session/load` non-recoverably (e.g. the
-   * historical session_id was deleted). Takes precedence over `detailError`
-   * AND the renderable-content gate: even when the local DB has the full
-   * message history, the user must explicitly choose Reload or start a new
-   * conversation since the agent can't continue this thread.
+   * historical session_id was deleted, or the conversation's folder is gone).
+   * Replaces the message area only when nothing is renderable; when the local
+   * DB has the message history, the transcript stays visible and the owning
+   * panel surfaces this error as a banner in the composer area instead (with
+   * Reload / New session actions), since the agent can't continue the thread.
    */
   acpLoadError?: string | null
   hideEmptyState?: boolean
@@ -686,6 +689,17 @@ export function MessageListView({
     selectTimelineTurns(s, conversationId)
   )
 
+  // Reverse infinite scroll: older history exists above the loaded window
+  // (windowed detail with a non-zero offset). Legacy full responses never
+  // report an offset, so the loader row and near-top trigger stay off.
+  const detail = session?.detail ?? null
+  const hasOlderTurns = isWindowedDetail(detail) && detail.turns_offset > 0
+  const loadingOlderTurns = session?.loadingOlderTurns ?? false
+  const { loadOlderTurns } = useConversationRuntimeActions()
+  const handleLoadOlder = useCallback(() => {
+    loadOlderTurns(conversationId)
+  }, [loadOlderTurns, conversationId])
+
   const shouldUseSmoothResize = !(
     isActive &&
     !detailLoading &&
@@ -770,8 +784,12 @@ export function MessageListView({
       // Include phase so a turn that briefly coexists across phases (e.g.
       // a streaming turn that has just been promoted to localTurns while the
       // liveMessage is still attached) doesn't collide with itself in the
-      // virtualized list. Index disambiguates further within a phase.
-      const key = `${phase}-${msg.id}-${i}`
+      // virtualized list, and role because the timeline dedup deliberately
+      // keeps different-role turns that share an id. NO positional index:
+      // paging in older history prepends items, and an index-bearing key
+      // would shift every existing row's identity — remounting the whole
+      // list and dropping the virtualizer's measurement cache mid-scroll.
+      const key = `${phase}-${role}-${msg.id}`
       // Hoist a compaction-only turn to its own standalone divider item so it
       // renders BETWEEN turns instead of being merged into (and wedged inside)
       // the preceding assistant reply by `mergeConsecutiveAssistantTurns`.
@@ -979,6 +997,11 @@ export function MessageListView({
   // Computed lazily: only while the panel is expanded, since
   // `extractSessionFilesGrouped` parses every turn's diffs. Collapsed (the
   // default) it stays EMPTY, keeping the streaming hot path free of diff parsing.
+  //
+  // Windowed loading caveat (accepted degradation): counts, ordinals and file
+  // summaries cover only the LOADED window — paging in older history extends
+  // them. Nav targets are recomputed with the items on every prepend, so the
+  // indices themselves never go stale.
   const navEntries = useMemo<MessageNavEntry[]>(() => {
     if (!showMessageNav || !navExpanded) return EMPTY_NAV_ENTRIES
     const turns = timelineTurns.map((item) => item.turn)
@@ -1030,11 +1053,13 @@ export function MessageListView({
     )
   }
 
-  // ACP load failures always replace content: even when the local DB has
-  // the conversation, the agent can't resume it, so silently rendering
-  // the history would mislead the user into thinking a follow-up message
-  // would extend the same thread.
-  const blockingLoadError = acpLoadError ?? null
+  // An ACP load failure replaces content only when there is nothing to show
+  // (e.g. the DB detail also failed). When the local DB has the conversation,
+  // keep the transcript visible — the failure is not silent: the detail panel
+  // renders the load error as a banner in the composer area (with Reload /
+  // New session actions), so the user still learns that a follow-up message
+  // can't extend this thread.
+  const blockingLoadError = hasRenderableContent ? null : (acpLoadError ?? null)
   const fallbackLoadError =
     detailError && !hasRenderableContent ? detailError : null
   const renderedLoadError = blockingLoadError ?? fallbackLoadError
@@ -1100,6 +1125,13 @@ export function MessageListView({
           renderItem={renderThreadItem}
           emptyState={emptyState}
           scrollApiRef={scrollApiRef}
+          hasOlder={hasOlderTurns}
+          isLoadingOlder={loadingOlderTurns}
+          onLoadOlder={handleLoadOlder}
+          loadOlderLabel={t("loadEarlier")}
+          loadingOlderLabel={t("loadingEarlier")}
+          prependEpoch={session?.olderTurnsPrependEpoch ?? 0}
+          prependScopeKey={conversationId}
         />
         <MessageThreadScrollButton />
       </MessageThread>

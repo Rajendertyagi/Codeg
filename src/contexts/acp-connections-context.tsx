@@ -3518,6 +3518,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                 return t("backendErrors.initializeTimeout", {
                   agent: agentLabel,
                 })
+              case "mcp_rejected_by_agent":
+                return t("backendErrors.mcpRejectedByAgent", {
+                  agent: agentLabel,
+                  message: e.message,
+                })
               case "sdk_not_installed":
                 return t("blocked.sdkMissing", { agent: agentLabel })
               case "platform_not_supported":

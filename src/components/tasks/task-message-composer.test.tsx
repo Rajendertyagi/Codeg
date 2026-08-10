@@ -5,11 +5,13 @@ import { createRef, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
 import type { ReferenceSearch } from "@/components/chat/composer/suggestion/types"
-import type { AgentSkillItem, AgentType } from "@/lib/types"
+import type { AgentSkillItem, AgentType, PromptInputBlock } from "@/lib/types"
 
-import { TaskFollowUpComposer } from "./task-follow-up-composer"
+import {
+  TaskMessageComposer,
+  type TaskMessageComposerHandle,
+} from "./task-message-composer"
 
 // The `/` menu's source: the agent-options probe (a transient CLI session).
 vi.mock("@/components/automations/use-agent-options", () => ({
@@ -37,6 +39,22 @@ const SKILL: AgentSkillItem = {
   description: "Ship it",
   read_only: false,
 }
+// The "+" menu's data sources all hit the transport; none of them is what
+// these tests exercise.
+vi.mock("@/hooks/use-built-in-experts", () => ({ useBuiltInExperts: () => [] }))
+vi.mock("@/hooks/use-built-in-science", () => ({ useBuiltInScience: () => [] }))
+vi.mock("@/hooks/use-enabled-skill-ids", () => ({
+  useEnabledSkillIds: () => ({
+    enabledIds: new Set<string>(),
+    ready: true,
+    supported: true,
+  }),
+}))
+vi.mock("@/lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/platform")>()),
+  isDesktop: () => false,
+}))
+
 vi.mock("@/hooks/use-agent-skills", () => ({
   useAgentSkills: (agentType: AgentType | null) =>
     agentType === "codex" ? [SKILL] : [],
@@ -67,15 +85,15 @@ vi.mock("@/components/chat/composer/use-reference-search", () => ({
 }))
 
 async function mount(
-  props: Partial<React.ComponentProps<typeof TaskFollowUpComposer>> = {}
+  props: Partial<React.ComponentProps<typeof TaskMessageComposer>> = {}
 ) {
-  const ref = createRef<RichComposerHandle>()
+  const ref = createRef<TaskMessageComposerHandle>()
   const onChange = vi.fn()
   const onSubmit = vi.fn()
   render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
-      <TaskFollowUpComposer
-        editorRef={ref}
+      <TaskMessageComposer
+        ref={ref}
         agentType="claude_code"
         folderPath="/repo-task-7"
         defaultText=""
@@ -96,7 +114,7 @@ async function mount(
   return { ref, editor, onChange, onSubmit }
 }
 
-describe("TaskFollowUpComposer", () => {
+describe("TaskMessageComposer", () => {
   it("offers the agent's slash commands and inserts the invocation token", async () => {
     const { editor, onChange } = await mount()
     act(() => {
@@ -156,17 +174,36 @@ describe("TaskFollowUpComposer", () => {
     await waitFor(() => expect(editor.getText()).toContain("$deploy"))
   })
 
-  it("follows the scenario's placeholder without dropping what was typed", async () => {
-    // Tiptap bakes the placeholder into an extension at creation, so switching
-    // scenario chips remounts the box. Wired the way the drawer wires it, the
-    // text has to survive that.
-    const ref = createRef<RichComposerHandle>()
+  it("seeds a stored prompt back into the box, attachments included", async () => {
+    // Editing a task hands the composer its stored blocks. Without this, the
+    // box would show only the prose and saving an untouched task would drop
+    // every image it had.
+    const blocks: PromptInputBlock[] = [
+      { type: "text", text: "the header is wrong" },
+      { type: "image", data: "aGk=", mime_type: "image/png", uri: null },
+    ]
+    const { ref } = await mount({ defaultBlocks: blocks })
+    await waitFor(() => expect(ref.current?.hasAttachments()).toBe(true))
+    // Round-trips: what comes back out is what a save would store.
+    const out = ref.current?.getPromptBlocks() ?? []
+    expect(out).toContainEqual({ type: "text", text: "the header is wrong" })
+    expect(out).toContainEqual(
+      expect.objectContaining({ type: "image", data: "aGk=" })
+    )
+  })
+
+  it("repaints the scenario's placeholder in place, keeping the document", async () => {
+    // The drawer swaps a placeholder per follow-up scenario. It must repaint
+    // without recreating the editor: a remount would take the document with it,
+    // and an attachment whose bytes live out of band (a pasted screenshot, a
+    // pathless file) cannot be recovered from the serialized text.
+    const ref = createRef<TaskMessageComposerHandle>()
     function Host({ placeholder }: { placeholder: string }) {
       const [text, setText] = useState("")
       return (
         <NextIntlClientProvider locale="en" messages={enMessages}>
-          <TaskFollowUpComposer
-            editorRef={ref}
+          <TaskMessageComposer
+            ref={ref}
             agentType="claude_code"
             folderPath={null}
             defaultText={text}
@@ -181,19 +218,26 @@ describe("TaskFollowUpComposer", () => {
     await waitFor(() => expect(ref.current?.getEditor()).not.toBeNull(), {
       timeout: 5000,
     })
+    const editor = ref.current?.getEditor() as Editor
     expect(
       document.querySelector('[data-placeholder="What should it change?"]')
     ).not.toBeNull()
 
-    act(() => {
-      ref.current?.getEditor()?.commands.insertContent("check the retry path")
-    })
+    // Tiptap only decorates an EMPTY node, so the switch is observable here.
     rerender(<Host placeholder="What do you want to know?" />)
     await waitFor(() =>
       expect(
         document.querySelector('[data-placeholder="What do you want to know?"]')
       ).not.toBeNull()
     )
+
+    // The same editor instance throughout — so what it holds survives the
+    // switch, badges and all.
+    act(() => {
+      editor.commands.insertContent("check the retry path")
+    })
+    rerender(<Host placeholder="What should it change?" />)
+    expect(ref.current?.getEditor()).toBe(editor)
     expect(ref.current?.getText()).toContain("check the retry path")
   })
 })

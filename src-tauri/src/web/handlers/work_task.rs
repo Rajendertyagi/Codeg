@@ -78,6 +78,10 @@ pub struct ReturnParams {
     /// Follow-up intent; absent → `revise` (the historical behaviour).
     #[serde(default)]
     pub intent: Option<String>,
+    /// Out-of-band attachments (images, pasted bytes) as raw prompt blocks.
+    /// Defaults, so an older client's body still deserializes.
+    #[serde(default)]
+    pub blocks: Vec<serde_json::Value>,
 }
 
 /// A restart (retry / requeue) that may carry a note for the next run. `note`
@@ -88,6 +92,9 @@ pub struct RestartParams {
     pub id: i32,
     #[serde(default)]
     pub note: Option<String>,
+    /// Out-of-band attachments (images, pasted bytes) as raw prompt blocks.
+    #[serde(default)]
+    pub blocks: Vec<serde_json::Value>,
 }
 
 /// Plan a to-do task's start. `scheduledAt` is RFC 3339; absent or null clears
@@ -268,7 +275,7 @@ pub async fn work_task_start_all(
 pub async fn work_task_retry(
     Json(params): Json<RestartParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    core::work_task_retry_core(params.id, params.note)
+    core::work_task_retry_core(params.id, params.note, params.blocks)
         .await
         .map_err(AppCommandError::from)?;
     Ok(Json(()))
@@ -278,8 +285,14 @@ pub async fn work_task_requeue(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<RestartParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    core::work_task_requeue_core(&state.emitter, &state.db, params.id, params.note)
-        .await
+    core::work_task_requeue_core(
+        &state.emitter,
+        &state.db,
+        params.id,
+        params.note,
+        params.blocks,
+    )
+    .await
         .map_err(AppCommandError::from)?;
     Ok(Json(()))
 }
@@ -297,7 +310,7 @@ pub async fn work_task_schedule(
 pub async fn work_task_return(
     Json(params): Json<ReturnParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    core::work_task_return_core(params.id, params.feedback, params.intent)
+    core::work_task_return_core(params.id, params.feedback, params.intent, params.blocks)
         .await
         .map_err(AppCommandError::from)?;
     Ok(Json(()))

@@ -157,4 +157,24 @@ describe("TaskRow", () => {
     renderRow(task({ status: "running", latest_progress: "installing deps" }))
     expect(screen.getByText("installing deps")).toBeTruthy()
   })
+
+  it("badges a deleted worktree, but not a task that never had one", () => {
+    const { unmount } = renderRow(
+      task({ status: "done", worktree_folder_id: null })
+    )
+    expect(screen.getByText("Worktree removed")).toBeInTheDocument()
+    unmount()
+
+    renderRow(
+      task({
+        status: "todo",
+        files_changed: null,
+        worktree_folder_id: null,
+        work_branch: null,
+        base_branch: null,
+        base_sha: null,
+      })
+    )
+    expect(screen.queryByText("Worktree removed")).toBeNull()
+  })
 })

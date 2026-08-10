@@ -34,6 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import { cn } from "@/lib/utils"
 import { getHomeDirectory, listDirectoryEntries } from "@/lib/api"
 import { parentFsPath } from "@/lib/path-utils"
@@ -123,6 +124,7 @@ export const DirectoryBrowser = forwardRef<
   ref
 ) {
   const t = useTranslations("DirectoryBrowser")
+  const ime = useImeGuard()
 
   const [rootPath, setRootPath] = useState("")
   const [entries, setEntries] = useState<Map<string, DirectoryEntry[]>>(
@@ -331,12 +333,12 @@ export const DirectoryBrowser = forwardRef<
 
   const handlePathInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.nativeEvent.isComposing || e.key === "Process") return
+      if (ime.isComposing(e)) return
       if (e.key === "Enter" && value.trim()) {
         navigateTo(value.trim())
       }
     },
-    [value, navigateTo]
+    [ime, value, navigateTo]
   )
 
   const selectedSet = new Set((selectedPaths ?? []).map(normalizeFsPath))
@@ -465,6 +467,7 @@ export const DirectoryBrowser = forwardRef<
           <InputGroupInput
             value={value}
             onChange={(e) => onValueChange(e.target.value)}
+            {...ime.props}
             onKeyDown={handlePathInputKeyDown}
             placeholder={t("pathPlaceholder")}
             className="h-8 text-sm font-mono"

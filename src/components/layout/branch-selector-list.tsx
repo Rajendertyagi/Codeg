@@ -17,6 +17,7 @@ import {
   Folder,
   FolderGit2,
   FolderOpen,
+  FolderX,
   GitBranch,
   GitBranchPlus,
   GitCommitHorizontal,
@@ -29,10 +30,13 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
+import { useImeGuard } from "@/hooks/use-ime-guard"
+import { isImeCompositionKey } from "@/lib/ime-composition"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { branchRowPaddingLeft } from "@/components/layout/branch-tree-collapsible"
 import {
+  branchLeafActions,
   buildBranchRows,
   isNavigableRow,
   type BranchLeafAction,
@@ -51,6 +55,8 @@ interface BranchSelectorListProps {
   remoteCount: number
   branch: string | null
   worktreeBranchSet: Set<string>
+  /** The repo's main working tree branch — see `branchLeafActions`. */
+  mainWorktreeBranch: string | null
   /** First-load fetch in flight and nothing cached yet — show a spinner. */
   branchLoading: boolean
   /** A git task is running — disable operation + branch-action rows. */
@@ -99,32 +105,27 @@ const ACTION_ICONS: Record<BranchLeafAction, LucideIcon> = {
   push: CloudUpload,
   delete: Trash2,
   deleteRemote: Trash2,
+  deleteWorktree: FolderX,
+  deleteWorktreeAndBranch: Trash2,
 }
 
-// The per-branch actions shown in the right-side bubble, in three groups:
-// what this branch does to the CURRENT one (switch/merge/rebase), what it
-// syncs with its remote (pull/push — both in place, no checkout), and the
-// destructive tail. "push" is local-only: publishing `origin/x` is meaningless.
-// Delete is hidden for the remote branch the current local branch tracks
-// (deleting it is nonsensical).
-function leafActions(
-  isRemote: boolean,
-  isTracking: boolean
-): BranchLeafAction[] {
-  const actions: BranchLeafAction[] = ["switch", "merge", "rebase", "pull"]
-  if (!isRemote) actions.push("push")
-  if (!isTracking) actions.push(isRemote ? "deleteRemote" : "delete")
-  return actions
-}
+// Which actions read as destructive (styled red, and confirmed by the caller).
+const DESTRUCTIVE_ACTIONS: ReadonlySet<BranchLeafAction> = new Set([
+  "delete",
+  "deleteRemote",
+  "deleteWorktree",
+  "deleteWorktreeAndBranch",
+])
 
-// First action of each group above. A rule ("insert a divider before any group
-// starter that isn't the first row") rather than fixed indices, so a group that
-// drops out entirely — a remote leaf has no "push", a tracked remote no
-// "delete" — never leaves a dangling divider behind.
+// First action of each group in `branchLeafActions`. A rule ("insert a divider
+// before any group starter that isn't the first row") rather than fixed indices,
+// so a group that drops out entirely — a remote leaf has no "push", a tracked
+// remote no "delete" — never leaves a dangling divider behind.
 const BUBBLE_GROUP_STARTS: ReadonlySet<BranchLeafAction> = new Set([
   "pull",
   "delete",
   "deleteRemote",
+  "deleteWorktree",
 ])
 
 interface ActionBubble {
@@ -156,11 +157,13 @@ export function BranchSelectorList({
   remoteCount,
   branch,
   worktreeBranchSet,
+  mainWorktreeBranch,
   branchLoading,
   loading,
   onRunOperation,
   onLeafAction,
 }: BranchSelectorListProps) {
+  const ime = useImeGuard()
   const t = useTranslations("Folder.branchDropdown")
 
   const [query, setQuery] = useState("")
@@ -221,7 +224,7 @@ export function BranchSelectorList({
           active.isContentEditable)
       )
         return
-      if (event.isComposing || event.key === "Process") return
+      if (isImeCompositionKey(event)) return
       const isPrintable =
         event.key.length === 1 &&
         !event.metaKey &&
@@ -393,6 +396,10 @@ export function BranchSelectorList({
         case "delete":
         case "deleteRemote":
           return t("deleteBranch")
+        case "deleteWorktree":
+          return t("deleteWorktree")
+        case "deleteWorktreeAndBranch":
+          return t("deleteWorktreeAndBranch")
       }
     },
     [t, branch]
@@ -414,7 +421,10 @@ export function BranchSelectorList({
     if (!el || !root) return
     const rowRect = el.getBoundingClientRect()
     const rootRect = root.getBoundingClientRect()
-    const actions = leafActions(row.isRemote, row.isTracking)
+    const actions = branchLeafActions({
+      ...row,
+      isMainWorktree: !row.isRemote && row.fullName === mainWorktreeBranch,
+    })
     const separatorCount = actions.filter(
       (action, index) => index > 0 && BUBBLE_GROUP_STARTS.has(action)
     ).length
@@ -472,7 +482,7 @@ export function BranchSelectorList({
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     // Don't steal Enter/arrows while an IME composition is in flight (CJK).
-    if (event.nativeEvent.isComposing || event.key === "Process") return
+    if (ime.isComposing(event)) return
 
     // When the action bubble is open, arrows/Enter drive it; Escape/Left close
     // it; any other key closes it and falls through to normal list handling.
@@ -708,6 +718,7 @@ export function BranchSelectorList({
               setActiveIndex(0)
               closeBubble()
             }}
+            {...ime.props}
             onKeyDown={handleKeyDown}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
@@ -765,7 +776,7 @@ export function BranchSelectorList({
         >
           {bubble.actions.map((action, index) => {
             const ActionIcon = ACTION_ICONS[action]
-            const destructive = action === "delete" || action === "deleteRemote"
+            const destructive = DESTRUCTIVE_ACTIONS.has(action)
             const bubbleActive = index === bubbleActiveIndex
             const startsGroup = index > 0 && BUBBLE_GROUP_STARTS.has(action)
             return (

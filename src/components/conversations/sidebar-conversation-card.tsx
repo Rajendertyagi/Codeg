@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
 import { STATUS_ORDER } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -142,6 +143,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onToggleExpand,
 }: SidebarConversationCardProps) {
   const t = useTranslations("Folder.conversationCard")
+  const ime = useImeGuard()
   const tSidebar = useTranslations("Folder.sidebar")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
@@ -578,8 +580,9 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
           <Input
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
+            {...ime.props}
             onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing || e.key === "Process") return
+              if (ime.isComposing(e)) return
               if (e.key === "Enter") handleRenameConfirm()
             }}
             autoFocus

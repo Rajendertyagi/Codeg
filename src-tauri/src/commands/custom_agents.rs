@@ -49,6 +49,9 @@ pub struct CustomAgentInfo {
     pub source: String,
     /// Mirrors [`CustomAgentDef::version_probe`] for the edit form.
     pub version_probe: Option<String>,
+    /// Mirrors [`CustomAgentDef::supports_mcp`] — backs the settings toggle
+    /// that decides whether codeg-mcp rides along on `session/new`.
+    pub supports_mcp: bool,
     /// False when the stored definition cannot produce launch metadata (e.g.
     /// a binary-only agent with no release for this platform). The row still
     /// lists, with the reason, instead of vanishing.
@@ -77,6 +80,7 @@ fn info_from_def(def: &CustomAgentDef) -> CustomAgentInfo {
         skills_dir: def.skills_dir.clone(),
         source: def.source.as_str().to_string(),
         version_probe: def.version_probe.clone(),
+        supports_mcp: def.supports_mcp,
         launchable: problem.is_none(),
         problem,
     }
@@ -481,6 +485,16 @@ pub struct SaveCustomAgentParams {
     /// omits it clears it.
     #[serde(default)]
     pub version_probe: Option<String>,
+    /// See [`CustomAgentDef::supports_mcp`]. `None` preserves the stored row's
+    /// value (or `true` for a brand-new row), like [`Self::source`] and unlike
+    /// the full-replace fields above: the safe value here is the one already
+    /// stored, so a caller that re-saves some OTHER declaration without
+    /// knowing about this one must not silently switch MCP back on and break a
+    /// connection the user just fixed. Resolved in
+    /// [`acp_save_custom_agent_params_core`], the only params path with DB
+    /// access.
+    #[serde(default)]
+    pub supports_mcp: Option<bool>,
 }
 
 impl SaveCustomAgentParams {
@@ -502,8 +516,8 @@ impl SaveCustomAgentParams {
             icon_url: self.icon_url,
             skills_shared_store: self.skills_shared_store,
             skills_dir: self.skills_dir,
-            // Placeholder — `acp_save_custom_agent_params_core` resolves the
-            // real value (params override / stored row / Manual).
+            // Placeholders — `acp_save_custom_agent_params_core` resolves the
+            // real values (params override / stored row / Manual, resp. on).
             source: Default::default(),
             version_probe: self
                 .version_probe
@@ -511,32 +525,52 @@ impl SaveCustomAgentParams {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
+            supports_mcp: true,
         })
     }
 }
 
 /// Save through the params surface (both runtimes' `acp_save_custom_agent`).
 ///
-/// Split from [`acp_save_custom_agent_core`] because resolving the definition
-/// source needs the DB: an absent `params.source` keeps the stored row's
-/// provenance (a registry-added agent edited through a partial caller must not
-/// silently become "manual"), and only a genuinely new row defaults to
-/// `Manual` — the params surface is the manual form.
+/// Split from [`acp_save_custom_agent_core`] because two fields resolve against
+/// the DB rather than against the payload: an absent `params.source` keeps the
+/// stored row's provenance (a registry-added agent edited through a partial
+/// caller must not silently become "manual") and only a genuinely new row
+/// defaults to `Manual` — the params surface is the manual form; an absent
+/// `params.supports_mcp` likewise keeps the stored declaration, defaulting to
+/// on for a new row.
 pub async fn acp_save_custom_agent_params_core(
     params: SaveCustomAgentParams,
     db: &AppDatabase,
     emitter: &EventEmitter,
 ) -> Result<(), AcpError> {
-    let source = match params.source.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(raw) => custom_registry::CustomAgentSource::parse(raw),
-        None => custom_agent_service::get(&db.conn, params.registry_id.trim())
+    let explicit_source = params
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(custom_registry::CustomAgentSource::parse);
+    // One read backs both fallbacks, and is skipped entirely when the caller
+    // stated everything that could need it.
+    let stored = if explicit_source.is_none() || params.supports_mcp.is_none() {
+        custom_agent_service::get(&db.conn, params.registry_id.trim())
             .await
             .map_err(|e| AcpError::protocol(e.to_string()))?
-            .map(|row| custom_registry::CustomAgentSource::parse(&row.source))
-            .unwrap_or(custom_registry::CustomAgentSource::Manual),
+    } else {
+        None
     };
+    let source = explicit_source.unwrap_or_else(|| {
+        stored
+            .as_ref()
+            .map(|row| custom_registry::CustomAgentSource::parse(&row.source))
+            .unwrap_or(custom_registry::CustomAgentSource::Manual)
+    });
+    let supports_mcp = params
+        .supports_mcp
+        .unwrap_or_else(|| stored.as_ref().map(|row| row.supports_mcp).unwrap_or(true));
     let mut def = params.into_def()?;
     def.source = source;
+    def.supports_mcp = supports_mcp;
     acp_save_custom_agent_core(def, db, emitter).await
 }
 
@@ -628,6 +662,7 @@ mod tests {
             skills_dir: None,
             source: Default::default(),
             version_probe: None,
+            supports_mcp: None,
         };
         assert!(params.into_def().is_err());
     }
@@ -646,8 +681,87 @@ mod tests {
             skills_dir: None,
             source: Default::default(),
             version_probe: None,
+            supports_mcp: None,
         };
         assert_eq!(params.into_def().unwrap().registry_id, "goose");
+    }
+
+    fn npx_params(id: &str) -> SaveCustomAgentParams {
+        SaveCustomAgentParams {
+            registry_id: id.into(),
+            name: "Qwen".into(),
+            description: String::new(),
+            version: "0.21.0".into(),
+            distribution_kind: "npx".into(),
+            spec: CustomAgentSpec {
+                npx: Some(NpxSpec {
+                    package: "@qwen-code/qwen-code@0.21.0".into(),
+                    cmd: Some("qwen".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+            supports_mcp: None,
+        }
+    }
+
+    #[tokio::test]
+    // The hydrate guard is held across awaits on purpose — see the identical
+    // note in `custom_agent_service`: it is a test-only mutex no production
+    // code takes, and `#[tokio::test]` runs this on a single-threaded runtime.
+    #[allow(clippy::await_holding_lock)]
+    async fn an_omitted_mcp_declaration_keeps_the_stored_one() {
+        let _guard = custom_registry::hydrate_test_guard();
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let emitter = EventEmitter::Noop;
+
+        // A brand-new row starts out forwarding MCP.
+        acp_save_custom_agent_params_core(npx_params("mcp-params"), &db, &emitter)
+            .await
+            .expect("saves");
+        async fn stored(db: &AppDatabase) -> crate::db::entities::custom_agent::Model {
+            custom_agent_service::get(&db.conn, "mcp-params")
+                .await
+                .unwrap()
+                .expect("the row exists")
+        }
+        assert!(stored(&db).await.supports_mcp);
+
+        // The settings toggle states it explicitly.
+        let mut off = npx_params("mcp-params");
+        off.supports_mcp = Some(false);
+        acp_save_custom_agent_params_core(off, &db, &emitter)
+            .await
+            .expect("saves");
+        assert!(!stored(&db).await.supports_mcp);
+
+        // A caller that re-saves some OTHER declaration without knowing about
+        // this one must not switch MCP back on — that would re-break a
+        // connection the user just fixed. This is why the field is an
+        // `Option`, unlike the full-replace skills fields.
+        let mut unaware = npx_params("mcp-params");
+        unaware.skills_shared_store = true;
+        acp_save_custom_agent_params_core(unaware, &db, &emitter)
+            .await
+            .expect("saves");
+        let row = stored(&db).await;
+        assert!(!row.supports_mcp, "an omitted flag must preserve the row");
+        assert!(row.skills_shared_store, "the stated field still applies");
+
+        // And it can be turned back on.
+        let mut on = npx_params("mcp-params");
+        on.supports_mcp = Some(true);
+        acp_save_custom_agent_params_core(on, &db, &emitter)
+            .await
+            .expect("saves");
+        assert!(stored(&db).await.supports_mcp);
+
+        custom_registry::hydrate(&[]);
     }
 
     #[test]
@@ -678,6 +792,7 @@ mod tests {
             skills_dir: None,
             source: Default::default(),
             version_probe: None,
+            supports_mcp: true,
         };
         let info = info_from_def(&def);
         assert!(!info.launchable);
@@ -834,6 +949,7 @@ mod tests {
             skills_dir: None,
             source: Default::default(),
             version_probe: None,
+            supports_mcp: true,
         };
         let info = info_from_def(&def);
         assert!(info.launchable);

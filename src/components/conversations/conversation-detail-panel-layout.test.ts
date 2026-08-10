@@ -36,6 +36,10 @@ const tabBarSource = readFileSync(
   resolve(process.cwd(), "src/components/tabs/tab-bar.tsx"),
   "utf8"
 )
+const messageListViewSource = readFileSync(
+  resolve(process.cwd(), "src/components/message/message-list-view.tsx"),
+  "utf8"
+)
 
 describe("ConversationDetailPanel new conversation layout", () => {
   it("keeps the new-conversation input in the welcome panel with the original scroll layout", () => {
@@ -143,8 +147,10 @@ describe("ConversationDetailPanel new conversation layout", () => {
     const pickerStart = messageInputSource.indexOf(
       "{hasFolderBranchPicker && ("
     )
+    // The picker row is the last thing inside the composer wrapper; the
+    // server-file dialog that follows it sits outside, so it anchors the slice.
     const pickerEnd = messageInputSource.indexOf(
-      "<ImagePreviewDialog",
+      "{!attach.showNativePaperclip && (",
       pickerStart
     )
     expect(pickerStart).toBeGreaterThan(-1)
@@ -381,5 +387,40 @@ describe("ConversationDetailPanel send-path hardening", () => {
     expect(catchBlock).toContain(
       'setAgentConnectError(tWelcome("createConversationFailed"))'
     )
+  })
+})
+
+describe("ConversationDetailPanel session-load failure surface", () => {
+  // When session/load fails on a conversation whose transcript already
+  // rendered (e.g. its folder was deleted), the history must STAY readable;
+  // the failure surfaces as a banner docked at the composer, not as a
+  // full-page error over the message area.
+  it("escalates the ACP load error to full-page only when nothing is renderable", () => {
+    expect(messageListViewSource).toContain(
+      "const blockingLoadError = hasRenderableContent ? null : (acpLoadError ?? null)"
+    )
+  })
+
+  it("docks the load error at the composer with the recovery actions", () => {
+    // The composer input stays hidden (a send can't reach the dead session)…
+    expect(source).toContain(
+      "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
+    )
+    // …and the banner takes its place, explaining why and offering recovery.
+    expect(source).toContain("composerBanner={acpLoadErrorBanner}")
+    const bannerStart = source.indexOf("const acpLoadErrorBanner")
+    expect(bannerStart).toBeGreaterThan(-1)
+    const bannerEnd = source.indexOf("const goalControlValue", bannerStart)
+    expect(bannerEnd).toBeGreaterThan(bannerStart)
+    const banner = source.slice(bannerStart, bannerEnd)
+    expect(banner).toContain("hasPersistedConversation && acpLoadError")
+    expect(banner).toContain("handleReloadDetail")
+    expect(banner).toContain("handleOpenNewSession")
+    // The shell renders the banner inside the composer dock, constrained to
+    // the same message-column width as the input it replaces.
+    const dockIdx = conversationShellSource.indexOf("{composerBanner && (")
+    expect(dockIdx).toBeGreaterThan(-1)
+    const dock = conversationShellSource.slice(dockIdx, dockIdx + 200)
+    expect(dock).toContain("mx-auto w-full max-w-3xl")
   })
 })

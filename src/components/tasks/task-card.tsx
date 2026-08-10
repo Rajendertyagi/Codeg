@@ -7,12 +7,14 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
+  FolderX,
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { formatRelative } from "@/components/conversations/sidebar-conversation-grouping"
 import { formatScheduleFull, formatScheduleShort } from "@/lib/task-schedule"
 import { cn } from "@/lib/utils"
+import { worktreeWasRemoved } from "./task-acceptance"
 import { buildTaskActions, type TaskActionItem } from "./task-actions"
 import type { TaskActionHandlers } from "./task-actions"
 import type { WorkTask } from "@/lib/types"
@@ -211,6 +213,27 @@ export function PreflightChip({ task }: { task: WorkTask }) {
 }
 
 /**
+ * "The worktree this task ran in has been deleted" — shown in EVERY status
+ * (a reviewed task explains its Complete button, a canceled one warns that a
+ * requeue starts over, a done one explains why there is no diff). The one
+ * exception is built into the predicate: a just-created task that never
+ * initialized has nothing removed to report.
+ */
+export function WorktreeRemovedChip({ task }: { task: WorkTask }) {
+  const t = useTranslations("Tasks")
+  if (!worktreeWasRemoved(task)) return null
+  return (
+    <span
+      className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-amber-600 dark:text-amber-400"
+      title={t("badgeWorktreeRemoved")}
+    >
+      <FolderX className="size-2.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{t("badgeWorktreeRemoved")}</span>
+    </span>
+  )
+}
+
+/**
  * The planned start of a to-do task. Primary-tinted rather than muted: it is
  * the one thing on a pending card that says something WILL happen, and it is
  * how a card that looks idle explains itself.
@@ -323,12 +346,17 @@ export function TaskCard({
         {when ? <span className="shrink-0">{when}</span> : null}
         <ScheduleChip task={task} />
         <PreflightChip task={task} />
+        <WorktreeRemovedChip task={task} />
         {task.cleanup_state === "failed" ? (
           <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[0.625rem] text-amber-600 dark:text-amber-400">
             {t("badgeCleanupFailed")}
           </span>
         ) : null}
-        {task.status === "canceled" && task.worktree_folder_id != null ? (
+        {/* "Kept" claims the worktree is still there — stay silent when its
+            directory is actually gone (the removed chip above speaks then). */}
+        {task.status === "canceled" &&
+        task.worktree_folder_id != null &&
+        task.worktree_missing !== true ? (
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem]">
             {t("badgeWorktreeKept")}
           </span>

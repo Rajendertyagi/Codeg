@@ -14,11 +14,13 @@ import { useEffect } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
-import type { WorkTask } from "@/lib/types"
+import type { PromptInputBlock, WorkTask } from "@/lib/types"
 
 import { TaskDetailSheet } from "./task-detail-sheet"
-import type { TaskFollowUpComposerProps } from "./task-follow-up-composer"
+import type {
+  TaskMessageComposerHandle,
+  TaskMessageComposerProps,
+} from "./task-message-composer"
 
 const workTaskReturn = vi.fn().mockResolvedValue(undefined)
 const workTaskRetry = vi.fn().mockResolvedValue(undefined)
@@ -65,15 +67,23 @@ vi.mock("@/components/diff/unified-diff-preview", () => ({
  * caught up with) and the props the drawer passes in.
  */
 let editorText = ""
-let composerProps: TaskFollowUpComposerProps | null = null
-vi.mock("./task-follow-up-composer", () => ({
-  TaskFollowUpComposer: (props: TaskFollowUpComposerProps) => {
+let editorBlocks: PromptInputBlock[] = []
+let uploading = false
+let composerProps: TaskMessageComposerProps | null = null
+vi.mock("./task-message-composer", () => ({
+  TaskMessageComposer: (props: TaskMessageComposerProps) => {
     composerProps = props
-    const ref = props.editorRef
+    const ref = props.ref
     useEffect(() => {
-      if (ref) ref.current = { getText: () => editorText } as RichComposerHandle
+      if (!ref || typeof ref === "function") return
+      ref.current = {
+        getText: () => editorText,
+        getAttachmentBlocks: () => editorBlocks,
+        hasUploadingImage: () => uploading,
+        hasAttachments: () => editorBlocks.length > 0,
+      } as TaskMessageComposerHandle
       return () => {
-        if (ref) ref.current = null
+        ref.current = null
       }
     }, [ref])
     return <div data-testid="follow-up-composer" />
@@ -119,6 +129,8 @@ function mount(row: WorkTask) {
 
 beforeEach(() => {
   editorText = ""
+  editorBlocks = []
+  uploading = false
   composerProps = null
   vi.clearAllMocks()
 })
@@ -141,7 +153,8 @@ describe("task drawer follow-up", () => {
     expect(workTaskReturn).toHaveBeenCalledWith(
       7,
       "look at [retry.ts](file:///repo/retry.ts) again",
-      "revise"
+      "revise",
+      []
     )
   })
 
@@ -183,7 +196,7 @@ describe("task drawer follow-up", () => {
     editorText = "run pnpm install first"
     await user.click(screen.getByRole("button", { name: /^send$/i }))
     await waitFor(() => expect(workTaskRetry).toHaveBeenCalledTimes(1))
-    expect(workTaskRetry).toHaveBeenCalledWith(7, "run pnpm install first")
+    expect(workTaskRetry).toHaveBeenCalledWith(7, "run pnpm install first", [])
   })
 
   it.each([
@@ -225,6 +238,41 @@ describe("task drawer follow-up", () => {
     // An untouched box is the plain one-click restart it replaced.
     await user.click(screen.getByRole("button", { name: /^send$/i }))
     await waitFor(() => expect(workTaskRequeue).toHaveBeenCalledTimes(1))
-    expect(workTaskRequeue).toHaveBeenCalledWith(7, null)
+    expect(workTaskRequeue).toHaveBeenCalledWith(7, null, [])
+  })
+
+  it("follows up on a pasted screenshot with no prose", async () => {
+    const user = userEvent.setup()
+    editorBlocks = [
+      { type: "image", data: "aGk=", mime_type: "image/png", uri: null },
+    ]
+    mount(task())
+    await user.click(screen.getByRole("button", { name: /follow up/i }))
+    await screen.findByTestId("follow-up-composer")
+    // `revise` normally demands text; an attachment is content in its own
+    // right, so the send is live and the image travels as its own block.
+    await act(async () => {
+      composerProps?.onAttachmentsChange?.(1)
+    })
+    await user.click(screen.getByRole("button", { name: /^send$/i }))
+    await waitFor(() => expect(workTaskReturn).toHaveBeenCalledTimes(1))
+    expect(workTaskReturn).toHaveBeenCalledWith(7, "", "revise", editorBlocks)
+  })
+
+  it("refuses to send while an image upload is still in flight", async () => {
+    const user = userEvent.setup()
+    uploading = true
+    editorText = "look at this"
+    editorBlocks = [
+      { type: "image", data: "", mime_type: "image/png", uri: null },
+    ]
+    mount(task())
+    await user.click(screen.getByRole("button", { name: /follow up/i }))
+    await screen.findByTestId("follow-up-composer")
+    await act(async () => {
+      composerProps?.onSubmit?.()
+    })
+    // The block would reach the agent with neither bytes nor a uri.
+    expect(workTaskReturn).not.toHaveBeenCalled()
   })
 })

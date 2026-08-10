@@ -295,6 +295,29 @@ pub async fn remove_folder(conn: &DatabaseConnection, path: &str) -> Result<(), 
     Ok(())
 }
 
+/// Soft-delete a folder by id and close it — the permanent counterpart of
+/// [`set_folder_open`]`(.., false)`, used when the directory behind the row is
+/// gone for good (a removed git worktree).
+///
+/// An id that is already soft-deleted (or never existed) succeeds untouched, so
+/// a caller retrying a half-finished cleanup still reaches its "announce the
+/// drop" step instead of aborting on a row it already removed.
+pub async fn soft_delete_folder(conn: &DatabaseConnection, folder_id: i32) -> Result<(), DbError> {
+    let Some(row) = folder::Entity::find_by_id(folder_id).one(conn).await? else {
+        return Ok(());
+    };
+    if row.deleted_at.is_some() {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let mut active = row.into_active_model();
+    active.is_open = Set(false);
+    active.deleted_at = Set(Some(now));
+    active.updated_at = Set(now);
+    active.update(conn).await?;
+    Ok(())
+}
+
 pub async fn set_folder_open(
     conn: &DatabaseConnection,
     folder_id: i32,

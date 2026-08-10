@@ -1144,6 +1144,11 @@ pub async fn get_folder_conversation_core(
             session_stats,
             transcript_watermark,
             in_flight_user_turn_id: None,
+            turns_offset: None,
+            turns_total: None,
+            assistant_turns_before_offset: None,
+            prefix_hash: None,
+            uncovered_prefix_max_ts: None,
         },
         parsed_title,
     ))
@@ -1299,6 +1304,44 @@ fn apply_in_flight_message_id(
     None
 }
 
+/// Resolve the raw `tailTurns` / `fromIndex` request fields into a window
+/// selector. `None` when neither is present (legacy full response); an error
+/// when both are (the two coordinate systems are mutually exclusive).
+pub fn resolve_turn_window_req(
+    tail_turns: Option<usize>,
+    from_index: Option<usize>,
+) -> Result<Option<crate::commands::turn_window::TurnWindowReq>, AppCommandError> {
+    use crate::commands::turn_window::TurnWindowReq;
+    match (tail_turns, from_index) {
+        (Some(_), Some(_)) => Err(AppCommandError::invalid_input(
+            "tailTurns and fromIndex are mutually exclusive",
+        )),
+        (Some(n), None) => Ok(Some(TurnWindowReq::Tail(n))),
+        (None, Some(k)) => Ok(Some(TurnWindowReq::FromIndex(k))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Slice a fully post-processed detail down to the requested window and stamp
+/// the window metadata. MUST run after every pass that inspects or mutates the
+/// full turn list (delegation meta, auto-title, in-flight stamping) — slicing
+/// is strictly a serialization concern, so the windowed `turns` are identical
+/// to the corresponding region of the full response.
+fn apply_turn_window(
+    detail: &mut DbConversationDetail,
+    req: crate::commands::turn_window::TurnWindowReq,
+) {
+    use crate::commands::turn_window;
+    let offset = turn_window::resolve_window_offset(&detail.turns, req);
+    let meta = turn_window::window_meta(&detail.turns, offset);
+    detail.turns.drain(..offset);
+    detail.turns_offset = Some(meta.offset);
+    detail.turns_total = Some(meta.total);
+    detail.assistant_turns_before_offset = Some(meta.assistant_before);
+    detail.prefix_hash = Some(meta.prefix_hash);
+    detail.uncovered_prefix_max_ts = meta.uncovered_prefix_max_ts;
+}
+
 /// `get_folder_conversation_core` plus live in-flight correlation: when a turn is
 /// currently running on the conversation's connection, stamp the persisted
 /// in-flight user turn with the broadcast `message_id` so a cross-client viewer
@@ -1306,12 +1349,17 @@ fn apply_in_flight_message_id(
 /// as `in_flight_user_turn_id` so the frontend can hide the partial assistant
 /// reply persisted after it mid-stream. A no-op (one cheap lock pass) when no turn
 /// is in flight. Shared by the Tauri command and the web handler.
+///
+/// `window`: when set, the response's `turns` are sliced to the requested
+/// window AFTER all full-list post-processing (the summary counts, stats and
+/// watermark keep describing the full transcript).
 pub async fn get_folder_conversation_with_live_core(
     conn: &sea_orm::DatabaseConnection,
     manager: &crate::acp::manager::ConnectionManager,
     chat_channel_manager: &crate::chat_channel::manager::ChatChannelManager,
     emitter: &EventEmitter,
     conversation_id: i32,
+    window: Option<crate::commands::turn_window::TurnWindowReq>,
 ) -> Result<DbConversationDetail, AppCommandError> {
     let (mut detail, parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
 
@@ -1354,7 +1402,37 @@ pub async fn get_folder_conversation_with_live_core(
         detail.in_flight_user_turn_id =
             apply_in_flight_message_id(&mut detail.turns, &pending, started_at);
     }
+    if let Some(req) = window {
+        apply_turn_window(&mut detail, req);
+    }
     Ok(detail)
+}
+
+/// One page of older history for the reverse-infinite-scroll path. Light
+/// variant of the detail fetch: full parse + delegation-meta injection (both
+/// happen inside `get_folder_conversation_core`), then a pure slice — no
+/// auto-title refresh, no live correlation, no sidebar events.
+pub async fn get_folder_conversation_turns_core(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    before_index: usize,
+    limit: usize,
+) -> Result<ConversationTurnsPage, AppCommandError> {
+    use crate::commands::turn_window;
+    let (detail, _parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
+    let turns = detail.turns;
+    let (start, end) = turn_window::resolve_page_bounds(&turns, before_index, limit);
+    let meta = turn_window::window_meta(&turns, start);
+    let seam = turn_window::window_meta(&turns, before_index.min(turns.len()));
+    Ok(ConversationTurnsPage {
+        turns: turns[start..end].to_vec(),
+        turns_offset: meta.offset,
+        turns_total: meta.total,
+        assistant_turns_before_offset: meta.assistant_before,
+        prefix_hash: meta.prefix_hash,
+        prefix_hash_before_index: seam.prefix_hash,
+        uncovered_prefix_max_ts: meta.uncovered_prefix_max_ts,
+    })
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1365,15 +1443,30 @@ pub async fn get_folder_conversation(
     manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
     chat_channel_manager: tauri::State<'_, crate::chat_channel::manager::ChatChannelManager>,
     conversation_id: i32,
+    tail_turns: Option<usize>,
+    from_index: Option<usize>,
 ) -> Result<DbConversationDetail, AppCommandError> {
+    let window = resolve_turn_window_req(tail_turns, from_index)?;
     get_folder_conversation_with_live_core(
         &db.conn,
         &manager,
         &chat_channel_manager,
         &EventEmitter::Tauri(app),
         conversation_id,
+        window,
     )
     .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_folder_conversation_turns(
+    db: tauri::State<'_, AppDatabase>,
+    conversation_id: i32,
+    before_index: usize,
+    limit: usize,
+) -> Result<ConversationTurnsPage, AppCommandError> {
+    get_folder_conversation_turns_core(&db.conn, conversation_id, before_index, limit).await
 }
 
 /// Emit a `conversation://changed` Upsert for `conversation_id` so every
@@ -4370,6 +4463,167 @@ mod tests {
                 .await
                 .is_err(),
             "a row FK violation must propagate through the strict importer"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Turn windowing: request resolution + response slicing.
+    // ──────────────────────────────────────────────────────────────────────
+
+    fn windowless_detail(turns: Vec<MessageTurn>) -> DbConversationDetail {
+        DbConversationDetail {
+            summary: DbConversationSummary {
+                id: 1,
+                folder_id: 1,
+                title: None,
+                title_locked: false,
+                agent_type: AgentType::ClaudeCode,
+                status: "completed".into(),
+                kind: crate::db::entities::conversation::ConversationKind::Regular,
+                model: None,
+                git_branch: None,
+                external_id: None,
+                message_count: turns.len() as u32,
+                child_count: 0,
+                created_at: at(-100),
+                updated_at: at(0),
+                pinned_at: None,
+                parent_id: None,
+                parent_tool_use_id: None,
+                delegation_call_id: None,
+                origin_cwd: None,
+            },
+            turns,
+            session_stats: None,
+            transcript_watermark: Some(123),
+            in_flight_user_turn_id: None,
+            turns_offset: None,
+            turns_total: None,
+            assistant_turns_before_offset: None,
+            prefix_hash: None,
+            uncovered_prefix_max_ts: None,
+        }
+    }
+
+    fn four_turns() -> Vec<MessageTurn> {
+        vec![
+            user_text_turn("turn-0", "q1", at(-40)),
+            assistant_text_turn("turn-1", "a1", at(-39), true),
+            user_text_turn("turn-2", "q2", at(-20)),
+            assistant_text_turn("turn-3", "a2", at(-19), true),
+        ]
+    }
+
+    #[test]
+    fn resolve_turn_window_req_rejects_both_selectors() {
+        assert!(resolve_turn_window_req(Some(10), Some(3)).is_err());
+        assert!(matches!(resolve_turn_window_req(None, None), Ok(None)));
+        assert!(resolve_turn_window_req(Some(10), None).unwrap().is_some());
+        assert!(resolve_turn_window_req(None, Some(0)).unwrap().is_some());
+    }
+
+    #[test]
+    fn apply_turn_window_tail_slices_and_stamps_meta() {
+        let full = four_turns();
+        let mut detail = windowless_detail(full.clone());
+        apply_turn_window(
+            &mut detail,
+            crate::commands::turn_window::TurnWindowReq::Tail(1),
+        );
+        // Tail(1) lands on turn-3 (assistant) and round-aligns back to the
+        // user turn at index 2.
+        assert_eq!(detail.turns_offset, Some(2));
+        assert_eq!(detail.turns_total, Some(4));
+        assert_eq!(detail.assistant_turns_before_offset, Some(1));
+        assert_eq!(
+            detail.turns.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["turn-2", "turn-3"]
+        );
+        // The windowed turns are the same objects the full response carries.
+        assert_eq!(detail.turns[0].timestamp, full[2].timestamp);
+        // Full-transcript fields keep describing the full transcript.
+        assert_eq!(detail.summary.message_count, 4);
+        assert_eq!(detail.transcript_watermark, Some(123));
+        assert_eq!(
+            detail.uncovered_prefix_max_ts,
+            Some(full[1].timestamp),
+            "max ts over the uncovered prefix [0..2)"
+        );
+        assert_eq!(
+            detail.prefix_hash.as_deref(),
+            Some(crate::commands::turn_window::prefix_fingerprint(&full[..2]).as_str())
+        );
+    }
+
+    #[test]
+    fn apply_turn_window_from_index_is_exact_and_full_coverage_is_marked() {
+        let mut detail = windowless_detail(four_turns());
+        apply_turn_window(
+            &mut detail,
+            crate::commands::turn_window::TurnWindowReq::FromIndex(3),
+        );
+        // Index 3 is an assistant turn — fromIndex must NOT round-align.
+        assert_eq!(detail.turns_offset, Some(3));
+        assert_eq!(detail.turns.len(), 1);
+
+        let mut full = windowless_detail(four_turns());
+        apply_turn_window(
+            &mut full,
+            crate::commands::turn_window::TurnWindowReq::FromIndex(0),
+        );
+        assert_eq!(full.turns_offset, Some(0));
+        assert_eq!(full.turns.len(), 4);
+        assert_eq!(full.uncovered_prefix_max_ts, None);
+        assert!(full.prefix_hash.is_some(), "offset 0 still stamps the seed");
+    }
+
+    #[test]
+    fn apply_turn_window_from_index_past_total_yields_empty_window() {
+        let mut detail = windowless_detail(four_turns());
+        apply_turn_window(
+            &mut detail,
+            crate::commands::turn_window::TurnWindowReq::FromIndex(99),
+        );
+        assert_eq!(detail.turns_offset, Some(4));
+        assert_eq!(detail.turns_total, Some(4));
+        assert!(detail.turns.is_empty());
+    }
+
+    #[tokio::test]
+    async fn turns_page_core_slices_with_seam_proof() {
+        // End-to-end through the DB-backed core: a conversation without an
+        // external_id parses to zero turns, so drive the page math through the
+        // pure helpers on a synthetic list instead, then verify the empty-DB
+        // path returns a well-formed empty page.
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/page").await;
+        let conv_id = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("create conversation");
+        let page = get_folder_conversation_turns_core(&db.conn, conv_id, 10, 5)
+            .await
+            .expect("page fetch");
+        assert_eq!(page.turns_total, 0);
+        assert_eq!(page.turns_offset, 0);
+        assert!(page.turns.is_empty());
+        assert_eq!(
+            page.prefix_hash, page.prefix_hash_before_index,
+            "empty transcript: both fingerprints are the seed"
+        );
+
+        // Seam-proof shape on a synthetic list: the page [start..before) must
+        // report H(0..start) as its own fingerprint and H(0..before) as the
+        // seam — the latter is what the client compares against its current
+        // window fingerprint before prepending.
+        let turns = four_turns();
+        let (start, end) = crate::commands::turn_window::resolve_page_bounds(&turns, 2, 2);
+        assert_eq!((start, end), (0, 2));
+        let own = crate::commands::turn_window::window_meta(&turns, start);
+        let seam = crate::commands::turn_window::window_meta(&turns, 2);
+        assert_eq!(own.prefix_hash, crate::commands::turn_window::prefix_fingerprint(&[]));
+        assert_eq!(
+            seam.prefix_hash,
+            crate::commands::turn_window::prefix_fingerprint(&turns[..2])
         );
     }
 }

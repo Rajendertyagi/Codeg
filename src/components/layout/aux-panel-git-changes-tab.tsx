@@ -63,6 +63,7 @@ import { useTabStore } from "@/contexts/tab-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
 import { useGitQuickActions } from "@/hooks/use-git-quick-actions"
+import { useImeGuard } from "@/hooks/use-ime-guard"
 import { AuxPanelNoFolderEmpty } from "@/components/layout/aux-panel-no-folder-empty"
 import { GIT_TOOLBAR_ICON_BUTTON_CLASS } from "@/components/layout/git-toolbar-controls"
 import { WorkspaceDegradedBanner } from "@/components/layout/workspace-degraded-banner"
@@ -484,6 +485,7 @@ function canOpenFile(status: string): boolean {
 }
 
 export function GitChangesTab() {
+  const ime = useImeGuard()
   const t = useTranslations("Folder.gitChangesTab")
   const tCommon = useTranslations("Folder.common")
   const tFileTree = useTranslations("Folder.fileTreeTab")
@@ -1496,12 +1498,11 @@ export function GitChangesTab() {
           <Input
             value={commitMessage}
             onChange={(event) => setCommitMessage(event.target.value)}
+            {...ime.props}
             onKeyDown={(event) => {
               // Never submit mid-IME-composition: a CJK candidate is confirmed
               // with Enter, which must not also fire the commit.
-              if (event.nativeEvent.isComposing || event.key === "Process") {
-                return
-              }
+              if (ime.isComposing(event)) return
               if (event.key === "Enter" && canQuickCommit) {
                 event.preventDefault()
                 void handleQuickCommit()
