@@ -36,6 +36,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Base-selection model (2026-08-12): the plugin-dev native trees are NOT
+      # the patch target. newplugin/BASE pins the exact upstream commit (v0.24.0)
+      # the archive was re-anchored against. Reconstruct the COMPLETE upstream
+      # tree at that SHA, then restore ONLY the plugin-dev custom layer CI needs
+      # (patch archive + the custom workflow files). Identical step to
+      # codeg-portable-win64-custom.yml.
+      - name: Reconstruct engine from pinned upstream base (newplugin/BASE)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pluginDevSha = (git rev-parse HEAD).Trim()
+          if (-not $pluginDevSha) { throw "Could not resolve plugin-dev HEAD SHA" }
+          Write-Host "plugin-dev captured at: $pluginDevSha"
+          $base = Get-Content newplugin/BASE | Where-Object { $_ -match '^[a-z]+=' }
+          $up = (($base | Where-Object { $_ -like 'upstream=*' }) -replace '^upstream=','').Trim()
+          $ref = (($base | Where-Object { $_ -like 'ref=*' })     -replace '^ref=','').Trim()
+          $sha = (($base | Where-Object { $_ -like 'sha=*' })     -replace '^sha=','').Trim()
+          if (-not $up -or -not $ref -or -not $sha) { throw "newplugin/BASE is incomplete" }
+          git fetch "$up" "refs/tags/${ref}:refs/tags/${ref}"
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed for $ref" }
+          $resolved = (git rev-parse "refs/tags/$ref").Trim()
+          if ($resolved -ne $sha) { throw "BASE SHA mismatch: pinned $sha != resolved $resolved" }
+          git checkout --detach $sha
+          if ($LASTEXITCODE -ne 0) { throw "git checkout --detach $sha failed" }
+          git checkout $pluginDevSha -- newplugin/
+          git checkout $pluginDevSha -- .github/workflows/codeg-portable-win64-custom.yml `
+                                     .github/workflows/test-patched.yml
+          if ($LASTEXITCODE -ne 0) { throw "Failed to restore plugin-dev custom layer" }
+          Write-Host "Reconstructed upstream $resolved + plugin-dev custom layer"
+          git status --porcelain
+
       - name: Apply custom feature patches
         shell: pwsh
         run: |
@@ -116,6 +147,37 @@ jobs:
             clippy_args: "--no-default-features --bin codeg-server --lib"
     steps:
       - uses: actions/checkout@v4
+
+      # Base-selection model (2026-08-12): the plugin-dev native trees are NOT
+      # the patch target. newplugin/BASE pins the exact upstream commit (v0.24.0)
+      # the archive was re-anchored against. Reconstruct the COMPLETE upstream
+      # tree at that SHA, then restore ONLY the plugin-dev custom layer CI needs
+      # (patch archive + the custom workflow files). Identical step to
+      # codeg-portable-win64-custom.yml.
+      - name: Reconstruct engine from pinned upstream base (newplugin/BASE)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pluginDevSha = (git rev-parse HEAD).Trim()
+          if (-not $pluginDevSha) { throw "Could not resolve plugin-dev HEAD SHA" }
+          Write-Host "plugin-dev captured at: $pluginDevSha"
+          $base = Get-Content newplugin/BASE | Where-Object { $_ -match '^[a-z]+=' }
+          $up = (($base | Where-Object { $_ -like 'upstream=*' }) -replace '^upstream=','').Trim()
+          $ref = (($base | Where-Object { $_ -like 'ref=*' })     -replace '^ref=','').Trim()
+          $sha = (($base | Where-Object { $_ -like 'sha=*' })     -replace '^sha=','').Trim()
+          if (-not $up -or -not $ref -or -not $sha) { throw "newplugin/BASE is incomplete" }
+          git fetch "$up" "refs/tags/${ref}:refs/tags/${ref}"
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed for $ref" }
+          $resolved = (git rev-parse "refs/tags/$ref").Trim()
+          if ($resolved -ne $sha) { throw "BASE SHA mismatch: pinned $sha != resolved $resolved" }
+          git checkout --detach $sha
+          if ($LASTEXITCODE -ne 0) { throw "git checkout --detach $sha failed" }
+          git checkout $pluginDevSha -- newplugin/
+          git checkout $pluginDevSha -- .github/workflows/codeg-portable-win64-custom.yml `
+                                     .github/workflows/test-patched.yml
+          if ($LASTEXITCODE -ne 0) { throw "Failed to restore plugin-dev custom layer" }
+          Write-Host "Reconstructed upstream $resolved + plugin-dev custom layer"
+          git status --porcelain
 
       - name: Apply custom feature patches
         shell: pwsh

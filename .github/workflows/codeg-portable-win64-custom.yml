@@ -22,13 +22,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Patch-archive model (2026-08-07): the tree is 100% pure origin/main;
-      # custom features are archived as apply-on-demand patches under
-      # newplugin/patches/ and applied here in dependency order:
-      #   1) 17 auto-approve patches        (`.patch`)
-      #   2) 9  task-accept patches         (`.accept.patch`)
-      #   3) 20 launch-target patches       (`.launch.patch`)
-      #   4) 13 custom-workflows tab patches (`.customtab.patch`)
+      # Base-selection model (2026-08-12): the plugin-dev native trees are NOT
+      # the patch target. The single source of truth is newplugin/BASE, which
+      # pins the exact upstream commit (v0.24.0) the archive was re-anchored
+      # against. This step reconstructs the COMPLETE upstream tree at that SHA,
+      # then restores ONLY the plugin-dev custom layer CI needs (patch archive +
+      # the custom workflow files). It is NOT a path-scoped overlay: git fully
+      # materializes the upstream tree, so upstream deletions/renames cannot
+      # leave stale old-base files behind.
+      #
+      # Resulting workspace:  pinned upstream base (newplugin/BASE)
+      #                       + plugin-dev custom layer (newplugin/ + workflows)
+      #                       + 104 patches (applied below, unchanged).
+      - name: Reconstruct engine from pinned upstream base (newplugin/BASE)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # 1) Capture the exact plugin-dev commit we were checked out at
+          #    BEFORE detaching. Never resolve the plugin-dev branch by name
+          #    after detaching (it could move between runs).
+          $pluginDevSha = (git rev-parse HEAD).Trim()
+          if (-not $pluginDevSha) { throw "Could not resolve plugin-dev HEAD SHA" }
+          Write-Host "plugin-dev captured at: $pluginDevSha"
+          # 2) Read the pinned upstream base from newplugin/BASE.
+          $base = Get-Content newplugin/BASE | Where-Object { $_ -match '^[a-z]+=' }
+          $up = (($base | Where-Object { $_ -like 'upstream=*' }) -replace '^upstream=','').Trim()
+          $ref = (($base | Where-Object { $_ -like 'ref=*' })     -replace '^ref=','').Trim()
+          $sha = (($base | Where-Object { $_ -like 'sha=*' })     -replace '^sha=','').Trim()
+          if (-not $up -or -not $ref -or -not $sha) { throw "newplugin/BASE is incomplete" }
+          Write-Host "base: $up $ref"
+          # 3) Fetch the pinned upstream tag and verify it resolves to the
+          #    immutable SHA declared in newplugin/BASE.
+          git fetch "$up" "refs/tags/${ref}:refs/tags/${ref}"
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed for $ref" }
+          $resolved = (git rev-parse "refs/tags/$ref").Trim()
+          if ($resolved -ne $sha) { throw "BASE SHA mismatch: pinned $sha != resolved $resolved" }
+          Write-Host "base SHA verified: $resolved"
+          # 4) Reconstruct the COMPLETE upstream tree at the pinned SHA.
+          git checkout --detach $sha
+          if ($LASTEXITCODE -ne 0) { throw "git checkout --detach $sha failed" }
+          # 5) Restore ONLY the CI-required plugin-dev custom layer from the
+          #    captured plugin-dev SHA (additive re-application from git objects).
+          git checkout $pluginDevSha -- newplugin/
+          git checkout $pluginDevSha -- .github/workflows/codeg-portable-win64-custom.yml `
+                                     .github/workflows/test-patched.yml
+          if ($LASTEXITCODE -ne 0) { throw "Failed to restore plugin-dev custom layer" }
+          Write-Host "Reconstructed upstream $resolved + plugin-dev custom layer"
+          git status --porcelain
+
+      # Patch-archive model (2026-08-07): custom features are archived as
+      # apply-on-demand patches under newplugin/patches/ and applied here in
+      # dependency order:
+      #   1) 54 plain/perchat/channelmsg patches (`.patch`)
+      #   2) 16 task-accept patches             (`.accept.patch`)
+      #   3) 21 launch-target patches           (`.launch.patch`)
+      #   4) 13 custom-workflows tab patches    (`.customtab.patch`)
       # Within each group patches are applied alphabetically. This build
       # therefore ships WITH all custom features.
       - name: Apply custom feature patches

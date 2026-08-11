@@ -5,20 +5,35 @@ action that creates, regenerates, modifies, deletes, validates, or applies plugi
 It is **mandatory reading** before any such action (see `agent.md`).
 
 The protocol below was independently verified by a full reconstruction replay on
-**2026-08-09** and must be treated as the single source of truth for patch ordering and
-generation. Do not introduce a second patch-order source of truth.
+**2026-08-09**, and re-verified against the pinned **v0.24.0** base on **2026-08-12**
+(104/104 patches apply clean in CI order; 58-path changed-file union). It must be treated
+as the single source of truth for patch ordering and generation. Do not introduce a second
+patch-order source of truth.
 
 ---
 
 ## 1. Repository model (verified facts)
 
-- **Upstream base:** `origin/main` = `42b906d992ff45b2d7cd51ac5d2fb3c771b27322`
-- **Working branch:** `plugin-dev` (all custom work happens here; `main` is a clean
-  upstream mirror — never commit to it).
-- **Native trees are pristine:** `src/` and `src-tauri/src/` on `plugin-dev` must remain
-  **byte-identical to `origin/main`**. Verified: `git diff origin/main..HEAD -- src src-tauri`
-  is empty. There are **zero** direct engine modifications.
+- **Base selection — `newplugin/BASE` is the single source of truth.** It pins the exact
+  upstream commit the archive is re-anchored against:
+
+      upstream=https://github.com/xintaofei/codeg.git
+      ref=v0.24.0
+      sha=df7a872de44546277e4c49cfe9d173c631161dc6
+
+  Every reconstruction (CI workflows, `simulate-ci.sh`, `regen-perchat.sh`) reads this
+  file, fetches the pinned tag from `upstream=`, verifies it resolves to the immutable
+  `sha=`, then materializes the **complete** upstream tree at that SHA. **Never** use
+  `origin/main` or the plugin-dev native trees as the patch base — they are drift-prone and
+  are NOT the patch target. To move the base, update all three fields in `newplugin/BASE`
+  together and re-verify the full replay (§5) — this is the only allowed base change.
+- **Working branch:** `plugin-dev` (all custom work happens here).
+- **Canonical native trees are NOT the patch target:** `src/` and `src-tauri/src/` on
+  `plugin-dev` predate v0.24.0 and are not byte-identical to the pinned base. The patch
+  target is always the reconstructed upstream tree from `newplugin/BASE`, never these
+  canonical trees.
 - **All custom features live ONLY under `newplugin/`:**
+  - `newplugin/BASE` — pinned upstream base record (single source of truth).
   - `newplugin/patches/` — apply-on-demand raw git diff patches (engine + frontend).
   - `newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/` — out-of-tree custom code.
 - **Patch archive:** currently **104 tracked patches** under `newplugin/patches/`.
@@ -46,6 +61,13 @@ The CI workflow is the **authoritative ordering**:
 
     .github/workflows/codeg-portable-win64-custom.yml
 
+Both custom workflows (`codeg-portable-win64-custom.yml`, `test-patched.yml`) first run the
+**"Reconstruct engine from pinned upstream base (newplugin/BASE)"** step: they capture the
+plugin-dev HEAD SHA *before* detaching, read `newplugin/BASE`, verify the pinned SHA, then
+`git checkout --detach` the complete upstream tree and restore only the plugin-dev custom
+layer CI needs (`newplugin/` + the two custom workflow files). Patches are then applied on
+top of that reconstructed base.
+
 Step "Apply custom feature patches" defines four groups applied in dependency order,
 **alphabetically by filename within each group** (`Sort-Object Name`):
 
@@ -62,9 +84,12 @@ Step "Apply custom feature patches" defines four groups applied in dependency or
   as a complete feature.
 - Sum check: 54 + 16 + 21 + 13 = **104**.
 - `newplugin/scripts/simulate-ci.sh` mirrors this ordering (identical results verified
-  position-by-position for all 104 patches). It is a local **checking aid only**; the CI
-  workflow remains the source of truth. Known benign difference: CI **throws** on a group
-  with 0 matches, the simulator **skips** it (report it, do not "fix" it).
+  position-by-position for all 104 patches). It uses the same BASE mechanism: it reads
+  `newplugin/BASE`, verifies the pinned SHA, reconstructs the complete upstream tree in a
+  **disposable worktree**, restores the plugin-dev custom layer, and applies all 104
+  patches in CI order. It is a local **checking aid only**; the CI workflow remains the
+  source of truth. Known benign difference: CI **throws** on a group with 0 matches, the
+  simulator **skips** it (report it, do not "fix" it).
 - **Never introduce a second patch-order source of truth** (e.g., an `apply-order.json`).
 
 ---
@@ -91,11 +116,12 @@ Step "Apply custom feature patches" defines four groups applied in dependency or
 
 ## 4. Generation workflow (producing or updating a patch)
 
-1. **Start from a clean, pinned base.** Use `origin/main`
-   (`42b906d992ff45b2d7cd51ac5d2fb3c771b27322` or the current verified base) — never a
-   drift-prone local state.
-2. **Use an isolated feature worktree.** Create a disposable worktree from the pinned
-   base; never generate patches from an unclean or half-patched `plugin-dev` checkout:
+1. **Start from a clean, pinned base.** Read `newplugin/BASE` (the single source of truth),
+   fetch the pinned tag from `upstream=`, and verify the resolved SHA equals `sha=`. Use
+   that SHA as the base — never a drift-prone local state, never `origin/main`, never the
+   canonical plugin-dev native trees.
+2. **Use an isolated feature worktree.** Create a disposable worktree from the pinned base;
+   never generate patches from an unclean or half-patched `plugin-dev` checkout:
    `git worktree add --detach <tmp>/work <base-sha>`.
 3. **Apply the existing archive first** (exact CI order, §2) so your new feature builds on
    the real accumulated tree.
@@ -117,7 +143,8 @@ Step "Apply custom feature patches" defines four groups applied in dependency or
 
 Before accepting any patch set (new feature or update), run the full replay:
 
-1. `git worktree add --detach <tmp>/replay origin/main` (clean, disposable).
+1. Read `newplugin/BASE`, fetch/verify the pinned SHA, and `git worktree add --detach
+   <tmp>/replay <base-sha>` (clean, disposable; same base-selection as CI §2).
 2. Apply **all** 104 patches (or the full archive) in the exact CI order (§2) from the
    worktree root, using the canonical `newplugin/patches/` as the patch source.
 3. Every patch must apply cleanly (`git apply` exit 0 each); **no failures, no
@@ -169,17 +196,18 @@ involved. Wait for direction before acting.
 ## 7. Quick Checklist (run before committing any patch)
 
 - [ ] Read this protocol (mandatory).
-- [ ] Native `src/` and `src-tauri/src/` pristine vs `origin/main`.
-- [ ] Base pinned: `origin/main` = `42b906d992ff45b2d7cd51ac5d2fb3c771b27322`.
+- [ ] Base selected from `newplugin/BASE` (single source of truth): `upstream=` fetched,
+      `ref=` tag resolves to `sha=`; base SHA used for every reconstruction.
 - [ ] Patch generated Git-native (raw `git diff`), UTF-8 / LF / no BOM, no custom headers.
 - [ ] `git apply --check --whitespace=error` passes.
 - [ ] No unrelated patches regenerated; ownership/inventory intact.
 - [ ] Full CI-order replay (groups 1→4, alphabetical within group) passes on a disposable
-      worktree from pristine base.
+      worktree reconstructed from the `newplugin/BASE` SHA.
 - [ ] Reconstructed tree equals intended feature tree; no files changed outside
       `src/` + `src-tauri/`.
 - [ ] Patch count + family inventory verified (104 = 29 + 21 + 16 + 13 + 6 + 19 for the
       current archive).
-- [ ] Canonical `plugin-dev` clean; no patch files modified.
+- [ ] Canonical `plugin-dev` clean; no patch files modified; no `newplugin/BASE` fields
+      changed without re-verifying the full replay.
 - [ ] No second patch-order source of truth created (no `apply-order.json`).
 - [ ] No feature maintained as both direct engine edits and patches.
