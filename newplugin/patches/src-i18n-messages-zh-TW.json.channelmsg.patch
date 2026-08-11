@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
-index db20bc0e..a57362ba 100644
+index 98f36ea..a1717bf 100644
 --- a/src/i18n/messages/zh-TW.json
 +++ b/src/i18n/messages/zh-TW.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "儲存從聊天中建立的設定失敗",
-     "loadFailed": "載入失敗：{detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "本輪已結束。",
+     "submitFailed": "留言送出失敗"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "AI 頻道訊息",
@@ -17,6 +17,6 @@ index db20bc0e..a57362ba 100644
 +    "saveFailed": "儲存 AI 頻道訊息設定失敗",
 +    "loadFailed": "載入失敗：{detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "向使用者提問",
-     "description": "允許智能體暫停並向你提出多選問題，問題會顯示在對話輸入框上方。智能體會一直等待，直到你作答（或略過）。",
+   "AgentToolsSettings": {
+     "title": "對話內工具",
+     "description": "codeg 在對話中額外提供給智慧代理的工具。工具會在代理啟動時注入，變更只對之後啟動的代理生效。",

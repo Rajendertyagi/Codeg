@@ -1,29 +1,31 @@
 diff --git a/src/components/chat/message-input.tsx b/src/components/chat/message-input.tsx
-index 1c40c5b5..27584842 100644
+index c3b9ab2..3e63f0e 100644
 --- a/src/components/chat/message-input.tsx
 +++ b/src/components/chat/message-input.tsx
-@@ -26,6 +26,8 @@ import {
+@@ -15,6 +15,8 @@ import {
+   MessageSquareText,
    Scissors,
-   Search,
    Send,
 +  Shield,
 +  ShieldCheck,
-   Command,
-   Sparkles,
    Square,
-@@ -83,6 +85,8 @@ import {
-   uploadLocalPathToRemote,
-   isEmptyAttachmentError,
-   openSettingsWindow,
+   TextSelect,
+   X,
+@@ -49,6 +51,10 @@ import { toErrorMessage } from "@/lib/app-error"
+ import { isNoActiveTurnRejection } from "@/lib/turn-busy"
+ import { ServerFileBrowserDialog } from "@/components/shared/server-file-browser-dialog"
+ import { toast } from "sonner"
++import {
 +  getGlobalAutoApprove,
 +  toggleGlobalAutoApprove,
-   type SettingsSection,
-   UPLOAD_MAX_BYTES,
-   UPLOAD_I18N_KEY_TOO_LARGE,
-@@ -578,6 +582,40 @@ export function MessageInput({
-   // subset); office is a fixed static set. `tQa` supplies office labels/prompts.
-   const locale = useLocale()
-   const tQa = useTranslations("Folder.chat.welcomePanel.quickActions")
++} from "@/lib/api"
+ import type {
+   AgentSkillItem,
+   AgentType,
+@@ -308,6 +314,40 @@ export function MessageInput({
+   // upload / attachment toasts — read as a single coherent group when
+   // scanning the file. Same namespace, no extra runtime cost.
+   const tAttach = useTranslations("Folder.chat.messageInput")
 +  // Auto-accept shield (custom hooks): when on, the backend answers tool
 +  // permission requests automatically instead of parking a card. The toggle is
 +  // GLOBAL (app-wide, persisted in `app_metadata`), so every composer shows the
@@ -58,10 +60,10 @@ index 1c40c5b5..27584842 100644
 +  const autoApproveOffLabel = t.has("autoApproveOff")
 +    ? t("autoApproveOff")
 +    : "Auto-accept: off"
-   const experts = useBuiltInExperts()
-   const science = useBuiltInScience()
-   const {
-@@ -2955,6 +2993,26 @@ export function MessageInput({
+   // The `$` prefix autocomplete is Codex-only: Codex advertises very few
+   // native slash commands, so we augment the dropdown with the agent's
+   // skills read from disk. Other agents already surface their full command
+@@ -1381,6 +1421,26 @@ export function MessageInput({
            label={t("modeLabel")}
          />
        )}

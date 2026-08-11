@@ -1,8 +1,8 @@
 diff --git a/src/components/tasks/task-editor-dialog.tsx b/src/components/tasks/task-editor-dialog.tsx
-index 5134bc23..d08f314d 100644
+index 15494f9..80d0db3 100644
 --- a/src/components/tasks/task-editor-dialog.tsx
 +++ b/src/components/tasks/task-editor-dialog.tsx
-@@ -48,11 +48,13 @@ import {
+@@ -37,11 +37,13 @@ import {
  } from "@/components/ui/select"
  import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
  import {
@@ -15,8 +15,8 @@ index 5134bc23..d08f314d 100644
 +import { AutomationConversationPicker } from "../../../newplugin/frontend/automation-conversation-picker"
  import type {
    AgentType,
-   PromptInputBlock,
-@@ -108,6 +110,82 @@ export function TaskEditorDialog({
+   WorkTask,
+@@ -96,6 +98,82 @@ export function TaskEditorDialog({
    )
  }
  
@@ -99,7 +99,7 @@ index 5134bc23..d08f314d 100644
  function TaskEditorBody({
    task,
    defaultFolderId,
-@@ -152,6 +230,12 @@ function TaskEditorBody({
+@@ -142,6 +220,12 @@ function TaskEditorBody({
    const [configValues, setConfigValues] = useState<Record<string, string>>(
      task?.config?.config_values ?? {}
    )
@@ -112,7 +112,7 @@ index 5134bc23..d08f314d 100644
    const [error, setError] = useState<string | null>(null)
    const [saving, setSaving] = useState(false)
  
-@@ -253,6 +337,7 @@ function TaskEditorBody({
+@@ -227,6 +311,7 @@ function TaskEditorBody({
          agent_type: null,
          mode_id: null,
          config_values: {},
@@ -120,7 +120,7 @@ index 5134bc23..d08f314d 100644
        }
      }
      const snapshot = await agentOptions.ensure()
-@@ -271,6 +356,7 @@ function TaskEditorBody({
+@@ -245,6 +330,7 @@ function TaskEditorBody({
          agent_label: getAgentLabel(agentType) ?? agentType,
          ...snapshotLabels(snapshot, mode_id, config_values),
        },
@@ -128,9 +128,9 @@ index 5134bc23..d08f314d 100644
      }
    }
  
-@@ -281,6 +367,22 @@ function TaskEditorBody({
-     if (!displayText) return setError(t("errorPrompt"))
-     if (folderId == null) return setError(t("errorFolder"))
+@@ -262,6 +348,22 @@ function TaskEditorBody({
+       return setError(tChat("attachUploadInProgress"))
+     }
  
 +    // Validate: existing conversation must belong to the task's folder.
 +    if (existingConversationId != null) {
@@ -151,7 +151,7 @@ index 5134bc23..d08f314d 100644
      setSaving(true)
      try {
        const draft: WorkTaskDraft = {
-@@ -477,6 +579,53 @@ function TaskEditorBody({
+@@ -458,6 +560,53 @@ function TaskEditorBody({
            </div>
          </div>
  

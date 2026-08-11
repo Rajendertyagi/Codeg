@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
-index b8a1434b..699c4d5b 100644
+index d620504..4d186d4 100644
 --- a/src/i18n/messages/en.json
 +++ b/src/i18n/messages/en.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "Failed to save create-from-chat settings",
-     "loadFailed": "Failed to load: {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "The turn already ended.",
+     "submitFailed": "Couldn't send your note"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "AI Channel Messaging",
@@ -17,6 +17,6 @@ index b8a1434b..699c4d5b 100644
 +    "saveFailed": "Failed to save AI Channel Messaging settings",
 +    "loadFailed": "Failed to load: {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "Ask user question",
-     "description": "Let agents pause and ask you a multiple-choice question that appears above the conversation input box. The agent waits until you answer (or skip).",
+   "AgentToolsSettings": {
+     "title": "In-conversation tools",
+     "description": "Extra tools codeg gives an agent inside a conversation. Each is injected when the agent starts, so a change applies to agents started afterwards.",

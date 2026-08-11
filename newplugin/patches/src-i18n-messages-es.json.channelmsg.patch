@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/es.json b/src/i18n/messages/es.json
-index b1b48949..1e4ba4f7 100644
+index e3eb61b..bf86d0d 100644
 --- a/src/i18n/messages/es.json
 +++ b/src/i18n/messages/es.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "No se pudieron guardar los ajustes de crear desde el chat",
-     "loadFailed": "Error al cargar: {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "El turno ya terminó.",
+     "submitFailed": "No se pudo enviar tu nota"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "Mensajería de canal AI",
@@ -17,6 +17,6 @@ index b1b48949..1e4ba4f7 100644
 +    "saveFailed": "No se pudieron guardar los ajustes de mensajería de canal AI",
 +    "loadFailed": "Error al cargar: {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "Preguntar al usuario",
-     "description": "Permite que los agentes se detengan y te hagan una pregunta de opción múltiple que aparece encima del cuadro de entrada de la conversación. El agente espera hasta que respondas (u omitas).",
+   "AgentToolsSettings": {
+     "title": "Herramientas en la conversación",
+     "description": "Herramientas adicionales que codeg entrega a un agente dentro de una conversación. Se inyectan al iniciar el agente, así que los cambios se aplican a los agentes iniciados después.",

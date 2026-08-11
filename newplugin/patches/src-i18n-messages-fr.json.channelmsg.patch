@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/fr.json b/src/i18n/messages/fr.json
-index e87f36e9..94f78912 100644
+index b17ba21..9c6a721 100644
 --- a/src/i18n/messages/fr.json
 +++ b/src/i18n/messages/fr.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "Échec de l'enregistrement des paramètres de création depuis le chat",
-     "loadFailed": "Échec du chargement : {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "Le tour est déjà terminé.",
+     "submitFailed": "Impossible d'envoyer votre note"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "Messagerie de canal IA",
@@ -17,6 +17,6 @@ index e87f36e9..94f78912 100644
 +    "saveFailed": "Échec de l'enregistrement des paramètres de messagerie de canal IA",
 +    "loadFailed": "Échec du chargement : {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "Poser une question à l'utilisateur",
-     "description": "Permet aux agents de s'interrompre et de vous poser une question à choix multiples affichée au-dessus de la zone de saisie de la conversation. L'agent attend votre réponse (ou que vous ignoriez).",
+   "AgentToolsSettings": {
+     "title": "Outils dans la conversation",
+     "description": "Outils supplémentaires que codeg fournit à un agent au sein d'une conversation. Ils sont injectés au démarrage de l'agent : une modification s'applique donc aux agents démarrés ensuite.",

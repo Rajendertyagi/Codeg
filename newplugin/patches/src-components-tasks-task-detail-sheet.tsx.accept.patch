@@ -1,8 +1,8 @@
 diff --git a/src/components/tasks/task-detail-sheet.tsx b/src/components/tasks/task-detail-sheet.tsx
-index 4517cde..06c6e98 100644
+index 9bc5746..ad912d4 100644
 --- a/src/components/tasks/task-detail-sheet.tsx
 +++ b/src/components/tasks/task-detail-sheet.tsx
-@@ -19,6 +19,7 @@ import {
+@@ -20,6 +20,7 @@ import {
    CircleAlert,
    CircleCheck,
    CircleX,
@@ -10,7 +10,7 @@ index 4517cde..06c6e98 100644
    Coins,
    FileDiff,
    FolderX,
-@@ -36,6 +37,7 @@ import {
+@@ -37,6 +38,7 @@ import {
  } from "lucide-react"
  import {
    workTaskArchive,
@@ -18,9 +18,9 @@ index 4517cde..06c6e98 100644
    getFolderConversation,
    workTaskChangedFiles,
    workTaskCleanup,
-@@ -369,22 +371,31 @@ export function TaskDetailSheet({
-     return (composerRef.current?.getText() ?? composerText).trim() || null
-   }
+@@ -391,22 +393,31 @@ export function TaskDetailSheet({
+   const composerBlocks = (): PromptInputBlock[] =>
+     composerOpen ? (composerRef.current?.getAttachmentBlocks() ?? []) : []
    if (isReview) {
 -    // A task that changed nothing has no merge to offer — accepting it IS the
 -    // primary action (same swap the board card makes).

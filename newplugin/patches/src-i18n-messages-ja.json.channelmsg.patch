@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/ja.json b/src/i18n/messages/ja.json
-index 2330c338..ad53f2ee 100644
+index d48c75b..fd53035 100644
 --- a/src/i18n/messages/ja.json
 +++ b/src/i18n/messages/ja.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "チャットから作成の設定の保存に失敗しました",
-     "loadFailed": "読み込みに失敗しました: {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "ターンはすでに終了しています。",
+     "submitFailed": "メモを送信できませんでした"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "AI チャネルメッセージ",
@@ -17,6 +17,6 @@ index 2330c338..ad53f2ee 100644
 +    "saveFailed": "AIチャネルメッセージ設定の保存に失敗しました",
 +    "loadFailed": "読み込みに失敗しました: {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "ユーザーに質問",
-     "description": "エージェントが処理を一時停止し、会話の入力欄の上に表示される選択式の質問をできるようにします。回答（またはスキップ）するまでエージェントは待機します。",
+   "AgentToolsSettings": {
+     "title": "会話内ツール",
+     "description": "codeg が会話の中でエージェントに追加で渡すツールです。エージェントの起動時に注入されるため、変更は以降に起動したエージェントに適用されます。",

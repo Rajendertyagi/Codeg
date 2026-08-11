@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/zh-CN.json b/src/i18n/messages/zh-CN.json
-index 17ed86a8..42182723 100644
+index 92cb36f..9123478 100644
 --- a/src/i18n/messages/zh-CN.json
 +++ b/src/i18n/messages/zh-CN.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "保存从聊天中创建的设置失败",
-     "loadFailed": "加载失败：{detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "本轮已结束。",
+     "submitFailed": "留言发送失败"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "AI 频道消息",
@@ -17,6 +17,6 @@ index 17ed86a8..42182723 100644
 +    "saveFailed": "保存 AI 频道消息设置失败",
 +    "loadFailed": "加载失败：{detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "向用户提问",
-     "description": "允许智能体暂停并向你提出多选问题，问题会显示在会话输入框上方。智能体会一直等待，直到你作答（或跳过）。",
+   "AgentToolsSettings": {
+     "title": "会话内工具",
+     "description": "codeg 在会话中额外提供给智能体的工具。工具在智能体启动时注入，改动只对之后启动的智能体生效。",

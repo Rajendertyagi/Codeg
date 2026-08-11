@@ -1,19 +1,19 @@
 diff --git a/src/components/settings/general-settings.tsx b/src/components/settings/general-settings.tsx
-index 4af9187f..3c2aa453 100644
+index 61609dc..0d991c7 100644
 --- a/src/components/settings/general-settings.tsx
 +++ b/src/components/settings/general-settings.tsx
-@@ -34,6 +34,7 @@ import { SessionFeedbackSettingsSection } from "@/components/settings/session-fe
- import { AskQuestionSettingsSection } from "@/components/settings/ask-question-settings"
- import { SessionInfoSettingsSection } from "@/components/settings/session-info-settings"
- import { ChatAuthoringSettingsSection } from "@/components/settings/chat-authoring-settings"
+@@ -44,6 +44,7 @@ import { toErrorMessage } from "@/lib/app-error"
+ import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
+ import { DelegationSettingsSection } from "@/components/settings/delegation-settings"
+ import { AgentToolsSettingsSection } from "@/components/settings/agent-tools-settings"
 +import { ChannelMessagingSettingsSection } from "@/components/settings/chat-channel-messaging-settings"
  
  const TERMINAL_SHELL_OPTION_SYSTEM = "system"
  const TERMINAL_SHELL_OPTION_CUSTOM = "custom"
-@@ -398,6 +399,8 @@ export function GeneralSettings() {
-         <SessionInfoSettingsSection />
+@@ -411,6 +412,8 @@ export function GeneralSettings() {
+         <DelegationSettingsSection />
  
-         <ChatAuthoringSettingsSection />
+         <AgentToolsSettingsSection />
 +
 +        <ChannelMessagingSettingsSection />
        </div>

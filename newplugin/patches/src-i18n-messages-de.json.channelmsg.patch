@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/de.json b/src/i18n/messages/de.json
-index 1ca3c7e6..05dd6752 100644
+index fd48913..74c4ae5 100644
 --- a/src/i18n/messages/de.json
 +++ b/src/i18n/messages/de.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "Einstellungen für Aus dem Chat erstellen konnten nicht gespeichert werden",
-     "loadFailed": "Laden fehlgeschlagen: {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "Die Runde ist bereits beendet.",
+     "submitFailed": "Deine Notiz konnte nicht gesendet werden"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "KI-Kanalnachrichten",
@@ -17,6 +17,6 @@ index 1ca3c7e6..05dd6752 100644
 +    "saveFailed": "Einstellungen für KI-Kanalnachrichten konnten nicht gespeichert werden",
 +    "loadFailed": "Laden fehlgeschlagen: {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "Benutzer fragen",
-     "description": "Erlaubt Agenten, anzuhalten und dir eine Multiple-Choice-Frage zu stellen, die über dem Eingabefeld der Unterhaltung erscheint. Der Agent wartet, bis du antwortest (oder überspringst).",
+   "AgentToolsSettings": {
+     "title": "Tools in der Unterhaltung",
+     "description": "Zusätzliche Tools, die codeg einem Agenten innerhalb einer Unterhaltung gibt. Sie werden beim Start des Agenten injiziert – eine Änderung gilt daher für danach gestartete Agenten.",

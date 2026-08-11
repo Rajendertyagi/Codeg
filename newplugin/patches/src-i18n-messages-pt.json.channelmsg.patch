@@ -1,10 +1,10 @@
 diff --git a/src/i18n/messages/pt.json b/src/i18n/messages/pt.json
-index b119d161..2e0fffe3 100644
+index bfefcb6..520da03 100644
 --- a/src/i18n/messages/pt.json
 +++ b/src/i18n/messages/pt.json
-@@ -4009,6 +4009,17 @@
-     "saveFailed": "Falha ao salvar as configurações de criar a partir do chat",
-     "loadFailed": "Falha ao carregar: {detail}"
+@@ -4062,6 +4062,17 @@
+     "turnEnded": "O turno já terminou.",
+     "submitFailed": "Não foi possível enviar a sua nota"
    },
 +  "ChannelMessagingSettings": {
 +    "title": "Mensagens de canal IA",
@@ -17,6 +17,6 @@ index b119d161..2e0fffe3 100644
 +    "saveFailed": "Falha ao salvar as configurações de mensagens de canal IA",
 +    "loadFailed": "Falha ao carregar: {detail}"
 +  },
-   "AskQuestionSettings": {
-     "title": "Perguntar ao usuário",
-     "description": "Permite que os agentes pausem e façam uma pergunta de múltipla escolha que aparece acima da caixa de entrada da conversa. O agente aguarda até você responder (ou pular).",
+   "AgentToolsSettings": {
+     "title": "Ferramentas na conversa",
+     "description": "Ferramentas extras que o codeg dá a um agente dentro de uma conversa. Elas são injetadas quando o agente inicia, então a mudança vale para os agentes iniciados depois.",
