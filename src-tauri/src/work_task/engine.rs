@@ -44,7 +44,7 @@ use crate::db::AppDatabase;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 use crate::models::{
     AgentType, FollowUpIntent, WorkTaskConfig, WorkTaskFolderSettings, WorkTaskMergeState,
-    WorkTaskPreflight, STAGE_PROMPT_ALL,
+    WorkTaskPreflight, WorkTaskQueuedMerge, STAGE_PROMPT_ALL,
 };
 use crate::web::event_bridge::{
     emit_event, EventEmitter, WorkTaskChange, WORK_TASK_CHANGED_EVENT,
@@ -82,8 +82,18 @@ pub struct TaskEngine {
     index: Arc<Mutex<HashMap<String, (i32, i32)>>>,
     /// Outstanding blocking requests per task (`"q:<id>"`, `"p:<id>"`,
     /// `"a:<id>"` — namespaced so the three id spaces can't collide). Non-empty
-    /// set ⇔ awaiting_input.
+    /// set ⇔ awaiting_input. Requests raised by a delegation sub-agent are
+    /// additionally prefixed with the child's connection id
+    /// (`"<child_conn>#p:<id>"`) so [`TaskEngine::forget_delegation_child`] can
+    /// drop the whole group when that child goes away.
     awaiting: Arc<Mutex<HashMap<i32, HashSet<String>>>>,
+    /// `child_connection_id -> parent_connection_id` for delegation children of
+    /// a task run. A sub-agent's blocking prompts arrive on the CHILD's
+    /// connection, which is not in `index` — without this mapping they are
+    /// dropped and the board keeps saying "running" while the run is actually
+    /// parked on the user (#447). Populated from `DelegationStarted` (only for
+    /// connections that ARE task runs) and dropped on `DelegationCompleted`.
+    delegation_parents: Arc<Mutex<HashMap<String, String>>>,
     /// Tasks currently being launched (`queued`, then `preparing` in DB, but
     /// owned by an in-flight launch), mapped to their folder so the pump's
     /// concurrency accounting stays per-folder. Keeps the pump from
@@ -151,6 +161,7 @@ pub fn build_task_engine(
         data_dir,
         index: Arc::new(Mutex::new(HashMap::new())),
         awaiting: Arc::new(Mutex::new(HashMap::new())),
+        delegation_parents: Arc::new(Mutex::new(HashMap::new())),
         launching: Arc::new(Mutex::new(HashMap::new())),
         launch_token: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         setup_children: Arc::new(Mutex::new(HashMap::new())),
@@ -162,6 +173,40 @@ pub fn build_task_engine(
     });
     let _ = ENGINE.set(engine.clone());
     Some(engine)
+}
+
+/// Hard stop when walking `TaskEngine::delegation_parents` up to its run. Well
+/// above any usable `depth_limit` (the delegation config's, which bounds the
+/// real chain), so it only ever fires against a map that shouldn't exist —
+/// insurance against spinning, not a functional limit.
+const MAX_DELEGATION_CHAIN_HOPS: usize = 16;
+
+/// Build an engine WITHOUT taking the process-wide ownership lock or publishing
+/// it to the `ENGINE` cell, so a test can drive the instance methods (event
+/// handling, request tracking) directly. The subscriber loop is never started;
+/// tests feed `on_event` themselves.
+#[cfg(test)]
+fn test_engine(db: AppDatabase) -> Arc<TaskEngine> {
+    Arc::new(TaskEngine {
+        db,
+        manager: ConnectionManager::new(),
+        emitter: EventEmitter::Noop,
+        bus: Arc::new(InternalEventBus::new(Default::default())),
+        // An anonymous temp file, not a handle on `data_dir`: opening a
+        // DIRECTORY as a File succeeds on Unix but fails on Windows.
+        _engine_lock: tempfile::tempfile().expect("temp file"),
+        data_dir: std::env::temp_dir(),
+        index: Arc::new(Mutex::new(HashMap::new())),
+        awaiting: Arc::new(Mutex::new(HashMap::new())),
+        delegation_parents: Arc::new(Mutex::new(HashMap::new())),
+        launching: Arc::new(Mutex::new(HashMap::new())),
+        launch_token: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        setup_children: Arc::new(Mutex::new(HashMap::new())),
+        merging: Arc::new(Mutex::new(HashSet::new())),
+        task_locks: Arc::new(Mutex::new(HashMap::new())),
+        folder_locks: Arc::new(Mutex::new(HashMap::new())),
+        pump_locks: Arc::new(Mutex::new(HashMap::new())),
+    })
 }
 
 enum Ownership {
@@ -265,6 +310,59 @@ pub async fn run_task_engine(engine: Arc<TaskEngine>) {
         }
     }
 }
+
+/// What a merge request actually did. Merges into one base branch are serial,
+/// so a click that finds the folder's slot busy takes a place in line instead
+/// of failing — and the caller has to be able to tell the user which happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeDispatch {
+    /// The merge generation is running now.
+    Dispatched,
+    /// Parked on the row; the folder's merge pump dispatches it when the slot
+    /// frees.
+    Queued,
+}
+
+impl MergeDispatch {
+    pub fn is_queued(self) -> bool {
+        matches!(self, MergeDispatch::Queued)
+    }
+}
+
+/// The queued merge a pump dispatch is FOR, carried from the scan down to the
+/// CAS that spends it.
+///
+/// `raw` is the row's `pending_merge` JSON verbatim — an optimistic token, not
+/// a re-serialization: every write that consumes a queued merge demands the
+/// column still equal it. Between the scan and the dispatch the pump does a
+/// worktree stat, takes the folder lock and runs three git subprocesses, and a
+/// user can withdraw or edit the merge anywhere in that window. `run_seq` does
+/// not move for either, so without this token a withdrawn merge would still
+/// land on the base branch.
+struct QueuedMergeClaim {
+    raw: String,
+    /// The instant the task took its place in line, so a re-park (the slot got
+    /// taken first) keeps it rather than going to the back.
+    queued_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// What one pass over a folder's merge queue concluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainOutcome {
+    /// A merge is running (or was just dispatched / refused) — the folder's one
+    /// merge slot is spoken for this round.
+    Taken,
+    /// Nothing is queued. The slot is free for the auto-merge sweep.
+    Empty,
+    /// The queue changed while this pass worked on it; the snapshot is out of
+    /// date and must be re-read before anything else may use the slot.
+    Stale,
+}
+
+/// How many times a drain re-reads a queue that changed under it before it
+/// gives the slot back to the next pump. Each retry requires a fresh
+/// concurrent change, so this only bounds a pathological click loop.
+const MERGE_QUEUE_DRAIN_ATTEMPTS: usize = 3;
 
 /// How a launch composes its prompt.
 enum LaunchMode {
@@ -556,6 +654,7 @@ impl TaskEngine {
         if let Some(conn_id) = conn_id {
             let _ = self.manager.cancel(&self.db.conn, &conn_id).await;
             self.index.lock().await.remove(&conn_id);
+            self.forget_delegation_children_of(&conn_id).await;
             let _ = self.manager.disconnect(&conn_id).await;
         }
         self.awaiting.lock().await.remove(&task_id);
@@ -1472,7 +1571,188 @@ impl TaskEngine {
                 self.track_request(&env.connection_id, format!("a:{approval_id}"), false)
                     .await;
             }
+            // Both delegation events ride the PARENT's stream, so
+            // `env.connection_id` is the (possibly task-owning) parent and the
+            // child id is in the payload.
+            AcpEvent::DelegationStarted {
+                child_connection_id,
+                ..
+            } => {
+                // Scoped to task runs: a delegation from an ordinary chat tab
+                // has no board row to flip, and mapping it would grow this map
+                // for the life of the process. Resolved through
+                // `task_for_connection` rather than `index` alone so a nested
+                // delegation (a sub-agent delegating further) maps to the same
+                // run — its prompts block the task just as much.
+                if self.task_for_connection(&env.connection_id).await.is_some() {
+                    self.delegation_parents
+                        .lock()
+                        .await
+                        .insert(child_connection_id.clone(), env.connection_id.clone());
+                    // The broker starts the child's turn BEFORE announcing it
+                    // (`send_prompt_linked_for_delegation` precedes
+                    // `emit_started_if_real`), so a child that blocks
+                    // immediately raised its prompt while we had no mapping and
+                    // we dropped it. Recover from live state now that we do —
+                    // otherwise the board sits at `running` for a run that is
+                    // already parked on the user.
+                    self.backfill_child_blocking_prompts(child_connection_id)
+                        .await;
+                }
+            }
+            AcpEvent::DelegationCompleted {
+                child_connection_id,
+                ..
+            } => {
+                self.forget_delegation_child(child_connection_id).await;
+            }
             _ => {}
+        }
+    }
+
+    /// Resolve the task generation an event belongs to, and whether `conn_id` is
+    /// the run's OWN connection. A connection that isn't itself a task run may
+    /// still be a delegation child of one, in which case the run is its
+    /// parent's and the caller must namespace anything it records by
+    /// `conn_id` — see [`Self::track_request`].
+    ///
+    /// Walks the delegation chain rather than one hop: with `depth_limit > 1` a
+    /// sub-agent can delegate further, and a grandchild parked on a permission
+    /// blocks the run exactly as much as a direct child does. Bounded by
+    /// [`MAX_DELEGATION_CHAIN_HOPS`] so a malformed map can never spin.
+    ///
+    /// Never holds two of the engine's maps at once (each guard is a statement
+    /// temporary), matching the discipline the rest of these helpers keep.
+    async fn task_for_connection(&self, conn_id: &str) -> Option<((i32, i32), bool)> {
+        if let Some(entry) = self.index.lock().await.get(conn_id).copied() {
+            return Some((entry, true));
+        }
+        let mut cursor = conn_id.to_string();
+        for _ in 0..MAX_DELEGATION_CHAIN_HOPS {
+            let parent = self.delegation_parents.lock().await.get(&cursor).cloned()?;
+            if let Some(entry) = self.index.lock().await.get(&parent).copied() {
+                return Some((entry, false));
+            }
+            cursor = parent;
+        }
+        None
+    }
+
+    /// Detach `root`'s delegation-child mappings, transitively, and return every
+    /// connection id removed (`root` itself only when `include_root`).
+    ///
+    /// Transitive because a sub-agent may have delegated further: dropping only
+    /// the direct children would strand the deeper links, and — since
+    /// [`Self::task_for_connection`] deliberately doesn't prune as it walks —
+    /// nothing else would ever collect them.
+    ///
+    /// Terminates unconditionally: each iteration removes the entries it
+    /// enqueues, so the map strictly shrinks.
+    async fn detach_delegation_subtree(&self, root: &str, include_root: bool) -> Vec<String> {
+        let mut parents = self.delegation_parents.lock().await;
+        let mut detached = Vec::new();
+        let mut frontier = vec![root.to_string()];
+        while let Some(node) = frontier.pop() {
+            let children: Vec<String> = parents
+                .iter()
+                .filter(|(_, parent)| parent.as_str() == node)
+                .map(|(child, _)| child.clone())
+                .collect();
+            for child in children {
+                parents.remove(&child);
+                frontier.push(child.clone());
+                detached.push(child);
+            }
+        }
+        if include_root && parents.remove(root).is_some() {
+            detached.push(root.to_string());
+        }
+        detached
+    }
+
+    /// Track any blocking prompt the child is ALREADY parked on, reading its
+    /// live `SessionState` (authoritative, and updated independently of the
+    /// event bus). Idempotent: re-tracking a key already in the set is a
+    /// no-op insert, so a prompt we did see plus this backfill can't
+    /// double-count.
+    ///
+    /// Reads all three prompt kinds rather than the single top-precedence one,
+    /// so resolving whichever comes first can't empty the set while another is
+    /// still outstanding.
+    async fn backfill_child_blocking_prompts(&self, child_conn_id: &str) {
+        let Some(state) = self.manager.get_state(child_conn_id).await else {
+            return;
+        };
+        // Collect under the read lock, track after releasing it — `track_request`
+        // takes the engine's own maps and must not nest inside a session lock.
+        let keys: Vec<String> = {
+            let s = state.read().await;
+            let mut keys = Vec::new();
+            if let Some(p) = s.pending_permission.as_ref() {
+                keys.push(format!("p:{}", p.request_id));
+            }
+            if let Some(q) = s.pending_question.as_ref() {
+                keys.push(format!("q:{}", q.question_id));
+            }
+            if let Some(a) = s.pending_plan_approval.as_ref() {
+                keys.push(format!("a:{}", a.approval_id));
+            }
+            keys
+        };
+        for key in keys {
+            self.track_request(child_conn_id, key, true).await;
+        }
+    }
+
+    /// Drop every delegation-child mapping belonging to a retired run. Called
+    /// wherever a run leaves `index`; the run's outstanding-request set is
+    /// cleared wholesale by those same call sites.
+    async fn forget_delegation_children_of(&self, parent_conn_id: &str) {
+        // `parent_conn_id` is a run connection, never a key in this map.
+        self.detach_delegation_subtree(parent_conn_id, false).await;
+    }
+
+    /// Drop a finished delegation child (and anything it delegated in turn) plus
+    /// any blocking requests they left unanswered.
+    ///
+    /// The cleanup is the load-bearing half: a child torn down while a
+    /// permission was still pending (cancel, crash, parent teardown) would
+    /// otherwise leave its key in the task's outstanding set forever, pinning
+    /// the row at `awaiting_input` with nothing left that could ever resolve it.
+    /// Empties the set through the same flip path as `track_request` so the row
+    /// returns to `running`.
+    async fn forget_delegation_child(&self, child_conn_id: &str) {
+        // Resolve the run BEFORE detaching — afterwards the chain is gone.
+        let entry = self.task_for_connection(child_conn_id).await;
+        let detached = self.detach_delegation_subtree(child_conn_id, true).await;
+        let Some(((task_id, run_seq), _)) = entry else {
+            return;
+        };
+        let prefixes: Vec<String> = detached.iter().map(|c| format!("{c}#")).collect();
+        let emptied = {
+            let mut awaiting = self.awaiting.lock().await;
+            let Some(set) = awaiting.get_mut(&task_id) else {
+                return;
+            };
+            let before = set.len();
+            set.retain(|k| !prefixes.iter().any(|p| k.starts_with(p.as_str())));
+            if set.len() == before {
+                return; // nothing of this subtree's was outstanding
+            }
+            if set.is_empty() {
+                awaiting.remove(&task_id);
+                true
+            } else {
+                false
+            }
+        };
+        if emptied {
+            let flipped = work_task_service::flip_awaiting(&self.db.conn, task_id, run_seq, false)
+                .await
+                .unwrap_or(false);
+            if flipped {
+                self.emit_upsert(task_id);
+            }
         }
     }
 
@@ -1485,6 +1765,7 @@ impl TaskEngine {
         let summary = self.capture_summary(conn_id).await;
         self.index.lock().await.remove(conn_id);
         self.awaiting.lock().await.remove(&task_id);
+        self.forget_delegation_children_of(conn_id).await;
         let _ = self.manager.disconnect(conn_id).await;
 
         let task = work_task_service::get_model(&self.db.conn, task_id).await.ok();
@@ -1498,9 +1779,9 @@ impl TaskEngine {
             self.settle_merge_generation(t, stop_reason, summary.as_deref())
                 .await;
             self.pump_folder(t.folder_id).await;
-            // The folder's one merge slot just freed — the next reviewed task
-            // in the auto-merge train (if any) can land now.
-            self.spawn_auto_merge_sweep(t.folder_id);
+            // The folder's one merge slot just freed — the next merge the user
+            // queued (or the auto-merge train) can land now.
+            self.spawn_merge_pump(t.folder_id);
             return;
         }
 
@@ -1582,10 +1863,22 @@ impl TaskEngine {
 
     /// Track an outstanding blocking request and flip running ⇄ awaiting_input
     /// on the empty↔non-empty edges of the per-task set.
+    ///
+    /// `conn_id` may be the task's own connection or one of its delegation
+    /// children: a sub-agent parked on a permission blocks the run just as
+    /// surely as the top-level agent does, and is in fact harder to notice
+    /// (#447). A child's keys are prefixed with its connection id so
+    /// [`Self::forget_delegation_child`] can retract them as a group.
     async fn track_request(&self, conn_id: &str, key: String, outstanding: bool) {
-        let entry = { self.index.lock().await.get(conn_id).copied() };
-        let Some((task_id, run_seq)) = entry else {
+        let Some(((task_id, run_seq), is_own_connection)) =
+            self.task_for_connection(conn_id).await
+        else {
             return;
+        };
+        let key = if is_own_connection {
+            key
+        } else {
+            format!("{conn_id}#{key}")
         };
         let flip = {
             let mut awaiting = self.awaiting.lock().await;
@@ -1680,7 +1973,7 @@ impl TaskEngine {
         tokio::spawn(async move {
             engine.run_preflight(task_id, run_seq).await;
             if let Ok(task) = work_task_service::get_model(&engine.db.conn, task_id).await {
-                engine.auto_merge_sweep(task.folder_id).await;
+                engine.merge_pump(task.folder_id).await;
             }
         });
     }
@@ -1992,13 +2285,35 @@ impl TaskEngine {
     /// never from the agent's word. `auto` marks a dispatch the engine's
     /// auto-merge sweep issued rather than a click — same pipeline (including
     /// the folder's per-stage prompts), different actor on the timeline.
+    ///
+    /// A click that arrives while the folder's one merge slot is busy is
+    /// QUEUED rather than refused: the intent is parked on the row and the
+    /// merge pump dispatches it when the slot frees, so accepting a whole
+    /// review column is one pass of clicks instead of a wait per landing. An
+    /// unattended dispatch never queues — the sweep runs its own train.
+    ///
+    /// `claim` is set only when the pump is spending a merge the user queued
+    /// earlier; it binds every write here to that exact parked intent (see
+    /// [`QueuedMergeClaim`]). A click passes `None` and always wins.
     pub async fn merge_task(
         self: &Arc<Self>,
         task_id: i32,
         message: Option<String>,
         delete_worktree: bool,
         auto: bool,
-    ) -> Result<(), String> {
+    ) -> Result<MergeDispatch, String> {
+        self.merge_task_inner(task_id, message, delete_worktree, auto, None)
+            .await
+    }
+
+    async fn merge_task_inner(
+        self: &Arc<Self>,
+        task_id: i32,
+        message: Option<String>,
+        delete_worktree: bool,
+        auto: bool,
+        claim: Option<&QueuedMergeClaim>,
+    ) -> Result<MergeDispatch, String> {
         let task = work_task_service::get_model(&self.db.conn, task_id)
             .await
             .map_err(|e| e.to_string())?;
@@ -2031,7 +2346,44 @@ impl TaskEngine {
                 .into_iter()
                 .any(|t| t.folder_id == task.folder_id);
         if another_merging {
-            return Err("another task of this project is already merging — wait for it".to_string());
+            if auto {
+                // The sweep drains its column one landing at a time and
+                // re-sweeps on every settle; a parked unattended intent would
+                // outlive the setting that asked for it.
+                return Err(
+                    "another task of this project is already merging — wait for it".to_string()
+                );
+            }
+            // Take (or keep) a place in line. Reusing the existing `queued_at`
+            // is what makes re-queuing — the user reopening the dialog to
+            // change the message, or the pump re-parking a merge whose slot got
+            // taken first — an edit rather than a trip to the back of the queue.
+            let queued_at = claim
+                .map(|c| c.queued_at)
+                .or_else(|| {
+                    work_task_service::queued_merge(task.pending_merge.as_deref())
+                        .map(|q| q.queued_at)
+                })
+                .unwrap_or_else(chrono::Utc::now);
+            let intent = WorkTaskQueuedMerge {
+                message,
+                delete_worktree,
+                queued_at,
+            };
+            let queued = work_task_service::queue_merge(
+                &self.db.conn,
+                task_id,
+                &intent,
+                task.run_seq,
+                claim.map(|c| c.raw.as_str()),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            if !queued {
+                return Err(missed_queue_cas(claim));
+            }
+            self.emit_upsert(task_id);
+            return Ok(MergeDispatch::Queued);
         }
         let head = resolve_git_head(&root.path).await.map_err(|e| e.to_string())?;
         if head.branch.as_deref() != Some(base_branch.as_str()) {
@@ -2073,11 +2425,15 @@ impl TaskEngine {
             &state,
             task.run_seq,
             auto,
+            claim.map(|c| c.raw.as_str()),
         )
         .await
         {
             Err(e) => Err(e.to_string()),
-            Ok(None) => Err("task left review before the merge began".to_string()),
+            Ok(None) => Err(match claim {
+                Some(_) => missed_queue_cas(claim),
+                None => "task left review before the merge began".to_string(),
+            }),
             Ok(Some(_run_seq)) => {
                 self.emit_upsert(task_id);
                 // A merge generation never transitions out of `merging` here,
@@ -2098,7 +2454,7 @@ impl TaskEngine {
                     )
                     .await
                 {
-                    Ok(()) => Ok(()),
+                    Ok(()) => Ok(MergeDispatch::Dispatched),
                     Err(e) => {
                         self.back_to_review(task_id, format!("merge dispatch failed: {e}"), None)
                             .await;
@@ -2268,26 +2624,172 @@ impl TaskEngine {
         Ok((root, wt, base_branch, work_branch))
     }
 
+    // ── merge pump (the folder's one merge slot) ────────────────────────────
+
+    /// Advance the folder's merge slot: the user's merge queue first, then the
+    /// auto-merge train. Called wherever that slot can have freed (a settled
+    /// merge, crash recovery, a fresh review, the reconcile tick) — the two
+    /// sources of landings share one slot, so they share one pump.
+    async fn merge_pump(self: &Arc<Self>, folder_id: i32) {
+        if self.drain_merge_queue(folder_id).await {
+            return;
+        }
+        self.auto_merge_sweep(folder_id).await;
+    }
+
+    /// Dispatch the oldest merge the user queued on this folder. Returns
+    /// whether the merge slot is spoken for — the auto sweep must not chase a
+    /// user's landing into the same slot, and a queued column drains one
+    /// landing per pump (every settle pumps again).
+    ///
+    /// A queue that changed under the scan (the user withdrew or edited a merge
+    /// while this was working) is re-scanned rather than worked from the stale
+    /// picture: continuing would dispatch out of order, and reporting an empty
+    /// queue would hand the slot to the auto sweep — which has neither the
+    /// user's commit message nor their worktree choice. Bounded, because each
+    /// retry needs a fresh concurrent change to happen at all; still churning
+    /// after that leaves the slot to the next pump.
+    async fn drain_merge_queue(self: &Arc<Self>, folder_id: i32) -> bool {
+        for _ in 0..MERGE_QUEUE_DRAIN_ATTEMPTS {
+            match self.drain_merge_queue_once(folder_id).await {
+                DrainOutcome::Taken => return true,
+                DrainOutcome::Empty => return false,
+                DrainOutcome::Stale => continue,
+            }
+        }
+        true
+    }
+
+    /// One pass over the folder's queue. See [`Self::drain_merge_queue`].
+    ///
+    /// Refusals are handled like the sweep's: a task that left the queue on its
+    /// own moves on to the next one, and a real refusal (wrong base branch,
+    /// staged changes, a worktree that vanished) banners the row and drops its
+    /// queue entry, so a hopeless intent is attempted once rather than looped
+    /// over by the reconcile tick.
+    async fn drain_merge_queue_once(self: &Arc<Self>, folder_id: i32) -> DrainOutcome {
+        // Fast path only — merge_task re-checks under the folder lock.
+        let merging = work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Merging])
+            .await
+            .unwrap_or_default();
+        if merging.iter().any(|t| t.folder_id == folder_id) {
+            return DrainOutcome::Taken;
+        }
+        let mut queued: Vec<_> =
+            work_task_service::list_by_status(&self.db.conn, &[WorkTaskStatus::Review])
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|t| t.folder_id == folder_id)
+                .filter_map(|t| {
+                    // The raw column value travels with the parsed intent: it is
+                    // the token every write below CASes on (see
+                    // `QueuedMergeClaim`).
+                    let raw = t.pending_merge.clone()?;
+                    let intent = work_task_service::queued_merge(Some(raw.as_str()))?;
+                    let claim = QueuedMergeClaim {
+                        raw,
+                        queued_at: intent.queued_at,
+                    };
+                    Some((intent, claim, t))
+                })
+                .collect();
+        queued.sort_by_key(|(intent, _, task)| queue_order(intent, task));
+        for (intent, claim, task) in queued {
+            if self.live_worktree(&task).await.is_none() {
+                // Only the intent we scanned can be refused; anything else on
+                // the row now is a change we have to re-read.
+                if !self
+                    .refuse_queued_merge(&task, &claim, "the task worktree no longer exists on disk")
+                    .await
+                {
+                    return DrainOutcome::Stale;
+                }
+                continue;
+            }
+            match self
+                .merge_task_inner(
+                    task.id,
+                    intent.message.clone(),
+                    intent.delete_worktree,
+                    false,
+                    Some(&claim),
+                )
+                .await
+            {
+                // Queued again: the slot was taken between the scan and the
+                // folder lock. The row keeps its place in line untouched.
+                Ok(_) => return DrainOutcome::Taken,
+                // The user withdrew or edited THIS merge while we worked on it:
+                // the whole snapshot is stale (their edit may now sort first,
+                // and it must not be left to the auto sweep's defaults).
+                Err(e) if is_queued_merge_superseded(&e) => return DrainOutcome::Stale,
+                // The task left review on its own — it is out of the queue for
+                // good, so the rest of the snapshot still holds.
+                Err(e) if is_benign_merge_race(&e) => continue,
+                Err(e) => {
+                    tracing::warn!("[work_task] queued merge of task {} refused: {e}", task.id);
+                    if !self.refuse_queued_merge(&task, &claim, &e).await {
+                        return DrainOutcome::Stale;
+                    }
+                    return DrainOutcome::Taken;
+                }
+            }
+        }
+        DrainOutcome::Empty
+    }
+
+    /// Drop a queued merge that cannot run and leave the reason on the card —
+    /// the queue must not hold an intent the user has no way to see failing.
+    ///
+    /// Both writes are CAS'd on the refused intent: while the dispatch was
+    /// failing the user may have withdrawn it or queued different options, and
+    /// neither a silent delete of that newer request nor a banner about an
+    /// older one would be true.
+    /// `false` = the row moved on, so nothing was written: its current state is
+    /// not this refusal's to judge, and the caller must re-read the queue.
+    async fn refuse_queued_merge(
+        &self,
+        task: &crate::db::entities::work_task::Model,
+        claim: &QueuedMergeClaim,
+        error: &str,
+    ) -> bool {
+        let dropped = work_task_service::clear_queued_merge(&self.db.conn, task.id, &claim.raw)
+            .await
+            .unwrap_or(false);
+        if !dropped {
+            return false;
+        }
+        let _ = work_task_service::set_review_error(
+            &self.db.conn,
+            task.id,
+            task.run_seq,
+            &format!("queued merge failed: {error}"),
+        )
+        .await;
+        self.emit_upsert(task.id);
+        true
+    }
+
     // ── auto-merge (unattended landing) ─────────────────────────────────────
 
-    /// Fire-and-forget [`Self::auto_merge_sweep`] — a dispatch holds the
-    /// folder's git lock for the whole launch, which must not stall the
-    /// engine's event loop.
-    fn spawn_auto_merge_sweep(self: &Arc<Self>, folder_id: i32) {
+    /// Fire-and-forget [`Self::merge_pump`] — a dispatch holds the folder's git
+    /// lock for the whole launch, which must not stall the engine's event loop.
+    fn spawn_merge_pump(self: &Arc<Self>, folder_id: i32) {
         let engine = self.clone();
         tokio::spawn(async move {
-            engine.auto_merge_sweep(folder_id).await;
+            engine.merge_pump(folder_id).await;
         });
     }
 
-    /// Sweep one folder — or, with `None`, every folder that currently holds a
+    /// Pump one folder — or, with `None`, every folder that currently holds a
     /// reviewed task. `None` serves the reconcile tick and a change of the
     /// global settings row, which can switch auto-merge on for any folder that
-    /// follows it. Each folder's sweep runs spawned, so one folder's dispatch
+    /// follows it. Each folder's pump runs spawned, so one folder's dispatch
     /// cannot delay another's.
-    pub async fn sweep_auto_merge_backlog(self: &Arc<Self>, folder_id: Option<i32>) {
+    pub async fn sweep_merge_backlog(self: &Arc<Self>, folder_id: Option<i32>) {
         match folder_id {
-            Some(folder_id) => self.spawn_auto_merge_sweep(folder_id),
+            Some(folder_id) => self.spawn_merge_pump(folder_id),
             None => {
                 let review = work_task_service::list_by_status(
                     &self.db.conn,
@@ -2298,7 +2800,7 @@ impl TaskEngine {
                 let mut swept: HashSet<i32> = HashSet::new();
                 for task in review {
                     if swept.insert(task.folder_id) {
-                        self.spawn_auto_merge_sweep(task.folder_id);
+                        self.spawn_merge_pump(task.folder_id);
                     }
                 }
             }
@@ -2351,7 +2853,9 @@ impl TaskEngine {
                 .merge_task(task.id, None, settings.delete_worktree_default, true)
                 .await
             {
-                Ok(()) => {}
+                // An unattended dispatch never queues (see `merge_task`), so
+                // this is always the live generation.
+                Ok(_) => {}
                 Err(e) if is_benign_merge_race(&e) => {}
                 Err(e) => {
                     tracing::warn!(
@@ -2589,6 +3093,7 @@ impl TaskEngine {
             // status the TurnComplete was merely dropped — settle from it.
             self.index.lock().await.remove(&conn_id);
             self.awaiting.lock().await.remove(&task.id);
+            self.forget_delegation_children_of(&conn_id).await;
             let conv_status = match task.conversation_id {
                 Some(cid) => self.conversation_status(cid).await,
                 None => None,
@@ -2676,8 +3181,8 @@ impl TaskEngine {
                 engine.recover_merging(task.id).await;
                 engine.pump_folder(task.folder_id).await;
                 // Recovery freed the folder's merge slot (landed or bounced) —
-                // resume the auto-merge train where the crash cut it.
-                engine.auto_merge_sweep(task.folder_id).await;
+                // resume the queue / auto-merge train where the crash cut it.
+                engine.merge_pump(task.folder_id).await;
             });
         }
 
@@ -2690,11 +3195,13 @@ impl TaskEngine {
             self.pump_folder(folder_id).await;
         }
 
-        // Review backlog for auto-merge folders: a dispatch lost between the
-        // settle and the merge (crash window), and tasks already sitting in
-        // review when the setting was switched on. The sweep re-checks the
-        // setting per folder, so this is a cheap scan for folders without it.
-        self.sweep_auto_merge_backlog(None).await;
+        // Review backlog: merges the user queued whose pump never ran (queued
+        // before a restart, or a settle lost in the crash window), plus the
+        // auto-merge folders' own backlog (a dispatch lost between the settle
+        // and the merge, and tasks already sitting in review when the setting
+        // was switched on). The pump re-checks per folder, so this is a cheap
+        // scan for folders with neither.
+        self.sweep_merge_backlog(None).await;
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -2876,6 +3383,18 @@ fn auto_merge_candidate(
     if task.last_error.is_some() {
         return false;
     }
+    // A merge the user queued is theirs to land, with the commit message and
+    // the worktree choice THEY picked. The unattended dispatch has neither, so
+    // the queue's own drain owns this row (and clears the intent in the same
+    // CAS that starts the merge, which makes the row a normal candidate again).
+    //
+    // Any value in the column counts, parseable or not: the authoritative gate
+    // is `begin_merge`'s `PendingMerge IS NULL` filter, SQL cannot parse the
+    // JSON, and a looser predicate here would just dispatch into a CAS that
+    // misses every time — a sweep spinning on a row it can never land.
+    if task.pending_merge.is_some() {
+        return false;
+    }
     if task.files_changed == Some(0) {
         return false;
     }
@@ -2904,6 +3423,27 @@ fn preflight_configured(settings: &WorkTaskFolderSettings) -> bool {
         || settings.preflight_command_id.is_some()
 }
 
+/// Why a queue-bound CAS missed. With a claim it can be either "the row left
+/// review" or "this queued merge is no longer the one on the row" (withdrawn,
+/// or edited into a different one) — the pump treats both the same way, and
+/// both are races it should lose quietly rather than banner.
+fn missed_queue_cas(claim: Option<&QueuedMergeClaim>) -> String {
+    match claim {
+        Some(_) => "the queued merge was changed or withdrawn before it could start".to_string(),
+        None => "task left review before the merge was queued".to_string(),
+    }
+}
+
+/// The order the folder's merge queue drains in: oldest request first, task id
+/// breaking a tie. Mirrored client-side by `mergeQueueRanks`, so the place in
+/// line a card shows is the order the pump actually dispatches in.
+fn queue_order(
+    intent: &WorkTaskQueuedMerge,
+    task: &crate::db::entities::work_task::Model,
+) -> (chrono::DateTime<chrono::Utc>, i32) {
+    (intent.queued_at, task.id)
+}
+
 /// Merge-dispatch refusals that mean "someone else is (or just was) handling
 /// this" rather than "this merge cannot work": the losing side of a race with
 /// a click, another sweep or a user action. Matched on `merge_task`'s own
@@ -2913,6 +3453,14 @@ fn is_benign_merge_race(error: &str) -> bool {
     error.contains("not in review")
         || error.contains("left review")
         || error.contains("already merging")
+        || is_queued_merge_superseded(error)
+}
+
+/// The one benign race the drain cannot simply step over: the user withdrew or
+/// edited the very merge it was dispatching (see [`missed_queue_cas`]). Their
+/// word replaces the whole snapshot — a re-read, not a skip.
+fn is_queued_merge_superseded(error: &str) -> bool {
+    error.contains("changed or withdrawn")
 }
 
 /// Pick the launch mode for a pump-driven launch from the task's history: a
@@ -3674,6 +4222,27 @@ mod tests {
         assert!(!auto_merge_candidate(&task, &settings));
         task.last_error = None;
 
+        // A merge the user queued belongs to the queue's own drain, with THEIR
+        // commit message and worktree choice — the unattended dispatch has
+        // neither, so it must not take this row (a drain that skipped it after
+        // losing a race would otherwise hand it straight to the sweep).
+        task.pending_merge = Some(
+            serde_json::to_string(&WorkTaskQueuedMerge {
+                message: Some("feat: land it".into()),
+                delete_worktree: false,
+                queued_at: chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+            })
+            .unwrap(),
+        );
+        assert!(!auto_merge_candidate(&task, &settings));
+        // Deliberately the same predicate `begin_merge`'s auto CAS uses —
+        // "anything in the column" rather than "a parseable intent". A gate
+        // looser than the CAS that finally decides would dispatch into a miss
+        // on every sweep; a manual merge clears the column either way.
+        task.pending_merge = Some(r#"{"legacy":true}"#.into());
+        assert!(!auto_merge_candidate(&task, &settings));
+        task.pending_merge = None;
+
         // Only review is mergeable.
         task.status = WorkTaskStatus::Running;
         assert!(!auto_merge_candidate(&task, &settings));
@@ -3713,6 +4282,23 @@ mod tests {
         assert!(is_benign_merge_race(
             "task left review before the merge began"
         ));
+        // The queue's own CAS miss: the row moved on (a follow-up, a stop)
+        // while its queued dispatch waited for the folder lock.
+        assert!(is_benign_merge_race(
+            "task left review before the merge was queued"
+        ));
+        // A withdrawal / edit under the pump is benign too, but it is the one
+        // the drain must RE-READ for instead of stepping over: the user's new
+        // word may sort first, and leaving the slot to the auto sweep would
+        // land it with the unattended defaults.
+        let superseded = missed_queue_cas(Some(&QueuedMergeClaim {
+            raw: "{}".to_string(),
+            queued_at: chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        }));
+        assert!(is_benign_merge_race(&superseded));
+        assert!(is_queued_merge_superseded(&superseded));
+        assert!(!is_queued_merge_superseded("task is not in review"));
+        assert!(!is_queued_merge_superseded(&missed_queue_cas(None)));
         assert!(is_benign_merge_race(
             "another task of this project is already merging — wait for it"
         ));
@@ -3722,6 +4308,35 @@ mod tests {
         assert!(!is_benign_merge_race(
             "the task worktree no longer exists on disk"
         ));
+    }
+
+    /// The merge queue is first-asked-first-served, with the task id breaking a
+    /// tie — the same rule `mergeQueueRanks` draws on the cards, so the "第 2
+    /// 位" a user reads is the order they actually land in.
+    #[test]
+    fn the_merge_queue_drains_oldest_request_first() {
+        let intent = |secs: i64| WorkTaskQueuedMerge {
+            message: None,
+            delete_worktree: true,
+            queued_at: chrono::DateTime::from_timestamp(1_800_000_000 + secs, 0)
+                .expect("valid instant"),
+        };
+        let row = |id: i32| crate::db::entities::work_task::Model {
+            id,
+            ..task_row()
+        };
+
+        let mut queue = [
+            (intent(2), row(1)),
+            (intent(1), row(3)),
+            // Same instant as task 3 — id decides, exactly as the client does.
+            (intent(1), row(2)),
+        ];
+        queue.sort_by_key(|(intent, task)| queue_order(intent, task));
+        assert_eq!(
+            queue.iter().map(|(_, t)| t.id).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
     }
 
     /// Minimal task row for prompt composition (nothing here touches the DB).
@@ -4584,5 +5199,307 @@ mod tests {
             .join(format!("{}.lock", crate::db::database_file_name()));
         assert!(!automation_lock.exists());
         drop(guard);
+    }
+
+    // -- blocking prompts raised by a delegation sub-agent (#447) -----------
+
+    const PARENT_CONN: &str = "conn-task";
+    const CHILD_CONN: &str = "conn-child";
+
+    /// A task driven to `running` on `PARENT_CONN`, with the engine's live
+    /// index seeded as the launch path would. Returns `(engine, task_id)`.
+    async fn running_task() -> (Arc<TaskEngine>, i32) {
+        use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
+
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/task-deleg").await;
+        let conv =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .expect("conversation");
+        let task = work_task_service::create(
+            &db.conn,
+            crate::models::WorkTaskDraft {
+                folder_id,
+                title: "fix login".to_string(),
+                config: serde_json::json!({
+                    "display_text": "fix login",
+                    "prompt_blocks": [{ "type": "text", "text": "fix login" }],
+                }),
+            },
+        )
+        .await
+        .expect("task");
+        // Walk the real transition chain rather than writing the row directly,
+        // so the run_seq the engine flips against is the one the CAS minted.
+        let run_seq = work_task_service::claim_for_run(
+            &db.conn,
+            task.id,
+            WorkTaskStatus::Todo,
+            "test",
+        )
+        .await
+        .expect("claim")
+        .expect("claimed");
+        assert!(work_task_service::begin_setup(&db.conn, task.id, run_seq)
+            .await
+            .expect("begin_setup"));
+        assert!(
+            work_task_service::mark_running(&db.conn, task.id, run_seq, conv.id, PARENT_CONN)
+                .await
+                .expect("mark_running")
+        );
+
+        let engine = test_engine(db);
+        engine
+            .index
+            .lock()
+            .await
+            .insert(PARENT_CONN.into(), (task.id, run_seq));
+        (engine, task.id)
+    }
+
+    async fn status_of(engine: &TaskEngine, task_id: i32) -> WorkTaskStatus {
+        work_task_service::get_model(&engine.db.conn, task_id)
+            .await
+            .expect("task row")
+            .status
+    }
+
+    fn env(conn_id: &str, payload: AcpEvent) -> EventEnvelope {
+        EventEnvelope {
+            seq: 0,
+            connection_id: conn_id.to_string(),
+            payload,
+        }
+    }
+
+    fn delegation_started(parent: &str, child: &str) -> EventEnvelope {
+        env(
+            parent,
+            AcpEvent::DelegationStarted {
+                parent_connection_id: parent.into(),
+                parent_tool_use_id: "tu-1".into(),
+                child_connection_id: child.into(),
+                child_conversation_id: 1,
+                agent_type: AgentType::Codex,
+                task_preview: "run the tests".into(),
+                task_id: "task-1".into(),
+            },
+        )
+    }
+
+    fn delegation_completed(parent: &str, child: &str) -> EventEnvelope {
+        env(
+            parent,
+            AcpEvent::DelegationCompleted {
+                parent_connection_id: parent.into(),
+                parent_tool_use_id: "tu-1".into(),
+                child_connection_id: child.into(),
+                child_conversation_id: 1,
+                agent_type: AgentType::Codex,
+                result: crate::acp::types::DelegationResultSummary::Ok {
+                    duration_ms: 0,
+                    text_preview: None,
+                },
+            },
+        )
+    }
+
+    fn permission_request(conn: &str, request_id: &str) -> EventEnvelope {
+        env(
+            conn,
+            AcpEvent::PermissionRequest {
+                request_id: request_id.into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+                queued: 0,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn a_delegated_child_permission_flips_the_task_to_awaiting_input() {
+        // #447: the prompt arrives on the CHILD's connection, which is not in
+        // `index`. Before the parent lookup existed it was dropped outright and
+        // the board kept saying "running" for a run that was parked on the user.
+        let (engine, task_id) = running_task().await;
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
+
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::AwaitingInput);
+
+        engine
+            .on_event(&env(
+                CHILD_CONN,
+                AcpEvent::PermissionResolved {
+                    request_id: "r1".into(),
+                },
+            ))
+            .await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_child_torn_down_mid_permission_does_not_wedge_awaiting_input() {
+        // The failure this guards: a sub-agent cancelled/crashed while its
+        // permission was still pending leaves a key nothing can ever resolve,
+        // pinning the row at awaiting_input for the rest of the run.
+        let (engine, task_id) = running_task().await;
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::AwaitingInput);
+
+        engine.on_event(&delegation_completed(PARENT_CONN, CHILD_CONN)).await;
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::Running,
+            "an unanswerable request must not outlive its sub-agent"
+        );
+        assert!(engine.delegation_parents.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_child_permission_does_not_clear_the_parents_own_block() {
+        // Both connections' keys live in one set, so they must be independently
+        // namespaced — otherwise resolving one would flip the row back while
+        // the other is still waiting.
+        let (engine, task_id) = running_task().await;
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine.on_event(&permission_request(PARENT_CONN, "r1")).await;
+        // Same request_id on the child: a plausible collision, since the two
+        // agents mint ids independently.
+        engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
+
+        engine
+            .on_event(&env(
+                CHILD_CONN,
+                AcpEvent::PermissionResolved {
+                    request_id: "r1".into(),
+                },
+            ))
+            .await;
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput,
+            "the parent's own permission is still outstanding"
+        );
+
+        engine
+            .on_event(&env(
+                PARENT_CONN,
+                AcpEvent::PermissionResolved {
+                    request_id: "r1".into(),
+                },
+            ))
+            .await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_permission_racing_ahead_of_delegation_started_is_recovered() {
+        // The broker starts the child's turn BEFORE announcing the delegation
+        // (`send_prompt_linked_for_delegation` precedes `emit_started_if_real`),
+        // so a child that blocks immediately raises its prompt while the engine
+        // still has no mapping for it — and drops it. Without the backfill the
+        // board sits at `running` for a run already parked on the user, which is
+        // the very bug #447 is about.
+        use crate::acp::session_state::PendingPermissionState;
+        use crate::models::agent::AgentType;
+        use crate::web::event_bridge::EventEmitter;
+
+        let (engine, task_id) = running_task().await;
+        engine
+            .manager
+            .insert_test_connection(CHILD_CONN, AgentType::Codex, None, EventEmitter::Noop)
+            .await;
+
+        // Permission arrives first and is dropped (no mapping yet).
+        engine.on_event(&permission_request(CHILD_CONN, "r1")).await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
+
+        // The child's live state carries it regardless — that is what the
+        // backfill reads when the announcement finally lands.
+        {
+            let state = engine.manager.get_state(CHILD_CONN).await.expect("state");
+            let mut s = state.write().await;
+            s.pending_permission = Some(PendingPermissionState {
+                request_id: "r1".into(),
+                tool_call_id: "tc-1".into(),
+                tool_call: serde_json::json!({}),
+                options: vec![],
+                created_at: chrono::Utc::now(),
+                queued: 0,
+            });
+        }
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput
+        );
+
+        // The recovered key matches what a normal resolve retracts — otherwise
+        // the row would wedge at awaiting_input.
+        engine
+            .on_event(&env(
+                CHILD_CONN,
+                AcpEvent::PermissionResolved {
+                    request_id: "r1".into(),
+                },
+            ))
+            .await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_nested_delegation_child_still_maps_to_the_run() {
+        // A sub-agent that delegates further blocks the task just as much, so
+        // the grandchild has to resolve through the chain rather than requiring
+        // its parent to be the run's own connection.
+        let (engine, task_id) = running_task().await;
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine.on_event(&delegation_started(CHILD_CONN, "conn-grandchild")).await;
+
+        engine
+            .on_event(&permission_request("conn-grandchild", "r1"))
+            .await;
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput
+        );
+    }
+
+    #[tokio::test]
+    async fn completing_a_child_retracts_its_whole_subtree() {
+        // The middle child finishing takes its own delegations down with it, so
+        // a grandchild's unanswered prompt must be retracted too — otherwise
+        // the row wedges at awaiting_input on a key nothing can resolve, and
+        // the grandchild's mapping is stranded in the map forever.
+        let (engine, task_id) = running_task().await;
+        engine.on_event(&delegation_started(PARENT_CONN, CHILD_CONN)).await;
+        engine.on_event(&delegation_started(CHILD_CONN, "conn-grandchild")).await;
+        engine
+            .on_event(&permission_request("conn-grandchild", "r1"))
+            .await;
+        assert_eq!(
+            status_of(&engine, task_id).await,
+            WorkTaskStatus::AwaitingInput
+        );
+
+        engine.on_event(&delegation_completed(PARENT_CONN, CHILD_CONN)).await;
+        assert_eq!(status_of(&engine, task_id).await, WorkTaskStatus::Running);
+        assert!(
+            engine.delegation_parents.lock().await.is_empty(),
+            "the grandchild's mapping must not be stranded"
+        );
+    }
+
+    #[tokio::test]
+    async fn delegations_from_a_non_task_connection_are_not_tracked() {
+        // A delegation from an ordinary chat tab has no board row to flip; the
+        // map must not grow for it.
+        let (engine, _task_id) = running_task().await;
+        engine.on_event(&delegation_started("conn-chat", "conn-other-child")).await;
+        assert!(engine.delegation_parents.lock().await.is_empty());
     }
 }

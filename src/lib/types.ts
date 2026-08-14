@@ -1377,6 +1377,11 @@ export interface WorkTask {
    *  directory is gone from disk. Merge cannot run; review offers "complete"
    *  instead. Absent = false (stamped by the list/get commands). */
   worktree_missing?: boolean
+  /** The agent that runs — or ran — this task, resolved by the list/get
+   *  commands the way the engine resolves it at launch (the conversation that
+   *  actually ran, else the task's override, else the folder's task settings,
+   *  else the folder default). Absent/null = nothing configured anywhere. */
+  agent_type?: AgentType | null
   conversation_id: number | null
   /** Live ACP connection of the current generation; stale after a settle —
    *  gate on status before attaching. */
@@ -1395,6 +1400,11 @@ export interface WorkTask {
   /** Acceptance red/green light of the current review, if a preflight
    *  command ran. */
   preflight: WorkTaskPreflight | null
+  /** The merge this reviewed task is waiting to run — the user clicked merge
+   *  while another task of the same project was landing. Absent/null = not
+   *  queued; the rank comes from ordering the folder's queued tasks by
+   *  `queued_at`. */
+  merge_queued?: WorkTaskQueuedMerge | null
   archived_at: string | null
   /** Planned start of a to-do task (ISO); null = no plan. Consumed the moment
    *  the task is claimed, by the scheduler or by hand. */
@@ -1406,6 +1416,15 @@ export interface WorkTask {
   started_at: string | null
   settled_at: string | null
   finished_at: string | null
+}
+
+/** A merge parked on a reviewed task while its project lands another one. */
+export interface WorkTaskQueuedMerge {
+  /** The commit message the user typed; null = the agent writes it. */
+  message: string | null
+  delete_worktree: boolean
+  /** Place in line (ISO instant) — the order the engine's pump dispatches in. */
+  queued_at: string
 }
 
 /** Result of the folder's preflight command for one review generation. */
@@ -1589,7 +1608,13 @@ export interface TokenUsageReport {
 
 export interface TokenUsageFolderFacet {
   folder_id: number
+  /** Compact display name: the alias when set, else the folder name. The filter
+   *  list renders `alias [ name ]` from `name` + `alias` instead. */
   label: string
+  /** The folder's real (on-disk) directory name, alias or not. */
+  name: string
+  /** User-set display alias, or null when unset. */
+  alias: string | null
   path: string
   parent_id: number | null
 }
@@ -1748,10 +1773,26 @@ export type AcpEvent =
       request_id: string
       tool_call: unknown
       options: PermissionOptionInfo[]
+      /**
+       * How many FURTHER permission requests are queued behind this card. Only
+       * one card shows at a time, so this is what tells the user "the agent is
+       * waiting on me three more times" instead of leaving the rest looking
+       * like a hang. Optional: absent on pre-#442 persisted envelopes.
+       */
+      queued?: number
     }
   | {
       type: "permission_resolved"
       request_id: string
+    }
+  | {
+      /**
+       * Depth-only update: a new request queued up behind the visible card,
+       * which publishes no `permission_request` of its own. Without this the
+       * card's `queued` count would go stale.
+       */
+      type: "permission_queue_depth"
+      depth: number
     }
   | {
       type: "turn_complete"
@@ -1785,6 +1826,18 @@ export type AcpEvent =
   | {
       type: "session_config_options"
       config_options: SessionConfigOptionInfo[]
+    }
+  | {
+      // The agent settled a `session/set_config_option` somewhere other than
+      // where the pick asked. Correlated backend-side (see the Rust
+      // `ConfigOptionRejected`) because only that side can tell a request's
+      // answer from an unsolicited option update. `requested` / `actual` are
+      // display labels, already resolved against the option's value list.
+      type: "config_option_rejected"
+      config_id: string
+      option_name: string
+      requested: string
+      actual: string
     }
   | {
       type: "selectors_ready"
@@ -2099,6 +2152,8 @@ export interface PendingPermissionState {
   tool_call: unknown
   options: PermissionOptionInfo[]
   created_at: string
+  /** Requests queued behind this card; kept live by `permission_queue_depth`. */
+  queued?: number
 }
 
 /**
@@ -3055,7 +3110,19 @@ export interface GitStashEntry {
 
 export type FileTreeNode =
   | { kind: "file"; name: string; path: string }
-  | { kind: "dir"; name: string; path: string; children: FileTreeNode[] }
+  | {
+      kind: "dir"
+      name: string
+      path: string
+      children: FileTreeNode[]
+      /**
+       * The directory is a symlink on disk. Omitted (rather than `false`) for
+       * ordinary directories to keep the broadcast tree snapshot small. The
+       * backend does not descend through links, so `children` arrives empty
+       * and the panel lazy-loads it on expand.
+       */
+      symlink?: boolean
+    }
 
 /** Flat gitignore-aware workspace entry returned by `list_workspace_files`. */
 export interface WorkspaceFileEntry {

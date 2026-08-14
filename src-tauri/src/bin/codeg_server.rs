@@ -334,6 +334,14 @@ async fn async_main() -> ExitCode {
         &chat_authoring_config,
     )
     .await;
+    // Keep ACP model terminal fallbacks aligned with the same default-shell
+    // preference used by the built-in terminal before accepting connections.
+    let terminal_shell_config = state.connection_manager.terminal_shell_config();
+    codeg_lib::commands::system_settings::apply_persisted_terminal_shell_config(
+        &state.db.conn,
+        &terminal_shell_config,
+    )
+    .await;
 
     // Spawn the delegation listener so companion processes can round-trip
     // through the broker. Path is PID-scoped, so the listener owns it for
@@ -496,6 +504,24 @@ async fn async_main() -> ExitCode {
         state.data_dir.clone(),
     ) {
         tokio::spawn(codeg_lib::work_task::run_task_engine(engine));
+    }
+
+    // Label worktree folders registered before aliases were seeded at creation
+    // with the branch they have checked out (mirrors lib.rs setup). Background;
+    // changed folders are broadcast, so a browser that already fetched its
+    // folder list still picks them up.
+    {
+        let db = codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        };
+        let emitter = state.emitter.clone();
+        tokio::spawn(async move {
+            let n =
+                codeg_lib::commands::folders::backfill_worktree_folder_aliases(&emitter, &db).await;
+            if n > 0 {
+                tracing::info!("[folders] labeled {n} worktree folder(s) by branch");
+            }
+        });
     }
 
     // Sweep abandoned upload staging files from any prior run before
