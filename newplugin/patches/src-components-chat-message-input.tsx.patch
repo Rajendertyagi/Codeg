@@ -1,5 +1,5 @@
 diff --git a/src/components/chat/message-input.tsx b/src/components/chat/message-input.tsx
-index c3b9ab27..f437a3dd 100644
+index c3b9ab27..9d12b1c6 100644
 --- a/src/components/chat/message-input.tsx
 +++ b/src/components/chat/message-input.tsx
 @@ -15,6 +15,8 @@ import {
@@ -40,7 +40,7 @@ index c3b9ab27..f437a3dd 100644
  }: MessageInputProps) {
    const t = useTranslations("Folder.chat.messageInput")
    const tQueue = useTranslations("Folder.chat.messageQueue")
-@@ -308,6 +318,73 @@ export function MessageInput({
+@@ -308,6 +318,67 @@ export function MessageInput({
    // upload / attachment toasts — read as a single coherent group when
    // scanning the file. Same namespace, no extra runtime cost.
    const tAttach = useTranslations("Folder.chat.messageInput")
@@ -64,10 +64,7 @@ index c3b9ab27..f437a3dd 100644
 +    let cancelled = false
 +    getConversationAutoApprove(conversationId)
 +      .then((result) => {
-+        console.log(
-+          "[AutoApprove] Current conversation state is:",
-+          result
-+        )
++        console.log("[AutoApprove] Current conversation state is:", result)
 +        if (!cancelled) {
 +          setAutoApprove(result.enabled)
 +          setAutoApproveOverride(result.overrideState)
@@ -84,10 +81,7 @@ index c3b9ab27..f437a3dd 100644
 +    if (conversationId == null) return
 +    try {
 +      const result = await toggleConversationAutoApprove(conversationId)
-+      console.log(
-+        "[AutoApprove] Toggled conversation state to:",
-+        result
-+      )
++      console.log("[AutoApprove] Toggled conversation state to:", result)
 +      setAutoApprove(result.enabled)
 +      setAutoApproveOverride(result.overrideState)
 +    } catch (err) {
@@ -114,7 +108,7 @@ index c3b9ab27..f437a3dd 100644
    // The `$` prefix autocomplete is Codex-only: Codex advertises very few
    // native slash commands, so we augment the dropdown with the agent's
    // skills read from disk. Other agents already surface their full command
-@@ -1883,6 +1960,25 @@ export function MessageInput({
+@@ -1883,6 +1954,25 @@ export function MessageInput({
                        </Popover>
                      </div>
                    )}
