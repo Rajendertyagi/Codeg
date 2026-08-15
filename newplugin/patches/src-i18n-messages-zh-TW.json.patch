@@ -1,17 +1,18 @@
 diff --git a/src/i18n/messages/zh-TW.json b/src/i18n/messages/zh-TW.json
-index 153eb74d..d2ab209b 100644
+index bb959ae5..ac00dbe2 100644
 --- a/src/i18n/messages/zh-TW.json
 +++ b/src/i18n/messages/zh-TW.json
-@@ -2496,6 +2496,8 @@
+@@ -2577,6 +2577,9 @@
          "noModels": "找不到模型",
          "cancel": "取消",
          "send": "傳送",
 +        "autoApproveOn": "自動接受已開啟：工具權限請求將自動批准",
 +        "autoApproveOff": "自動接受已關閉：工具權限請求需要你批准",
++        "autoApproveInherit": "自動接受：繼承全域設定",
          "forkAndSend": "分叉發送",
          "queueMessage": "加入佇列",
          "steerIntoTurn": "插入目前回合",
-@@ -2677,6 +2679,9 @@
+@@ -2772,6 +2775,9 @@
          "plan": "計畫",
          "allowedActions": "允許的操作",
          "targetMode": "目標模式：{mode}",

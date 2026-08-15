@@ -1,5 +1,5 @@
 diff --git a/src/components/chat/message-input.tsx b/src/components/chat/message-input.tsx
-index c3b9ab2..3e63f0e 100644
+index c3b9ab27..f437a3dd 100644
 --- a/src/components/chat/message-input.tsx
 +++ b/src/components/chat/message-input.tsx
 @@ -15,6 +15,8 @@ import {
@@ -16,27 +16,62 @@ index c3b9ab2..3e63f0e 100644
  import { ServerFileBrowserDialog } from "@/components/shared/server-file-browser-dialog"
  import { toast } from "sonner"
 +import {
-+  getGlobalAutoApprove,
-+  toggleGlobalAutoApprove,
++  getConversationAutoApprove,
++  toggleConversationAutoApprove,
 +} from "@/lib/api"
  import type {
    AgentSkillItem,
    AgentType,
-@@ -308,6 +314,40 @@ export function MessageInput({
+@@ -201,6 +207,9 @@ interface MessageInputProps {
+   feedbackAddDisabled?: boolean
+   injectContent?: ComposerInjectContent | null
+   onInjectConsumed?: () => void
++  /** Persisted conversation id for the per-conversation auto-accept shield.
++   *  `null` (draft / no persisted conversation) disables the shield. */
++  conversationId?: number | null
+ }
+ 
+ // Non-image files attach as inline file badges in the editor (like `@`-file
+@@ -301,6 +310,7 @@ export function MessageInput({
+   feedbackAddDisabled,
+   injectContent,
+   onInjectConsumed,
++  conversationId = null,
+ }: MessageInputProps) {
+   const t = useTranslations("Folder.chat.messageInput")
+   const tQueue = useTranslations("Folder.chat.messageQueue")
+@@ -308,6 +318,73 @@ export function MessageInput({
    // upload / attachment toasts — read as a single coherent group when
    // scanning the file. Same namespace, no extra runtime cost.
    const tAttach = useTranslations("Folder.chat.messageInput")
-+  // Auto-accept shield (custom hooks): when on, the backend answers tool
-+  // permission requests automatically instead of parking a card. The toggle is
-+  // GLOBAL (app-wide, persisted in `app_metadata`), so every composer shows the
-+  // same shared state ΓÇö no conversation context is consulted.
++  // Auto-accept shield (custom hooks): per-conversation. When on, the backend
++  // answers tool permission requests for THIS conversation automatically
++  // instead of parking a card. The backend tri-state is `null` = inherit
++  // global / `true` = explicit ON / `false` = explicit OFF; the shield
++  // displays the EFFECTIVE state (`enabled`) but also tracks the raw override
++  // so the tooltip can distinguish inherited from explicit OFF. No persisted
++  // conversation (draft, `conversationId == null`) disables the shield.
 +  const [autoApprove, setAutoApprove] = useState(false)
++  const [autoApproveOverride, setAutoApproveOverride] = useState<
++    boolean | null
++  >(null)
 +  useEffect(() => {
++    if (conversationId == null) {
++      setAutoApprove(false)
++      setAutoApproveOverride(null)
++      return
++    }
 +    let cancelled = false
-+    getGlobalAutoApprove()
++    getConversationAutoApprove(conversationId)
 +      .then((result) => {
-+        console.log("[AutoApprove] Current global state is:", result.enabled)
-+        if (!cancelled) setAutoApprove(result.enabled)
++        console.log(
++          "[AutoApprove] Current conversation state is:",
++          result
++        )
++        if (!cancelled) {
++          setAutoApprove(result.enabled)
++          setAutoApproveOverride(result.overrideState)
++        }
 +      })
 +      .catch((err) => {
 +        console.error("[MessageInput] load auto-approve failed:", err)
@@ -44,49 +79,64 @@ index c3b9ab2..3e63f0e 100644
 +    return () => {
 +      cancelled = true
 +    }
-+  }, [])
++  }, [conversationId])
 +  const handleToggleAutoApprove = useCallback(async () => {
++    if (conversationId == null) return
 +    try {
-+      const result = await toggleGlobalAutoApprove()
-+      console.log("[AutoApprove] Toggled global state to:", result.enabled)
++      const result = await toggleConversationAutoApprove(conversationId)
++      console.log(
++        "[AutoApprove] Toggled conversation state to:",
++        result
++      )
 +      setAutoApprove(result.enabled)
++      setAutoApproveOverride(result.overrideState)
 +    } catch (err) {
 +      console.error("[MessageInput] toggle auto-approve failed:", err)
 +    }
-+  }, [])
++  }, [conversationId])
++  const autoApproveInheritLabel = t.has("autoApproveInherit")
++    ? t("autoApproveInherit")
++    : "Auto-accept: inherits global setting"
 +  const autoApproveOnLabel = t.has("autoApproveOn")
 +    ? t("autoApproveOn")
-+    : "Auto-accept: on"
++    : "Auto-accept: on for this conversation"
 +  const autoApproveOffLabel = t.has("autoApproveOff")
 +    ? t("autoApproveOff")
-+    : "Auto-accept: off"
++    : "Auto-accept: off for this conversation (overrides global)"
++  // Tooltip reflects the tri-state override (explicit OFF vs inherited OFF),
++  // not just the effective boolean — so an OFF→inherit change stays visible.
++  const autoApproveLabel =
++    autoApproveOverride == null
++      ? autoApproveInheritLabel
++      : autoApproveOverride
++        ? autoApproveOnLabel
++        : autoApproveOffLabel
    // The `$` prefix autocomplete is Codex-only: Codex advertises very few
    // native slash commands, so we augment the dropdown with the agent's
    // skills read from disk. Other agents already surface their full command
-@@ -1381,6 +1421,26 @@ export function MessageInput({
-           label={t("modeLabel")}
-         />
-       )}
-+      <Button
-+        onClick={handleToggleAutoApprove}
-+        variant="ghost"
-+        size="icon"
-+        className={cn(
-+          "h-8 w-8",
-+          autoApprove ? "text-emerald-500" : "text-red-500"
-+        )}
-+        title={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
-+        aria-label={
-+          autoApprove ? autoApproveOnLabel : autoApproveOffLabel
-+        }
-+        aria-pressed={autoApprove}
-+      >
-+        {autoApprove ? (
-+          <ShieldCheck className="size-4" />
-+        ) : (
-+          <Shield className="size-4" />
-+        )}
-+      </Button>
-     </>
-   )
- 
+@@ -1883,6 +1960,25 @@ export function MessageInput({
+                       </Popover>
+                     </div>
+                   )}
++                  <Button
++                    onClick={handleToggleAutoApprove}
++                    disabled={disabled || conversationId == null}
++                    variant="ghost"
++                    size="icon"
++                    className={cn(
++                      "h-8 w-8",
++                      autoApprove ? "text-emerald-500" : "text-red-500"
++                    )}
++                    title={autoApproveLabel}
++                    aria-label={autoApproveLabel}
++                    aria-pressed={autoApprove}
++                  >
++                    {autoApprove ? (
++                      <ShieldCheck className="size-4" />
++                    ) : (
++                      <Shield className="size-4" />
++                    )}
++                  </Button>
+                 </div>
+                 <div className="shrink-0">{actionButtons}</div>
+               </div>

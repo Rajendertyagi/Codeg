@@ -1,17 +1,18 @@
 diff --git a/src/i18n/messages/en.json b/src/i18n/messages/en.json
-index 8896456e..47098cf2 100644
+index 298f27a0..e49f7c54 100644
 --- a/src/i18n/messages/en.json
 +++ b/src/i18n/messages/en.json
-@@ -2498,6 +2498,8 @@
+@@ -2579,6 +2579,9 @@
          "noModels": "No models found",
          "cancel": "Cancel",
          "send": "Send",
 +        "autoApproveOn": "Auto-accept on: tool permission requests are answered automatically",
 +        "autoApproveOff": "Auto-accept off: tool permission requests require your approval",
++        "autoApproveInherit": "Auto-accept: inherits global setting",
          "forkAndSend": "Fork & Send",
          "queueMessage": "Queue message",
          "steerIntoTurn": "Insert into current turn",
-@@ -2677,6 +2679,9 @@
+@@ -2772,6 +2775,9 @@
          "plan": "Plan",
          "allowedActions": "Allowed actions",
          "targetMode": "Target mode: {mode}",
