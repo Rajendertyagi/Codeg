@@ -15,7 +15,8 @@ The CI workflow `.github/workflows/codeg-portable-win64-custom.yml` applies all
 patches in dependency order **before building** the portable Windows app:
 
 1. 18 patches (`.patch`): 17 auto-approve + 1 `FolderPicker` export (used by the local-folder selector)
-2. 16 task-accept patches (`.accept.patch`)
+2. 0 task-accept patches (`.accept.patch`) — **family retired**: v0.25.0 provides the
+   equivalent native completion behavior
 3. 20 launch-target patches (`.launch.patch`)
 4. 13 custom-workflows tab patches (`.customtab.patch`)
 
@@ -75,9 +76,15 @@ broadcast. The flag is persisted in `app_metadata` and survives restarts.
 
 ---
 
-## Feature 2 — Task-accept (review → done without git merge)
+## Feature 2 — Task-accept (review → done without git merge) — **RETIRED**
 
-### What it does
+> **Retired in v0.25.0.** The custom accept family was removed: the 16
+> `.accept.patch` archive patches, `newplugin/hooks/task_accept.rs`, and the
+> `work_task_accept` Tauri/web shims are gone (re-anchor, 2026-08-15).
+> **v0.25.0 provides the equivalent native completion behavior**, so no
+> replacement patch is needed. The section below is kept for historical record.
+
+### What it does (historical)
 
 Lets a reviewed work task go directly to **done** **without** a git merge.
 The upstream engine can only land a review through a merge; this feature adds a
@@ -95,9 +102,9 @@ worktree keep the merge pipeline — the accept button is not offered).
   style: requires the task to be in `review` state, must have no worktree, and
   lands the row straight to `done` without clearing preflight/merge bookkeeping.
 
-### Files
+### Files (all removed in the v0.25.0 re-anchor)
 
-| Path | Role |
+| Path | Role (historical) |
 |------|------|
 | `newplugin/hooks/task_accept.rs` | Core accept logic (review → done, no merge) |
 | `newplugin/hooks/web_workflows.rs` | Web handler: `work_task_accept` |
@@ -267,10 +274,13 @@ dispatch.
 | # | Feature | Status | Patches | Key custom files |
 |---|---------|--------|---------|------------------|
 | 1 | Auto-approve (global toggle) | Wired | 17 | `hooks/custom_auto_approve.rs` |
-| 2 | Task-accept (review → done, no merge) | Wired | 16 | `hooks/task_accept.rs` |
+| 2 | Task-accept (review → done, no merge) | **Retired** | 0 | — (removed in v0.25.0) |
 | 3 | Launch-target (resume / non-git folder) | Wired | 20 | `backend/src/launch_target.rs` |
 | 4 | Scheduled automation → existing chat | Wired | (within launch group) | `frontend/automation-conversation-picker.tsx` |
 | 5 | Custom Workflows tab | Placeholder only | 13 | `frontend/custom-workflows-page.tsx` |
 
 **Total: 67 patches** (18 + 16 + 20 + 13) + committed custom files in
-`newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/`.
+`newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/`. Of that sum,
+the **16 task-accept patches are retired** (removed in the v0.25.0 re-anchor);
+the current archive holds **89 patches** (55 auto-approve + 21 launch + 13
+customtab, accept family = 0).

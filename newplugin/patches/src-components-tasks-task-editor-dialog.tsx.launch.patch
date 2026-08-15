@@ -1,9 +1,9 @@
 diff --git a/src/components/tasks/task-editor-dialog.tsx b/src/components/tasks/task-editor-dialog.tsx
-index 15494f9..80d0db3 100644
+index 4de26e70..09d4847d 100644
 --- a/src/components/tasks/task-editor-dialog.tsx
 +++ b/src/components/tasks/task-editor-dialog.tsx
-@@ -37,11 +37,13 @@ import {
- } from "@/components/ui/select"
+@@ -31,11 +31,13 @@ import {
+ import { FolderSelect } from "@/components/shared/folder-select"
  import { useScrollbarSafeDismiss } from "@/hooks/use-scrollbar-safe-dismiss"
  import {
 +  listAllConversations,
@@ -16,7 +16,7 @@ index 15494f9..80d0db3 100644
  import type {
    AgentType,
    WorkTask,
-@@ -96,6 +98,82 @@ export function TaskEditorDialog({
+@@ -90,6 +92,82 @@ export function TaskEditorDialog({
    )
  }
  
@@ -99,7 +99,7 @@ index 15494f9..80d0db3 100644
  function TaskEditorBody({
    task,
    defaultFolderId,
-@@ -142,6 +220,12 @@ function TaskEditorBody({
+@@ -136,6 +214,12 @@ function TaskEditorBody({
    const [configValues, setConfigValues] = useState<Record<string, string>>(
      task?.config?.config_values ?? {}
    )
@@ -112,7 +112,7 @@ index 15494f9..80d0db3 100644
    const [error, setError] = useState<string | null>(null)
    const [saving, setSaving] = useState(false)
  
-@@ -227,6 +311,7 @@ function TaskEditorBody({
+@@ -221,6 +305,7 @@ function TaskEditorBody({
          agent_type: null,
          mode_id: null,
          config_values: {},
@@ -120,7 +120,7 @@ index 15494f9..80d0db3 100644
        }
      }
      const snapshot = await agentOptions.ensure()
-@@ -245,6 +330,7 @@ function TaskEditorBody({
+@@ -239,6 +324,7 @@ function TaskEditorBody({
          agent_label: getAgentLabel(agentType) ?? agentType,
          ...snapshotLabels(snapshot, mode_id, config_values),
        },
@@ -128,7 +128,7 @@ index 15494f9..80d0db3 100644
      }
    }
  
-@@ -262,6 +348,22 @@ function TaskEditorBody({
+@@ -256,6 +342,22 @@ function TaskEditorBody({
        return setError(tChat("attachUploadInProgress"))
      }
  
@@ -151,11 +151,11 @@ index 15494f9..80d0db3 100644
      setSaving(true)
      try {
        const draft: WorkTaskDraft = {
-@@ -458,6 +560,53 @@ function TaskEditorBody({
+@@ -440,6 +542,53 @@ function TaskEditorBody({
            </div>
          </div>
  
-+        {/* Conversation target — fresh (default) or resume an existing one. */}
++        {/* Conversation target - fresh (default) or resume an existing one. */}
 +        <div className="flex flex-col gap-2">
 +          <h3 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
 +            {t("sectionConversation")}

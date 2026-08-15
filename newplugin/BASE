@@ -1,3 +1,3 @@
 upstream=https://github.com/xintaofei/codeg.git
-ref=v0.24.0
-sha=df7a872de44546277e4c49cfe9d173c631161dc6
+ref=v0.25.0
+sha=b6e1d904a5c1f53849e8ea66672c65fdcd949546

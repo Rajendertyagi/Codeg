@@ -12,10 +12,8 @@ use axum::{Extension, Json};
 
 use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::app_state::AppState;
-use crate::web::handlers::work_task::IdParams;
 
 use super::custom_cron::{self, CustomWorkflow};
-use super::task_accept;
 
 /// POST body for `save_custom_workflow`: the full workflow row to insert or
 /// replace (merge semantics live in `custom_cron::save_workflow`).
@@ -93,21 +91,4 @@ pub async fn custom_workflow_run_now(
             ))
         }
     }
-}
-
-/// Accept a reviewed task that has no worktree (`review → done`, no git
-/// merge). Server-mode front of `task_accept::accept_task` (the desktop front
-/// is the `work_task_accept` Tauri shim in `mod.rs`). Refuses tasks that still
-/// own a worktree.
-pub async fn work_task_accept(
-    Extension(state): Extension<Arc<AppState>>,
-    Json(params): Json<IdParams>,
-) -> Result<Json<()>, AppCommandError> {
-    task_accept::accept_task(&state.db, &state.emitter, params.id)
-        .await
-        .map_err(|e| {
-            tracing::warn!("work_task_accept failed: {e}");
-            AppCommandError::new(AppErrorCode::TaskExecutionFailed, e)
-        })?;
-    Ok(Json(()))
 }

@@ -1,8 +1,8 @@
 diff --git a/src/contexts/acp-connections-context.tsx b/src/contexts/acp-connections-context.tsx
-index cb510d14..2cd2da4f 100644
+index 91da4d8b..089d042e 100644
 --- a/src/contexts/acp-connections-context.tsx
 +++ b/src/contexts/acp-connections-context.tsx
-@@ -179,6 +179,11 @@ export interface ConnectionState {
+@@ -191,6 +191,11 @@ export interface ConnectionState {
    usage: SessionUsageUpdateInfo | null
    liveMessage: LiveMessage | null
    pendingPermission: PendingPermission | null
@@ -14,7 +14,7 @@ index cb510d14..2cd2da4f 100644
    /** In-flight user prompt for the current turn — set from a `user_message`
     *  event or a snapshot's `pending_user_message`. A VIEWER mirrors this into
     *  the runtime as a synthesized user turn; `null` outside an active turn. */
-@@ -806,6 +811,63 @@ function mergePendingPermissionWithLiveMessage(
+@@ -840,6 +845,63 @@ function mergePendingPermissionWithLiveMessage(
    return mergePendingPermissionWithLiveInfo(pendingPermission, liveInfo)
  }
  
@@ -78,7 +78,7 @@ index cb510d14..2cd2da4f 100644
  function extractPermissionToolTitle(toolCall: unknown): string | null {
    const record = asRecord(toolCall)
    if (!record) return null
-@@ -1391,7 +1453,11 @@ function connectionsReducer(
+@@ -1425,7 +1487,11 @@ function connectionsReducer(
          availableCommands: action.patch.availableCommands,
          usage: action.patch.usage,
          liveMessage: hydratedLiveMessage,
@@ -91,7 +91,7 @@ index cb510d14..2cd2da4f 100644
          pendingAskQuestion: action.patch.pendingAskQuestion,
          pendingPlanApproval: action.patch.pendingPlanApproval,
          pendingUserMessage: action.patch.pendingUserMessage,
-@@ -1658,9 +1724,8 @@ function connectionsReducer(
+@@ -1692,9 +1758,8 @@ function connectionsReducer(
        next.set(action.contextKey, {
          ...conn,
          liveMessage: nextLiveMessage,
@@ -103,7 +103,7 @@ index cb510d14..2cd2da4f 100644
          ),
          claudeApiRetry: null,
        })
-@@ -1708,9 +1773,8 @@ function connectionsReducer(
+@@ -1742,9 +1807,8 @@ function connectionsReducer(
              conn.outOfTurnToolCalls,
              merged
            ),
@@ -115,7 +115,7 @@ index cb510d14..2cd2da4f 100644
            ),
          })
          return next
-@@ -1815,9 +1879,8 @@ function connectionsReducer(
+@@ -1849,9 +1913,8 @@ function connectionsReducer(
        next.set(action.contextKey, {
          ...conn,
          liveMessage: nextLiveMessage,
@@ -127,7 +127,7 @@ index cb510d14..2cd2da4f 100644
          ),
          claudeApiRetry: null,
        })
-@@ -1921,11 +1984,13 @@ function connectionsReducer(
+@@ -1955,12 +2018,14 @@ function connectionsReducer(
        next.set(action.contextKey, {
          ...conn,
          liveMessage: updatedLiveMessage,
@@ -135,18 +135,20 @@ index cb510d14..2cd2da4f 100644
 -          request_id: action.request_id,
 -          tool_call: permissionToolCall,
 -          options: action.options,
+-          queued: action.queued,
 -        },
 +        ...pendingPermissionSlot(
 +          upsertPendingPermission(conn.pendingPermissions, {
 +            request_id: action.request_id,
 +            tool_call: permissionToolCall,
 +            options: action.options,
++            queued: action.queued,
 +          })
 +        ),
        })
        return next
      }
-@@ -1933,16 +1998,29 @@ function connectionsReducer(
+@@ -1986,16 +2051,29 @@ function connectionsReducer(
      case "PERMISSION_CLEARED": {
        const conn = state.get(action.contextKey)
        if (!conn) return state

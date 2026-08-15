@@ -8,10 +8,6 @@
 
 pub mod custom_auto_approve;
 pub mod custom_cron;
-// Non-git accept (review → done without a merge, for tasks without a
-// worktree). See `task_accept` for the guard rules and the upstream-engine
-// rationale.
-pub mod task_accept;
 // Axum web-handler shims (needed in both desktop and server modes, unlike the
 // feature-gated Tauri command shims below).
 pub mod web_workflows;
@@ -78,10 +74,12 @@ pub struct AutoApproveConversationResult {
     pub override_state: Option<bool>,
 }
 
-/// Toggle PER-CONVERSATION auto-accept (runtime only, in-memory). Flips the
-/// raw override — absent -> explicit ON, present -> remove (inherit global).
-/// An effective OFF -> ON transition reconciles already-parked permission
-/// cards for that conversation.
+/// Toggle PER-CONVERSATION auto-accept (runtime only, in-memory). Cycles the
+/// raw tri-state override — `Some(true)` -> explicit OFF (`Some(false)`),
+/// `Some(false)` -> clear (inherit global), `None` -> explicit ON when the
+/// global flag is OFF / explicit OFF when it is ON. An effective OFF -> ON
+/// transition reconciles already-parked permission cards for that
+/// conversation.
 #[cfg(feature = "tauri-runtime")]
 #[tauri::command]
 pub async fn toggle_auto_approve_conversation(
@@ -156,18 +154,3 @@ pub async fn run_custom_workflow_now(
 }
 
 pub use custom_cron::CustomWorkflow;
-
-/// Accept a reviewed task that has no worktree (`review → done`, no git
-/// merge). The engine cannot express this transition (its only `done` writer
-/// is the git merge path); `task_accept` refuses tasks that still own a
-/// worktree. Desktop front of the same logic the `/work_task_accept` web route
-/// uses.
-#[cfg(feature = "tauri-runtime")]
-#[tauri::command]
-pub async fn work_task_accept(
-    app: tauri::AppHandle,
-    db: tauri::State<'_, crate::db::AppDatabase>,
-    id: i32,
-) -> Result<(), String> {
-    task_accept::accept_task(&db, &crate::web::event_bridge::EventEmitter::Tauri(app), id).await
-}

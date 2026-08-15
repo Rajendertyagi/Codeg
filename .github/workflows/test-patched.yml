@@ -89,7 +89,8 @@ jobs:
               } |
               Sort-Object Name
             if ($files.Count -eq 0) {
-              throw "No patches matched group $($group.Name)"
+              Write-Output "=== Group $($group.Name): 0 patches matched - skipping (intentionally empty group) ==="
+              continue
             }
             Write-Output "=== Applying $($group.Name) ($($files.Count) patches) ==="
             foreach ($file in $files) {
@@ -201,7 +202,8 @@ jobs:
               } |
               Sort-Object Name
             if ($files.Count -eq 0) {
-              throw "No patches matched group $($group.Name)"
+              Write-Output "=== Group $($group.Name): 0 patches matched - skipping (intentionally empty group) ==="
+              continue
             }
             Write-Output "=== Applying $($group.Name) ($($files.Count) patches) ==="
             foreach ($file in $files) {

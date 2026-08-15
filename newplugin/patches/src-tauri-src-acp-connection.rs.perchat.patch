@@ -1,8 +1,8 @@
 diff --git a/src-tauri/src/acp/connection.rs b/src-tauri/src/acp/connection.rs
-index 86edfe41..14685111 100644
+index ad139990..9e721c01 100644
 --- a/src-tauri/src/acp/connection.rs
 +++ b/src-tauri/src/acp/connection.rs
-@@ -272,6 +272,10 @@ pub enum ConnectionCommand {
+@@ -309,6 +309,10 @@ pub enum ConnectionCommand {
          request_id: String,
          option_id: String,
      },
@@ -13,7 +13,7 @@ index 86edfe41..14685111 100644
      Fork {
          reply:
              tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
-@@ -1368,7 +1372,10 @@ pub async fn spawn_agent_connection(
+@@ -1484,7 +1488,10 @@ pub async fn spawn_agent_connection(
  /// before codeg advertised `elicitation.form` — its chosen option answers the
  /// blocked elicitation request instead (see `handle_elicitation_request`).
  enum PendingPermission {
@@ -25,8 +25,8 @@ index 86edfe41..14685111 100644
      CodexElicitation {
          responder: Responder<serde_json::Value>,
          approval: crate::acp::question::ElicitationApproval,
-@@ -1379,7 +1386,7 @@ impl PendingPermission {
-     /// Resolve with the user's chosen option id.
+@@ -1506,7 +1513,7 @@ trait PermissionResponder {
+ impl PermissionResponder for PendingPermission {
      fn respond_selected(self, option_id: String) {
          match self {
 -            PendingPermission::Acp(responder) => {
@@ -34,8 +34,8 @@ index 86edfe41..14685111 100644
                  let outcome =
                      RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id));
                  let _ = responder.respond(RequestPermissionResponse::new(outcome));
-@@ -1400,7 +1407,7 @@ impl PendingPermission {
-     /// user chose.
+@@ -1525,7 +1532,7 @@ impl PermissionResponder for PendingPermission {
+ 
      fn respond_cancelled(self) {
          match self {
 -            PendingPermission::Acp(responder) => {
@@ -43,11 +43,29 @@ index 86edfe41..14685111 100644
                  let _ = responder.respond(RequestPermissionResponse::new(
                      RequestPermissionOutcome::Cancelled,
                  ));
-@@ -4619,12 +4626,18 @@ async fn handle_permission_request(
-     // consults no conversation/folder/sender context. When the toggle is off ΓÇö
-     // or the request offers no allow option ΓÇö fall through to the existing
-     // flow unchanged (never manufacture an approval the agent didn't offer).
+@@ -5396,22 +5403,30 @@ async fn handle_permission_request(
+         }
+     }
+ 
+-    // Auto-accept gate (custom hooks): when the GLOBAL auto-accept toggle is
+-    // on, answer the request with the first "allow" option the agent offered —
++    // Auto-accept gate (custom hooks): when auto-accept is on for THIS
++    // conversation (explicit per-chat override, else the global toggle),
++    // answer the request with the first "allow" option the agent offered —
+     // BEFORE it is parked or broadcast, so no subscriber (permission dialog,
+     // chat-channel relay, webhook) ever sees a stuck card. Resolves exactly
+     // like the `ConnectionCommand::RespondPermission` path (respond_selected ->
+     // `PermissionResolved`) so the agent sees an ordinary selected outcome.
+-    // The toggle is app-wide (persisted in `app_metadata`); it deliberately
+-    // consults no conversation/folder/sender context. When the toggle is off —
+-    // or the request offers no allow option — fall through to the existing
+-    // flow unchanged (never manufacture an approval the agent didn't offer).
 -    let approved = crate::custom_hooks::custom_auto_approve::is_auto_approved()
++    // When the effective toggle is off — or the request offers no allow
++    // option — fall through to the existing flow unchanged (never manufacture
++    // an approval the agent didn't offer). The allow option is remembered on
++    // the parked card so a later `ReconcileAutoApprove` can answer it without
++    // re-deriving anything.
 +    let conversation_id = state
 +        .read()
          .await
@@ -65,13 +83,16 @@ index 86edfe41..14685111 100644
          options.iter().map(|o| &o.kind).collect::<Vec<_>>()
      );
      if approved {
-@@ -4632,17 +4645,22 @@ async fn handle_permission_request(
+@@ -5419,18 +5434,29 @@ async fn handle_permission_request(
              .iter()
              .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
          {
 -            PendingPermission::Acp(responder).respond_selected(allow_option.option_id.clone());
-+            PendingPermission::Acp { responder, allow_option_id: None }
-+                .respond_selected(allow_option.option_id.clone());
++            PendingPermission::Acp {
++                responder,
++                allow_option_id: None,
++            }
++            .respond_selected(allow_option.option_id.clone());
              emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id })
                  .await;
              return;
@@ -82,15 +103,19 @@ index 86edfe41..14685111 100644
 +        .iter()
 +        .find(|opt| opt.kind == "allow_once" || opt.kind == "allow_always")
 +        .map(|opt| opt.option_id.clone());
-     perms
-         .lock()
-         .await
--        .insert(request_id.clone(), PendingPermission::Acp(responder));
-+        .insert(request_id.clone(), PendingPermission::Acp { responder, allow_option_id });
- 
-     emit_with_state(
+     admit_permission(
+         perms,
          state,
-@@ -4656,6 +4674,46 @@ async fn handle_permission_request(
+         emitter,
+-        PendingPermission::Acp(responder),
++        PendingPermission::Acp {
++            responder,
++            allow_option_id,
++        },
+         QueuedPermission {
+             request_id,
+             tool_call: tool_call_value,
+@@ -5440,6 +5466,46 @@ async fn handle_permission_request(
      .await;
  }
  
@@ -99,7 +124,8 @@ index 86edfe41..14685111 100644
 +/// (respond_selected -> `PermissionResolved`). No-op when the conversation's
 +/// effective auto-approve is OFF. Skips `CodexElicitation` cards and cards
 +/// without an allow option (never manufacture an approval the agent didn't
-+/// offer).
++/// offer). Reuses the queue's normal `resolve` path so the screen advances
++/// exactly as if the user answered each card.
 +async fn reconcile_auto_approve_perms(
 +    state: &Arc<RwLock<SessionState>>,
 +    emitter: &EventEmitter,
@@ -115,44 +141,43 @@ index 86edfe41..14685111 100644
 +        return;
 +    }
 +    let pending: Vec<(String, String)> = {
-+        let locked = perms.lock().await;
-+        locked
++        let queue = perms.lock().await;
++        queue
++            .responders
 +            .iter()
 +            .filter_map(|(request_id, p)| match p {
-+                PendingPermission::Acp { allow_option_id: Some(id), .. } => {
-+                    Some((request_id.clone(), id.clone()))
-+                }
++                PendingPermission::Acp {
++                    allow_option_id: Some(id),
++                    ..
++                } => Some((request_id.clone(), id.clone())),
 +                _ => None,
 +            })
 +            .collect()
 +    };
 +    for (request_id, option_id) in pending {
-+        if let Some(pending) = perms.lock().await.remove(&request_id) {
-+            pending.respond_selected(option_id);
-+            emit_with_state(state, emitter, AcpEvent::PermissionResolved { request_id }).await;
-+        }
++        resolve_permission(perms, state, emitter, request_id, option_id).await;
 +    }
 +}
 +
  fn respond_terminal_request<T: sacp::JsonRpcResponse>(
      responder: Responder<T>,
      result: Result<T, TerminalRuntimeError>,
-@@ -6512,6 +6570,9 @@ async fn run_conversation_loop<'a>(
-                                         .await;
-                                     }
+@@ -7532,6 +7598,9 @@ async fn run_conversation_loop<'a>(
+                                     )
+                                     .await;
                                  }
 +                                Some(ConnectionCommand::ReconcileAutoApprove) => {
-+                                    reconcile_auto_approve_perms(state, emitter, &perms).await;
++                                    reconcile_auto_approve_perms(state, emitter, perms).await;
 +                                }
                                  Some(ConnectionCommand::SetMode { mode_id }) => {
                                      let req = SetSessionModeRequest::new(sid.clone(), mode_id.clone());
                                      match cx.send_request_to(Agent, req).block_task().await {
-@@ -6786,6 +6847,9 @@ async fn run_conversation_loop<'a>(
-                         .await;
-                 }
+@@ -7802,6 +7871,9 @@ async fn run_conversation_loop<'a>(
+             }) => {
+                 resolve_permission(perms, state, emitter, request_id, option_id).await;
              }
 +            Some(ConnectionCommand::ReconcileAutoApprove) => {
-+                reconcile_auto_approve_perms(state, emitter, &perms).await;
++                reconcile_auto_approve_perms(state, emitter, perms).await;
 +            }
              Some(ConnectionCommand::SetMode { mode_id }) => {
                  if let Err(e) = set_session_mode(session, state, emitter, mode_id).await {

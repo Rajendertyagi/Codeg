@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/bin/codeg_server.rs b/src-tauri/src/bin/codeg_server.rs
-index 715aacab..31a445bb 100644
+index 7bff2ede..7b0cbc5a 100644
 --- a/src-tauri/src/bin/codeg_server.rs
 +++ b/src-tauri/src/bin/codeg_server.rs
 @@ -265,6 +265,7 @@ async fn async_main() -> ExitCode {
@@ -29,10 +29,10 @@ index 715aacab..31a445bb 100644
 +        &channel_messaging_config,
 +    )
 +    .await;
- 
-     // Spawn the delegation listener so companion processes can round-trip
-     // through the broker. Path is PID-scoped, so the listener owns it for
-@@ -364,6 +373,14 @@ async fn async_main() -> ExitCode {
+     // Keep ACP model terminal fallbacks aligned with the same default-shell
+     // preference used by the built-in terminal before accepting connections.
+     let terminal_shell_config = state.connection_manager.terminal_shell_config();
+@@ -372,6 +381,14 @@ async fn async_main() -> ExitCode {
                  state.emitter.clone(),
                  chat_authoring_config.clone(),
              )),

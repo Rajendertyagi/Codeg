@@ -5,10 +5,12 @@ action that creates, regenerates, modifies, deletes, validates, or applies plugi
 It is **mandatory reading** before any such action (see `agent.md`).
 
 The protocol below was independently verified by a full reconstruction replay on
-**2026-08-09**, and re-verified against the pinned **v0.24.0** base on **2026-08-12**
-(104/104 patches apply clean in CI order; 58-path changed-file union). It must be treated
-as the single source of truth for patch ordering and generation. Do not introduce a second
-patch-order source of truth.
+**2026-08-09**, re-verified against the pinned **v0.24.0** base on **2026-08-12**
+(104/104 patches apply clean in CI order; 58-path changed-file union), and re-anchored
+against the pinned **v0.25.0** base on **2026-08-15** (89/89 patches apply clean in CI
+order; the 16 `.accept.patch` features were retired with the accept family). It must be
+treated as the single source of truth for patch ordering and generation. Do not introduce
+a second patch-order source of truth.
 
 ---
 
@@ -18,8 +20,8 @@ patch-order source of truth.
   upstream commit the archive is re-anchored against:
 
       upstream=https://github.com/xintaofei/codeg.git
-      ref=v0.24.0
-      sha=df7a872de44546277e4c49cfe9d173c631161dc6
+      ref=v0.25.0
+      sha=b6e1d904a5c1f53849e8ea66672c65fdcd949546
 
   Every reconstruction (CI workflows, `simulate-ci.sh`, `regen-perchat.sh`) reads this
   file, fetches the pinned tag from `upstream=`, verifies it resolves to the immutable
@@ -29,25 +31,25 @@ patch-order source of truth.
   together and re-verify the full replay (§5) — this is the only allowed base change.
 - **Working branch:** `plugin-dev` (all custom work happens here).
 - **Canonical native trees are NOT the patch target:** `src/` and `src-tauri/src/` on
-  `plugin-dev` predate v0.24.0 and are not byte-identical to the pinned base. The patch
+  `plugin-dev` predate v0.25.0 and are not byte-identical to the pinned base. The patch
   target is always the reconstructed upstream tree from `newplugin/BASE`, never these
   canonical trees.
 - **All custom features live ONLY under `newplugin/`:**
   - `newplugin/BASE` — pinned upstream base record (single source of truth).
   - `newplugin/patches/` — apply-on-demand raw git diff patches (engine + frontend).
   - `newplugin/hooks/`, `newplugin/backend/`, `newplugin/frontend/` — out-of-tree custom code.
-- **Patch archive:** currently **104 tracked patches** under `newplugin/patches/`.
+- **Patch archive:** currently **89 tracked patches** under `newplugin/patches/`.
 - **Feature-family inventory (by filename suffix):**
 
   | Family     | Suffix            | Count |
   |------------|-------------------|-------|
   | channelmsg | `.channelmsg.patch` | 29  |
   | launch     | `.launch.patch`     | 21  |
-  | accept     | `.accept.patch`     | 16  |
+  | accept     | `.accept.patch`     | 0 (family retired) |
   | customtab  | `.customtab.patch`  | 13  |
   | perchat    | `.perchat.patch`    | 6   |
-  | plain      | `.patch` (no suffix) | 19  |
-  | **Total**  |                   | **104** |
+  | plain      | `.patch` (no suffix) | 20  |
+  | **Total**  |                   | **89** |
 
 - **Hard rule:** a given feature is maintained **either** as patch files **or** as direct
   engine changes — **never both simultaneously**. `plugin-dev` must contain no direct
@@ -73,8 +75,8 @@ Step "Apply custom feature patches" defines four groups applied in dependency or
 
 | Group | Selector                                                    | Count |
 |-------|-------------------------------------------------------------|-------|
-| 1     | `*.patch` NOT matching `\.(accept\|launch\|customtab)\.patch$` (plain + perchat + channelmsg) | 54 |
-| 2     | `*.accept.patch`                                            | 16 |
+| 1     | `*.patch` NOT matching `\.(accept\|launch\|customtab)\.patch$` (plain + perchat + channelmsg) | 55 |
+| 2     | `*.accept.patch`                                            | 0 (family retired) |
 | 3     | `*.launch.patch`                                            | 21 |
 | 4     | `*.customtab.patch`                                         | 13 |
 
@@ -82,11 +84,13 @@ Step "Apply custom feature patches" defines four groups applied in dependency or
 - Patches may touch the same target file across families; correctness depends on this
   exact order. **Never reorder, and never apply a single group in isolation** and treat it
   as a complete feature.
-- Sum check: 54 + 16 + 21 + 13 = **104**.
+- Sum check: 55 + 0 + 21 + 13 = **89** (the accept family is retired; the CI workflow still
+  declares group 2, so it matches 0 patches — report that benign difference, do not "fix"
+  it by deleting the group unless CI is updated to match).
 - `newplugin/scripts/simulate-ci.sh` mirrors this ordering (identical results verified
-  position-by-position for all 104 patches). It uses the same BASE mechanism: it reads
+  position-by-position for all 89 patches). It uses the same BASE mechanism: it reads
   `newplugin/BASE`, verifies the pinned SHA, reconstructs the complete upstream tree in a
-  **disposable worktree**, restores the plugin-dev custom layer, and applies all 104
+  **disposable worktree**, restores the plugin-dev custom layer, and applies all 89
   patches in CI order. It is a local **checking aid only**; the CI workflow remains the
   source of truth. Known benign difference: CI **throws** on a group with 0 matches, the
   simulator **skips** it (report it, do not "fix" it).
@@ -145,20 +149,19 @@ Before accepting any patch set (new feature or update), run the full replay:
 
 1. Read `newplugin/BASE`, fetch/verify the pinned SHA, and `git worktree add --detach
    <tmp>/replay <base-sha>` (clean, disposable; same base-selection as CI §2).
-2. Apply **all** 104 patches (or the full archive) in the exact CI order (§2) from the
+2. Apply **all** 89 patches (or the full archive) in the exact CI order (§2) from the
    worktree root, using the canonical `newplugin/patches/` as the patch source.
 3. Every patch must apply cleanly (`git apply` exit 0 each); **no failures, no
    `--whitespace=nowarn` masking**.
 4. Verify the reconstructed changed-file set equals the union of files touched by the
-   patches (`git apply --numstat` per patch vs `git status --porcelain`) — **58 paths** in
-   the verified archive.
+   patches (`git apply --numstat` per patch vs `git status --porcelain`).
 5. Verify **no unexpected files changed** — every changed path must be inside `src/` or
    `src-tauri/`; nothing else (no `.github/`, no docs, no unrelated files).
 6. Verify the reconstructed tree equals the **intended feature tree** (the feature built
    in the isolated worktree). Compare trees; must be byte-identical.
-7. Verify patch count and file inventory unchanged: 104 total, channelmsg 29 / launch 21 /
-   accept 16 / customtab 13 / perchat 6 / plain 19 (or the correct numbers for the current
-   archive).
+7. Verify patch count and file inventory unchanged: 89 total, channelmsg 29 / launch 21 /
+   accept 0 (family retired) / customtab 13 / perchat 6 / plain 20 (or the correct numbers
+   for the current archive).
 8. Verify the canonical `plugin-dev` tree remains **completely clean** after the test
    (`git status --short` empty) and that **no patch file was modified** (byte/content
    unchanged — hash before and after).
@@ -205,7 +208,7 @@ involved. Wait for direction before acting.
       worktree reconstructed from the `newplugin/BASE` SHA.
 - [ ] Reconstructed tree equals intended feature tree; no files changed outside
       `src/` + `src-tauri/`.
-- [ ] Patch count + family inventory verified (104 = 29 + 21 + 16 + 13 + 6 + 19 for the
+- [ ] Patch count + family inventory verified (89 = 29 + 21 + 0 + 13 + 6 + 20 for the
       current archive).
 - [ ] Canonical `plugin-dev` clean; no patch files modified; no `newplugin/BASE` fields
       changed without re-verifying the full replay.
