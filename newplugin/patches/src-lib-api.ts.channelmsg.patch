@@ -1,8 +1,8 @@
 diff --git a/src/lib/api.ts b/src/lib/api.ts
-index b475a786..0dcd6c35 100644
+index 9b547f2c..56553eba 100644
 --- a/src/lib/api.ts
 +++ b/src/lib/api.ts
-@@ -4237,6 +4237,24 @@ export async function setChatAuthoringSettings(
+@@ -4503,6 +4503,26 @@ export async function setChatAuthoringSettings(
    return getTransport().call("set_chat_authoring_settings", { settings })
  }
  
@@ -21,7 +21,9 @@ index b475a786..0dcd6c35 100644
 +export async function setChannelMessagingSettings(
 +  settings: ChannelMessagingSettings
 +): Promise<ChannelMessagingSettings> {
-+  return getTransport().call("set_chat_channel_messaging_settings", { settings })
++  return getTransport().call("set_chat_channel_messaging_settings", {
++    settings,
++  })
 +}
 +
  /** Live probe — opens a transient ACP connection to `agent_type`, reads what

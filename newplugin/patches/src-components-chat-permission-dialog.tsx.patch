@@ -1,8 +1,8 @@
 diff --git a/src/components/chat/permission-dialog.tsx b/src/components/chat/permission-dialog.tsx
-index d6dcf314..27b43ad2 100644
+index ee0f2e6f..dc3b58a7 100644
 --- a/src/components/chat/permission-dialog.tsx
 +++ b/src/components/chat/permission-dialog.tsx
-@@ -301,19 +301,68 @@ export function PermissionDialog({
+@@ -313,19 +313,67 @@ export function PermissionDialog({
        </div>
  
        <div className="mt-3 flex flex-wrap gap-2">
@@ -21,8 +21,7 @@ index d6dcf314..27b43ad2 100644
 +            (opt) => opt.kind === "allow_always"
 +          )
 +          const deny = permission.options.find(
-+            (opt) =>
-+              opt.kind === "reject_once" || opt.kind === "reject_always"
++            (opt) => opt.kind === "reject_once" || opt.kind === "reject_always"
 +          )
 +          const extras = permission.options.filter(
 +            (opt) => opt !== allowOnce && opt !== allowAlways && opt !== deny

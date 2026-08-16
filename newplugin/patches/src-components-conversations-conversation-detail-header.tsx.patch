@@ -1,5 +1,5 @@
 diff --git a/src/components/conversations/conversation-detail-header.tsx b/src/components/conversations/conversation-detail-header.tsx
-index 10c8f51..36e3327 100644
+index 10c8f518..b2d9d78b 100644
 --- a/src/components/conversations/conversation-detail-header.tsx
 +++ b/src/components/conversations/conversation-detail-header.tsx
 @@ -1,6 +1,6 @@
@@ -34,7 +34,7 @@ index 10c8f51..36e3327 100644
  import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-context-bar"
  import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
  import { useTabActions } from "@/contexts/tab-context"
-@@ -236,6 +241,42 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+@@ -236,6 +241,52 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
      setDetails(resolved)
    }, [conversationId, runtimeConversationId, runtimeId])
  
@@ -42,18 +42,21 @@ index 10c8f51..36e3327 100644
 +  // memory. Reloads when the active conversation changes — this header is a
 +  // single instance reused across tabs.
 +  const [autoApprove, setAutoApprove] = useState(false)
++  // Reset-on-null is derived at render: a null conversation renders the shield
++  // as OFF without a synchronous setState inside the effect.
++  const autoApproveEffective = conversationId == null ? false : autoApprove
 +  useEffect(() => {
-+    if (conversationId == null) {
-+      setAutoApprove(false)
-+      return
-+    }
++    if (conversationId == null) return
 +    let cancelled = false
 +    getConversationAutoApprove(conversationId)
 +      .then((result) => {
 +        if (!cancelled) setAutoApprove(result.enabled)
 +      })
 +      .catch((err) => {
-+        console.error("[ConversationDetailHeader] load auto-approve failed:", err)
++        console.error(
++          "[ConversationDetailHeader] load auto-approve failed:",
++          err
++        )
 +      })
 +    return () => {
 +      cancelled = true
@@ -66,18 +69,25 @@ index 10c8f51..36e3327 100644
 +      const result = await toggleConversationAutoApprove(conversationId)
 +      setAutoApprove(result.enabled)
 +    } catch (err) {
-+      console.error("[ConversationDetailHeader] toggle auto-approve failed:", err)
++      console.error(
++        "[ConversationDetailHeader] toggle auto-approve failed:",
++        err
++      )
 +    }
 +  }, [conversationId])
 +
 +  const tAuto = useTranslations("Folder.chat.messageInput")
-+  const autoApproveOnLabel = tAuto.has("autoApproveOn") ? tAuto("autoApproveOn") : "Auto-accept: on"
-+  const autoApproveOffLabel = tAuto.has("autoApproveOff") ? tAuto("autoApproveOff") : "Auto-accept: off"
++  const autoApproveOnLabel = tAuto.has("autoApproveOn")
++    ? tAuto("autoApproveOn")
++    : "Auto-accept: on"
++  const autoApproveOffLabel = tAuto.has("autoApproveOff")
++    ? tAuto("autoApproveOff")
++    : "Auto-accept: off"
 +
    return (
      // Transparent (no surface class): the title header reads as part of the
      // message canvas below it rather than as a frosted chrome band. With a
-@@ -260,6 +301,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
+@@ -260,6 +311,29 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
          </span>
        </div>
        <div className="flex shrink-0 items-center">
@@ -86,12 +96,23 @@ index 10c8f51..36e3327 100644
 +          variant="ghost"
 +          size="icon"
 +          disabled={!persisted}
-+          className={cn("h-7 w-7", autoApprove ? "text-emerald-500" : "text-red-500")}
-+          title={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
-+          aria-label={autoApprove ? autoApproveOnLabel : autoApproveOffLabel}
-+          aria-pressed={autoApprove}
++          className={cn(
++            "h-7 w-7",
++            autoApproveEffective ? "text-emerald-500" : "text-red-500"
++          )}
++          title={
++            autoApproveEffective ? autoApproveOnLabel : autoApproveOffLabel
++          }
++          aria-label={
++            autoApproveEffective ? autoApproveOnLabel : autoApproveOffLabel
++          }
++          aria-pressed={autoApproveEffective}
 +        >
-+          {autoApprove ? <ShieldCheck className="size-4" /> : <Shield className="size-4" />}
++          {autoApproveEffective ? (
++            <ShieldCheck className="size-4" />
++          ) : (
++            <Shield className="size-4" />
++          )}
 +        </Button>
          <DropdownMenu>
            <DropdownMenuTrigger asChild>
