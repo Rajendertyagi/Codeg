@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/acp/delegation/listener.rs b/src-tauri/src/acp/delegation/listener.rs
-index 4b51ad60..d99deb31 100644
+index f407c33b..5a0ba93c 100644
 --- a/src-tauri/src/acp/delegation/listener.rs
 +++ b/src-tauri/src/acp/delegation/listener.rs
 @@ -20,12 +20,13 @@ use crate::acp::delegation::transport::{
@@ -85,3 +85,61 @@ index 4b51ad60..d99deb31 100644
      async fn process(&self, req: BrokerRequest) -> DelegationTaskReport {
          // 1. Token + parent_connection_id consistency check. Treat both as
          //    "canceled" since the LLM can't usefully react to either —
+@@ -1009,6 +1042,17 @@ mod tests {
+         }
+     }
+ 
++    struct StubChannelMessaging;
++    #[async_trait]
++    impl ChannelMessageAccess for StubChannelMessaging {
++        async fn send_message(
++            &self,
++            _req: crate::acp::channel_messaging::SendChannelMessageRequest,
++        ) -> ChannelMessageOutcome {
++            ChannelMessageOutcome::rejected("stub channel messaging")
++        }
++    }
++
+     use tokio::sync::oneshot;
+ 
+     async fn make_broker(mock: Arc<MockSpawner>) -> Arc<DelegationBroker> {
+@@ -1043,6 +1087,7 @@ mod tests {
+             Arc::new(StubSessionInfo::default()),
+             Arc::new(StubTaskTools),
+             Arc::new(StubAuthoring::default()),
++            Arc::new(StubChannelMessaging),
+         )
+     }
+ 
+@@ -1065,6 +1110,7 @@ mod tests {
+             Arc::new(StubSessionInfo::default()),
+             Arc::new(StubTaskTools),
+             Arc::new(StubAuthoring::default()),
++            Arc::new(StubChannelMessaging),
+         )
+     }
+ 
+@@ -1088,6 +1134,7 @@ mod tests {
+             Arc::new(StubSessionInfo::default()),
+             Arc::new(StubTaskTools),
+             Arc::new(StubAuthoring::default()),
++            Arc::new(StubChannelMessaging),
+         )
+     }
+ 
+@@ -1110,6 +1157,7 @@ mod tests {
+             session_info,
+             Arc::new(StubTaskTools),
+             Arc::new(StubAuthoring::default()),
++            Arc::new(StubChannelMessaging),
+         )
+     }
+ 
+@@ -1134,6 +1182,7 @@ mod tests {
+             Arc::new(StubSessionInfo::default()),
+             Arc::new(StubTaskTools),
+             authoring,
++            Arc::new(StubChannelMessaging),
+         )
+     }
+ 

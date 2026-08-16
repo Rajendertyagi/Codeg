@@ -1,5 +1,5 @@
 diff --git a/src/components/automations/automation-editor.tsx b/src/components/automations/automation-editor.tsx
-index caa80c9f..3b591645 100644
+index caa80c9f..a2159427 100644
 --- a/src/components/automations/automation-editor.tsx
 +++ b/src/components/automations/automation-editor.tsx
 @@ -2,7 +2,7 @@
@@ -257,7 +257,7 @@ index caa80c9f..3b591645 100644
              },
        }
        await onSubmit(draft)
-@@ -456,67 +562,189 @@ export function AutomationEditor({
+@@ -456,74 +562,188 @@ export function AutomationEditor({
              {t("actionEnqueueTaskHint")}
            </p>
          ) : null}
@@ -445,6 +445,13 @@ index caa80c9f..3b591645 100644
 -            </Label>
 -          ) : null}
 -        </div>
+-        {/* Running in the folder shares the user's working tree (and any
+-            concurrent shared run); surface that trade-off where it's chosen. */}
+-        {action === "launch_session" && isolation === "shared_in_root" ? (
+-          <p className="text-xs text-muted-foreground">
+-            {t("isolationSharedCaveat")}
+-          </p>
+-        ) : null}
 +
 +              {/* A worktree run gets its own fresh tree, so a branch only
 +                  applies to the shared-folder case - the picker shows there and
@@ -493,7 +500,6 @@ index caa80c9f..3b591645 100644
 +            ) : null}
 +          </>
 +        )}
-+      </div>
-         {/* Running in the folder shares the user's working tree (and any
-             concurrent shared run); surface that trade-off where it's chosen. */}
-         {action === "launch_session" && isolation === "shared_in_root" ? (
+       </div>
+ 
+       {/* Trigger — manual vs scheduled, with the schedule details folded in. */}

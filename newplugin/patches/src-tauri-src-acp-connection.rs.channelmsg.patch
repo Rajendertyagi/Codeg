@@ -1,8 +1,8 @@
 diff --git a/src-tauri/src/acp/connection.rs b/src-tauri/src/acp/connection.rs
-index eef3ca96..6c366877 100644
+index c977a7fc..77e00135 100644
 --- a/src-tauri/src/acp/connection.rs
 +++ b/src-tauri/src/acp/connection.rs
-@@ -2631,6 +2631,11 @@ pub struct DelegationInjection {
+@@ -3308,6 +3308,11 @@ pub struct DelegationInjection {
      /// read-only groups these are ALSO re-read at call time by the authoring
      /// access impl — see [`crate::acp::chat_authoring::ChatAuthoringRuntimeConfig`].
      pub authoring: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
@@ -14,7 +14,7 @@ index eef3ca96..6c366877 100644
      /// Question registry handle for the teardown cascade. The `run_connection`
      /// cleanup guard calls `cancel_questions_by_parent` through this so a pending
      /// `ask_user_question` is reclaimed synchronously on disconnect, mirroring
-@@ -2744,6 +2749,8 @@ struct CompanionFeatureFlags {
+@@ -3421,6 +3426,8 @@ struct CompanionFeatureFlags {
      automations: bool,
      /// `create_work_task`, gated by the chat-authoring setting.
      taskboard: bool,
@@ -23,7 +23,7 @@ index eef3ca96..6c366877 100644
  }
  
  /// The `--features` value for a companion launch, or `None` when no group is
-@@ -2774,6 +2781,9 @@ fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
+@@ -3451,6 +3458,9 @@ fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
      if flags.taskboard {
          features.push("taskboard");
      }
@@ -33,7 +33,7 @@ index eef3ca96..6c366877 100644
      if features.is_empty() {
          return None;
      }
-@@ -2811,6 +2821,7 @@ async fn inject_codeg_mcp(
+@@ -3500,6 +3510,7 @@ async fn inject_codeg_mcp(
          tasks: tasks_enabled,
          automations: authoring.automations_enabled,
          taskboard: authoring.work_tasks_enabled,
@@ -41,3 +41,22 @@ index eef3ca96..6c366877 100644
      };
      // `None` (no feature enabled) short-circuits the whole injection.
      let features_arg = companion_features_arg(flags)?;
+@@ -14432,6 +14443,7 @@ mod tests {
+             ask: crate::acp::question::QuestionRuntimeConfig::new(),
+             sessions: crate::acp::session_info::SessionInfoRuntimeConfig::new(),
+             authoring: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig::new(),
++            channel_messaging: crate::acp::channel_messaging::ChannelMessagingRuntimeConfig::new(),
+             questions: Arc::new(NoQuestions)
+                 as Arc<dyn crate::acp::question::SessionQuestionAccess>,
+             plan_approvals: Arc::new(NoPlanApprovals)
+@@ -14611,8 +14623,9 @@ mod tests {
+                 tasks: true,
+                 automations: true,
+                 taskboard: true,
++                channels: true,
+             }),
+-            Some("delegation,feedback,ask,sessions,tasks,automations,taskboard".to_string())
++            Some("delegation,feedback,ask,sessions,tasks,automations,taskboard,channels".to_string())
+         );
+     }
+ 

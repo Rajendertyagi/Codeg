@@ -1,5 +1,5 @@
 diff --git a/src-tauri/src/acp/delegation/companion.rs b/src-tauri/src/acp/delegation/companion.rs
-index dad5fc59..68e7f1e4 100644
+index dad5fc59..210b1812 100644
 --- a/src-tauri/src/acp/delegation/companion.rs
 +++ b/src-tauri/src/acp/delegation/companion.rs
 @@ -47,11 +47,12 @@ use crate::acp::chat_authoring::{
@@ -148,3 +148,59 @@ index dad5fc59..68e7f1e4 100644
  /// Build the human-readable summary block for a found session: a metadata header
  /// plus, when present, a "Recent messages" section.
  fn render_session_summary_text(o: &Value) -> String {
+@@ -1539,6 +1619,7 @@ mod tests {
+             tasks: false,
+             automations: false,
+             taskboard: false,
++            channels: false,
+         })
+     }
+ 
+@@ -2114,6 +2195,7 @@ mod tests {
+         tasks: false,
+         automations: false,
+         taskboard: false,
++        channels: false,
+     };
+     const BOTH: CompanionFeatures = CompanionFeatures {
+         delegation: true,
+@@ -2123,6 +2205,7 @@ mod tests {
+         tasks: false,
+         automations: false,
+         taskboard: false,
++        channels: false,
+     };
+     const ASK_ONLY: CompanionFeatures = CompanionFeatures {
+         delegation: false,
+@@ -2132,6 +2215,7 @@ mod tests {
+         tasks: false,
+         automations: false,
+         taskboard: false,
++        channels: false,
+     };
+     const SESSIONS_ONLY: CompanionFeatures = CompanionFeatures {
+         delegation: false,
+@@ -2141,6 +2225,7 @@ mod tests {
+         tasks: false,
+         automations: false,
+         taskboard: false,
++        channels: false,
+     };
+ 
+     fn list_tool_names(action: LineAction) -> Vec<String> {
+@@ -2431,6 +2516,7 @@ mod tests {
+         tasks: false,
+         automations: true,
+         taskboard: false,
++        channels: false,
+     };
+     const TASKBOARD_ONLY: CompanionFeatures = CompanionFeatures {
+         delegation: false,
+@@ -2440,6 +2526,7 @@ mod tests {
+         tasks: false,
+         automations: false,
+         taskboard: true,
++        channels: false,
+     };
+ 
+     /// The two authoring groups gate independently: enabling one must not
