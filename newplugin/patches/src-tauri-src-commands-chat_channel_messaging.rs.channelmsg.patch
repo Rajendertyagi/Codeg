@@ -1,6 +1,6 @@
 diff --git a/src-tauri/src/commands/chat_channel_messaging.rs b/src-tauri/src/commands/chat_channel_messaging.rs
 new file mode 100644
-index 00000000..4c543af1
+index 00000000..8aff4935
 --- /dev/null
 +++ b/src-tauri/src/commands/chat_channel_messaging.rs
 @@ -0,0 +1,669 @@
@@ -572,7 +572,7 @@ index 00000000..4c543af1
 +        assert_eq!(outcome.total_targets, 0);
 +        let note = outcome.note.as_deref().unwrap_or("");
 +        assert!(
-+            note.contains("no enabled chat channels"),
++            note.contains("No enabled chat channels"),
 +            "note was: {note}"
 +        );
 +        assert!(rec.msgs.lock().await.is_empty());
