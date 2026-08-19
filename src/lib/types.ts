@@ -1,4 +1,4 @@
-/** The thirteen agents codeg ships hand-written support for. */
+/** The fourteen agents codeg ships hand-written support for. */
 export type BuiltinAgentType =
   | "claude_code"
   | "codex"
@@ -13,6 +13,7 @@ export type BuiltinAgentType =
   | "grok"
   | "cursor"
   | "deepseek"
+  | "qoder"
 
 /**
  * Which agent backs a conversation.
@@ -696,6 +697,7 @@ export const AGENT_DISPLAY_ORDER: BuiltinAgentType[] = [
   "grok",
   "cursor",
   "deepseek",
+  "qoder",
 ]
 
 const AGENT_DISPLAY_ORDER_INDEX = new Map<AgentType, number>(
@@ -728,6 +730,7 @@ export const ALL_AGENT_TYPES: BuiltinAgentType[] = [
   "grok",
   "cursor",
   "deepseek",
+  "qoder",
 ]
 
 export const MODEL_PROVIDER_AGENT_TYPES: BuiltinAgentType[] = [
@@ -1037,6 +1040,7 @@ export const AGENT_LABELS: Record<BuiltinAgentType, string> = {
   grok: "Grok",
   cursor: "Cursor",
   deepseek: "DeepSeek Harness",
+  qoder: "Qoder",
 }
 
 export const AGENT_COLORS: Record<BuiltinAgentType, string> = {
@@ -1053,6 +1057,7 @@ export const AGENT_COLORS: Record<BuiltinAgentType, string> = {
   grok: "bg-neutral-900",
   cursor: "bg-zinc-800",
   deepseek: "bg-[#4D6BFE]",
+  qoder: "bg-[#6C4CF1]",
 }
 
 // ACP connection status (matches Rust ConnectionStatus)
@@ -2593,6 +2598,26 @@ export interface CursorModelsResult {
   error: string | null
 }
 
+/** Result of probing `qoder status -o json` (auth card). A probe that could
+ * not run reports `error` with `logged_in: false`; the panel renders that as
+ * "could not check", never as "signed out". */
+export interface QoderAuthStatus {
+  installed: boolean
+  logged_in: boolean
+  username: string | null
+  email: string | null
+  /** Account tier, e.g. `personal_standard`. */
+  user_type: string | null
+  /** Version the probed binary reports — the one that would actually launch,
+   * not necessarily the version codeg's registry pins. */
+  version: string | null
+  allow_byok: boolean | null
+  error: string | null
+  /** Absolute path to the qoder binary codeg would launch; the panel builds a
+   * copy-pasteable `"<binary_path>" login` command from it. */
+  binary_path?: string | null
+}
+
 // Lightweight agent status returned by acp_get_agent_status
 export interface AcpAgentStatus {
   agent_type: AgentType
@@ -2980,6 +3005,7 @@ export type McpAppType =
   | "grok"
   | "cursor"
   | "deepseek"
+  | "qoder"
 
 export interface LocalMcpServer {
   id: string
