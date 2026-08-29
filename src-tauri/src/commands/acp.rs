@@ -3068,7 +3068,7 @@ fn import_existing_codex_catalog_source(codex_home: &Path) -> Option<String> {
     let root_model = toml_value.get("model").and_then(toml::Value::as_str);
     let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
     let config = crate::acp::codex_model_catalog::import_catalog(&catalog, root_model, &snapshot);
-    if crate::acp::codex_model_catalog::is_empty(&config) {
+    if crate::acp::codex_model_catalog::is_effectively_empty(&config, &snapshot) {
         return None;
     }
     serde_json::to_string(&config).ok()
@@ -3170,6 +3170,27 @@ fn codex_config_projection_from_toml(raw_toml: &str) -> serde_json::Map<String, 
         if !env_map.is_empty() {
             merged.insert("env".to_string(), serde_json::Value::Object(env_map));
         }
+    }
+
+    // `[features].default_mode_request_user_input` — the flag that lets codex
+    // call `request_user_input` outside Plan mode, i.e. whether codeg's
+    // question cards can appear in an ordinary turn at all
+    // (openai/codex#24750). Feature flags are resolved when the thread is
+    // created, so flipping this only reaches a session that starts afterwards;
+    // folding it into the fingerprint is what tells the user their RUNNING
+    // sessions need a restart. Same false-is-default rule as the sandbox keys
+    // below: absent and `false` both stay out, so a config nobody touched keeps
+    // its historical fingerprint.
+    if value
+        .get("features")
+        .and_then(|table| table.get("default_mode_request_user_input"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false)
+    {
+        merged.insert(
+            "defaultModeRequestUserInput".to_string(),
+            serde_json::Value::Bool(true),
+        );
     }
 
     // Sandbox / approval keys. codex reads these when a thread is created
@@ -3555,6 +3576,59 @@ fn is_absolute_config_path(value: &str) -> bool {
     }
 }
 
+/// Whether a `model_catalog_json` value points at the file codeg generates.
+/// Anything else is the user's OWN catalog — hand-written, or authored in the
+/// advanced config.toml editor — and codeg must never delete it. Resolved the
+/// way codex resolves the key, so an absolute path to codeg's own file counts
+/// as codeg-owned too. Unresolvable/foreign values answer `false`, which is the
+/// safe direction (leave the key alone).
+fn is_codeg_owned_catalog_ref(value: &str, codex_home: &Path) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    resolve_codex_home_relative(value, codex_home)
+        == codex_home.join(crate::acp::codex_model_catalog::CATALOG_REL)
+}
+
+/// Remove the root `model_catalog_json` key from codex's config.toml, keeping
+/// comments and every other key byte-identical. Returns `None` (no write) when
+/// the key is absent **or** points at a catalog codeg does not own, so this is
+/// safe to call on every save.
+///
+/// Pairs with [`crate::acp::codex_model_catalog::write_catalog_files`] returning
+/// `None`: codeg's generated files and the reference to them must appear and
+/// vanish together — codex refuses to start on a dangling `model_catalog_json`.
+fn remove_codex_catalog_key(
+    base_toml: &str,
+    codex_home: &Path,
+) -> Result<Option<String>, AcpError> {
+    let mut doc = base_toml
+        .parse::<toml_edit::Document>()
+        .map_err(|e| AcpError::protocol(format!("invalid codex config.toml: {e}")))?;
+    let owned = doc
+        .get("model_catalog_json")
+        .and_then(|v| v.as_str())
+        .map(|v| is_codeg_owned_catalog_ref(v, codex_home))
+        .unwrap_or(false);
+    if !owned {
+        return Ok(None);
+    }
+    doc.as_table_mut().remove("model_catalog_json");
+    Ok(Some(doc.to_string()))
+}
+
+/// Drop codeg's own `model_catalog_json` reference from the config.toml on disk,
+/// if it carries one. Reads fresh so it also cleans up a key written by an
+/// earlier codeg version or by another window since the panel opened.
+fn drop_codex_catalog_reference() -> Result<(), AcpError> {
+    let base = read_codex_config_or_empty()?;
+    if let Some(next) = remove_codex_catalog_key(&base, &codex_home_dir())? {
+        persist_codex_native_config_files(None, Some(&next))?;
+    }
+    Ok(())
+}
+
 /// Apply the Codex panel's sandbox / approval PATCH to the raw config.toml text,
 /// format-preservingly (comments and unmanaged keys are kept). Values are
 /// validated against the upstream vocabularies first, so a UI bug can never
@@ -3906,6 +3980,24 @@ pub(crate) fn grok_launch_permission_mode() -> Option<String> {
 /// launch-time channel that makes the user's own config mean anything, exactly
 /// like [`grok_launch_permission_mode`] above.
 ///
+/// ## What the three presets mean (codex-acp ≥1.7.0)
+///
+/// | preset | sandbox | approvals reviewer |
+/// |---|---|---|
+/// | `read-only` ("Ask for approval") | workspace-write | `user` |
+/// | `agent` ("Approve for me", DEFAULT) | workspace-write | `auto_review` |
+/// | `agent-full-access` ("Full access") | danger-full-access | policy `never` |
+///
+/// 1.7.0 redefined these. `read-only` used to carry a genuinely read-only
+/// sandbox; it now carries `workspaceWrite` like `agent`, and the two are
+/// separated by a new `approvalsReviewer` axis instead — `user` routes every
+/// escalation to the person, `auto_review` puts codex's Guardian model in front
+/// of it and only forwards what that judges unsafe (verified in the `@openai/
+/// codex` 0.148 binary: an `ApprovalsReviewer` enum plus a `guardian_*`
+/// telemetry surface carrying `risk_level` / `user_authorization`; codex's own
+/// `AskForApproval` vocabulary lists `on_request` and `on_request_auto_review`
+/// as DISTINCT policies).
+///
 /// ## Why it keys off the sandbox
 ///
 /// The sandbox is the only axis where guessing wrong ENLARGES access, so it
@@ -3915,6 +4007,33 @@ pub(crate) fn grok_launch_permission_mode() -> Option<String> {
 /// 1. never widen the sandbox — the result is identical or tighter;
 /// 2. never select `never` (no approvals at all) unless the config already says
 ///    exactly that.
+///
+/// ## Why the reviewer axis is NOT used to select
+///
+/// It is tempting to answer 1.7.0's redefinition by injecting `read-only` (the
+/// only user-reviewed preset) whenever the config asks to be consulted. That is
+/// wrong for two independent reasons:
+///
+/// - **It breaks older adapters.** `supports_custom_version()` is true for npx
+///   agents, so a user may pin codex-acp ≤1.6.2, where `read-only` is still a
+///   genuinely READ-ONLY sandbox. Injecting it for a `workspace-write` config
+///   would leave that agent unable to write any file — a silent, hard break.
+///   No preset injection is version-stable across the 1.6/1.7 boundary
+///   (`read-only` changed sandbox, `agent` changed reviewer), and
+///   `INITIAL_AGENT_MODE` is decided BEFORE launch, so the adapter's real
+///   version is not knowable here without an `npm list -g` spawn on the connect
+///   path.
+/// - **It could not help the majority anyway.** This mapping only fires when
+///   the user wrote a `sandbox_mode`. Everyone else gets no injection and so
+///   lands on the adapter's default `agent` — i.e. `auto_review` — regardless.
+///   Overriding the vendor's consent default for the minority who happened to
+///   write a sandbox key, while breaking their older pins, is not a coherent
+///   trade.
+///
+/// So the reviewer change is treated as what it is: an upstream default that
+/// every ACP client now inherits. codeg DISCLOSES it in the Codex panel, and the
+/// composer's approval-preset selector ("Ask for approval") remains the
+/// first-class, per-session control for a user who wants to adjudicate directly.
 ///
 /// ## What is deliberately NOT preserved
 ///
@@ -3927,6 +4046,14 @@ pub(crate) fn grok_launch_permission_mode() -> Option<String> {
 /// `on-request` PLUS a widened sandbox. Mapping is therefore strictly better on
 /// the sandbox axis and neutral on the approval axis; the panel discloses the
 /// approval loss to the user rather than pretending it away.
+///
+/// **The read-only sandbox, on codex-acp ≥1.7.0.** No preset carries one any
+/// more, and the adapter re-sends the selected preset's `sandboxPolicy` on every
+/// `runTurn`, so neither `config.toml` nor the `CODEX_CONFIG` session-config
+/// channel can put it back. `read-only` is still the right target for a
+/// read-only config — it is the tightest preset on both adapter generations —
+/// but on ≥1.7.0 the session really is workspace-writable, which the panel says
+/// out loud rather than papering over.
 fn codex_initial_agent_mode(settings: &CodexSandboxSettings) -> Option<&'static str> {
     // `default_permissions` makes codex resolve everything through that named
     // profile and IGNORE the root sandbox/approval keys entirely (the panel
@@ -3952,6 +4079,9 @@ fn codex_initial_agent_mode(settings: &CodexSandboxSettings) -> Option<&'static 
     // `on-request` and dropped anything outside `CODEX_APPROVAL_POLICIES`.
     let never = settings.approval_policy.as_deref() == Some("never");
     match settings.sandbox_mode.as_deref() {
+        // The tightest preset on BOTH adapter generations: a real read-only
+        // sandbox on ≤1.6.2, and workspace-write with user-adjudicated
+        // approvals on ≥1.7.0 (see the note above on what 1.7.0 removed).
         Some("read-only") => Some("read-only"),
         Some("workspace-write") => Some("agent"),
         // Full access is the one preset that removes approvals entirely, so it
@@ -4266,7 +4396,9 @@ fn persist_opencode_auth_json(raw_auth: &str) -> Result<(), AcpError> {
 // Kimi Code config helpers
 //
 // IMPORTANT — how `kimi acp` actually authenticates (reverse-engineered &
-// empirically verified against @moonshot-ai/kimi-code 0.19.1):
+// empirically verified against @moonshot-ai/kimi-code 0.19.1; still the exact
+// behaviour on 0.39.0, where the managed block + seeded token below were driven
+// through a real `session/new` + `session/prompt` again):
 //
 // `kimi acp` gates EVERY `session/new` on an OAuth-style token: it calls
 // `harnessIsAuthed`, which is true iff `~/.kimi-code/credentials/kimi-code.json`
@@ -5520,24 +5652,58 @@ pub(crate) fn pi_project_trust_launch_block(
 pub(crate) async fn acp_sync_antigravity_settings_core(
     db: &AppDatabase,
 ) -> Result<crate::acp::connection::AntigravitySyncReport, AcpError> {
-    // The read error is PROPAGATED, unlike the `.ok().flatten()` the pi trust
-    // path uses. This function's whole job is to report on the stored row, and
-    // treating a failed read as "no row" would not merely lose the method — it
-    // would hand the sync an empty environment, which on a machine with no
-    // settings.json yet writes `oauth-personal` and reports success for a
-    // choice the user did not make.
+    let runtime_env = antigravity_runtime_env(db).await?;
+    Ok(crate::acp::connection::sync_antigravity_settings_for_env(
+        &runtime_env,
+    ))
+}
+
+/// The environment a real Antigravity launch would compose from the STORED row.
+///
+/// The read error is PROPAGATED, unlike the `.ok().flatten()` the pi trust path
+/// uses. Treating a failed read as "no row" would not merely lose the method —
+/// it would hand the caller an empty environment, which on a machine with no
+/// settings.json yet writes `oauth-personal` and reports success for a choice
+/// the user did not make, and which points the browser-free sign-in at the
+/// default `~/.gemini` rather than the relocated `GEMINI_HOME` a session uses.
+async fn antigravity_runtime_env(db: &AppDatabase) -> Result<BTreeMap<String, String>, AcpError> {
     let setting = agent_setting_service::get_by_agent_type(&db.conn, AgentType::Antigravity)
         .await
         .map_err(|e| AcpError::protocol(e.to_string()))?;
     let local_config_json = load_agent_local_config_json(AgentType::Antigravity);
-    let runtime_env = build_runtime_env_from_setting(
+    Ok(build_runtime_env_from_setting(
         AgentType::Antigravity,
         setting.as_ref(),
         local_config_json.as_deref(),
-    );
-    Ok(crate::acp::connection::sync_antigravity_settings_for_env(
-        &runtime_env,
     ))
+}
+
+/// Start a browser-free Antigravity sign-in and hand back the link to open.
+///
+/// For headless deployments (codeg on a Linux server, no desktop), where the
+/// agent's own loopback browser flow cannot complete: it opens a browser that
+/// does not exist and then blocks for five minutes inside `session/new`. See
+/// [`crate::acp::antigravity_login`].
+pub(crate) async fn acp_antigravity_login_start_core(
+    db: &AppDatabase,
+    method_id: String,
+) -> Result<crate::acp::antigravity_login::AntigravityLoginStart, AcpError> {
+    let runtime_env = antigravity_runtime_env(db).await?;
+    crate::acp::antigravity_login::start(&runtime_env, method_id.trim()).await
+}
+
+/// Deliver the redirect the user's browser could not reach, completing the
+/// sign-in started by [`acp_antigravity_login_start_core`].
+pub(crate) async fn acp_antigravity_login_finish_core(
+    handle: String,
+    redirect: String,
+) -> Result<crate::acp::antigravity_login::AntigravityLoginOutcome, AcpError> {
+    crate::acp::antigravity_login::finish(handle.trim(), &redirect).await
+}
+
+/// Abandon a pending browser-free sign-in and stop its agent process.
+pub(crate) async fn acp_antigravity_login_cancel_core(handle: String) -> Result<(), AcpError> {
+    crate::acp::antigravity_login::cancel(handle.trim()).await
 }
 
 pub(crate) async fn acp_pi_project_trust_state_core(
@@ -6885,7 +7051,7 @@ async fn hermes_setup_argvs() -> (Vec<String>, Vec<String>) {
         // Unreachable: Hermes is always an Npx distribution. Fall through to
         // the npx guidance with the same pinned spec so a future match-arm
         // change can't resurrect a stale recipe.
-        _ => "hermes-agent@0.20.5",
+        _ => "hermes-agent@0.20.6",
     };
     let build = |tail: &[&str]| -> Vec<String> {
         let mut argv = vec![
@@ -10980,12 +11146,22 @@ pub(crate) async fn acp_update_agent_config_core(
         // the backend only (re)writes the generated catalog *files* here.
         if let Some(raw) = codex_model_catalog.as_deref() {
             let snapshot = crate::acp::codex_catalog_source::cached_or_bundled_snapshot();
-            if let Err(e) = crate::acp::codex_model_catalog::write_catalog_files(
+            match crate::acp::codex_model_catalog::write_catalog_files(
                 raw,
                 &codex_home_dir(),
                 &snapshot,
             ) {
-                tracing::error!("[acp_update_agent_config] write codex catalog failed: {e}");
+                // Catalog files gone (nothing deviates from codex's own list any
+                // more) — the reference must go with them, or codex fails to
+                // start on a `model_catalog_json` pointing at a missing file.
+                // The frontend only patches that key when the user *edits* the
+                // model editor, so a save that merely lets a stale removal
+                // dissolve would otherwise leave the two out of sync.
+                Ok(None) => drop_codex_catalog_reference()?,
+                Ok(Some(_)) => {}
+                Err(e) => {
+                    tracing::error!("[acp_update_agent_config] write codex catalog failed: {e}")
+                }
             }
         }
         emit_acp_agents_updated(emitter, "config_updated", Some(agent_type));
@@ -11328,6 +11504,34 @@ pub async fn acp_sync_antigravity_settings(
     db: tauri::State<'_, AppDatabase>,
 ) -> Result<crate::acp::connection::AntigravitySyncReport, AcpError> {
     acp_sync_antigravity_settings_core(&db).await
+}
+
+/// Start a browser-free Antigravity sign-in for a machine with no desktop.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_antigravity_login_start(
+    db: tauri::State<'_, AppDatabase>,
+    method_id: String,
+) -> Result<crate::acp::antigravity_login::AntigravityLoginStart, AcpError> {
+    acp_antigravity_login_start_core(&db, method_id).await
+}
+
+/// Complete a browser-free Antigravity sign-in from the address the user's
+/// browser was redirected to.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_antigravity_login_finish(
+    handle: String,
+    redirect: String,
+) -> Result<crate::acp::antigravity_login::AntigravityLoginOutcome, AcpError> {
+    acp_antigravity_login_finish_core(handle, redirect).await
+}
+
+/// Abandon a pending browser-free Antigravity sign-in.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_antigravity_login_cancel(handle: String) -> Result<(), AcpError> {
+    acp_antigravity_login_cancel_core(handle).await
 }
 
 /// Record (or clear, with `trusted: null`) an explicit project-trust decision in
@@ -12979,6 +13183,33 @@ mod tests {
     }
 
     #[test]
+    fn codex_initial_agent_mode_keeps_a_writable_config_writable_on_every_adapter() {
+        // Regression guard for a fix that looks right and is not. codex-acp
+        // 1.7.0 turned `read-only` into a workspace-write preset whose
+        // approvals are user-adjudicated, which invites mapping EVERY
+        // approval-wanting config onto it. But `supports_custom_version()` is
+        // true for npx agents, and on a user-pinned ≤1.6.2 that preset is still
+        // a genuinely READ-ONLY sandbox — the agent would silently be unable to
+        // write a single file. `INITIAL_AGENT_MODE` is chosen before launch, so
+        // the running adapter's version is not knowable here; the mapping must
+        // therefore stay keyed on the sandbox, which is the axis whose meaning
+        // did not move. See the "Why the reviewer axis is NOT used" note above.
+        for policy in [
+            "",
+            "approval_policy = \"on-request\"\n",
+            "approval_policy = \"on-failure\"\n",
+            "approval_policy = \"untrusted\"\n",
+        ] {
+            let toml = format!("{policy}sandbox_mode = \"workspace-write\"\n");
+            assert_eq!(
+                initial_mode_for(&toml),
+                Some("agent"),
+                "a writable config must never be handed the read-only preset ({policy:?})"
+            );
+        }
+    }
+
+    #[test]
     fn codex_initial_agent_mode_only_grants_full_access_on_an_exact_match() {
         // `agent-full-access` is the one preset with approvalPolicy `never`, so
         // it must never be inferred — both halves have to already say so.
@@ -13229,6 +13460,71 @@ mod tests {
         assert!(back.workspace_write.network_access);
     }
 
+    fn config_with_catalog_ref(value: &str) -> String {
+        format!(
+            "\
+# my codex config
+model = \"gw/x\"           # the model
+model_catalog_json = \"{value}\"
+model_provider = \"codeg\"
+
+[model_providers.codeg]
+base_url = \"https://example.test/v1\"
+"
+        )
+    }
+
+    #[test]
+    fn remove_codex_catalog_key_is_format_preserving_and_no_op_when_absent() {
+        let home = Path::new("/tmp/codeg-test-codex-home");
+        let base = config_with_catalog_ref("codeg-model-catalog.json");
+        let next = remove_codex_catalog_key(&base, home)
+            .unwrap()
+            .expect("codeg-owned key was present");
+        assert!(!next.contains("model_catalog_json"));
+        // Comments and every unmanaged key survive verbatim.
+        assert!(next.contains("# my codex config"));
+        assert!(next.contains("model = \"gw/x\"           # the model"));
+        assert!(next.contains("[model_providers.codeg]"));
+        assert!(next.contains("base_url = \"https://example.test/v1\""));
+        // No key → no rewrite at all (callers skip the disk write).
+        assert!(remove_codex_catalog_key(&next, home).unwrap().is_none());
+        assert!(remove_codex_catalog_key("", home).unwrap().is_none());
+    }
+
+    /// The cleanup must only ever reclaim codeg's OWN generated file. A catalog
+    /// the user wrote by hand (or typed into the advanced config.toml editor)
+    /// reaches this path on every panel save — deleting its reference would
+    /// silently orphan the user's models.
+    #[test]
+    fn remove_codex_catalog_key_preserves_user_owned_references() {
+        let home = Path::new("/tmp/codeg-test-codex-home");
+        for foreign in [
+            "manual.json",
+            "/abs/path/to/manual.json",
+            "~/my-catalog.json",
+            "nested/codeg-model-catalog.json",
+            "  ",
+        ] {
+            let base = config_with_catalog_ref(foreign);
+            assert!(
+                remove_codex_catalog_key(&base, home).unwrap().is_none(),
+                "must not touch a user-owned reference: {foreign}"
+            );
+        }
+        // An absolute path naming codeg's own file IS codeg-owned.
+        let abs = home
+            .join(crate::acp::codex_model_catalog::CATALOG_REL)
+            .to_string_lossy()
+            .into_owned();
+        assert!(is_codeg_owned_catalog_ref(&abs, home));
+        assert!(is_codeg_owned_catalog_ref(
+            crate::acp::codex_model_catalog::CATALOG_REL,
+            home
+        ));
+        assert!(!is_codeg_owned_catalog_ref("manual.json", home));
+    }
+
     #[test]
     fn apply_codex_sandbox_config_removes_keys_and_empty_section() {
         let base = "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n\n\
@@ -13412,6 +13708,40 @@ mod tests {
         );
         assert!(with_sandbox.contains_key("sandboxWorkspaceWrite"));
         assert_ne!(plain, with_sandbox, "the fingerprint input must change");
+    }
+
+    #[test]
+    fn codex_projection_folds_default_mode_request_user_input() {
+        // Feature flags resolve at thread creation, so turning questions on in
+        // Default mode must mark running sessions restart-required.
+        let base = "model = \"gpt-5\"\n";
+        let plain = codex_config_projection_from_toml(base);
+        assert!(!plain.contains_key("defaultModeRequestUserInput"));
+
+        let on = codex_config_projection_from_toml(
+            "model = \"gpt-5\"\n\n[features]\ndefault_mode_request_user_input = true\n",
+        );
+        assert_eq!(
+            on.get("defaultModeRequestUserInput")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_ne!(plain, on, "the fingerprint input must change");
+
+        // Explicit `false` IS codex's default, so it must hash identically to
+        // an untouched config — otherwise flipping the switch on and back off
+        // would leave every running session falsely marked restart-required.
+        let off = codex_config_projection_from_toml(
+            "model = \"gpt-5\"\n\n[features]\ndefault_mode_request_user_input = false\n",
+        );
+        assert_eq!(plain, off);
+
+        // Other `[features]` keys are not projected, and must not be mistaken
+        // for this one.
+        let other = codex_config_projection_from_toml(
+            "model = \"gpt-5\"\n\n[features]\nskills = true\n",
+        );
+        assert_eq!(plain, other);
     }
 
     #[test]
@@ -17048,7 +17378,7 @@ wire_api = "chat"
                     .expect("npx recipe must pin via --package");
                 assert_eq!(
                     argv.get(pkg_idx + 1).map(String::as_str),
-                    Some("hermes-agent@0.20.5")
+                    Some("hermes-agent@0.20.6")
                 );
                 assert_eq!(argv.get(pkg_idx + 2).map(String::as_str), Some("hermes"));
             } else {
@@ -17660,7 +17990,7 @@ model = "gpt"
             )
         };
 
-        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.20.5", download());
+        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.20.6", download());
         let text = annotated.to_string();
         assert!(text.contains("fetch failed"), "keeps the original error");
         assert!(text.contains("HTTP(S)_PROXY"), "adds the proxy hint");
@@ -17672,7 +18002,7 @@ model = "gpt"
 
         // A hermes failure that isn't a download stays untouched.
         let permissions = annotate_npm_bootstrap_failure(
-            "hermes-agent@0.20.5",
+            "hermes-agent@0.20.6",
             AcpError::Protocol("failed to install npm package globally: EACCES".to_string()),
         );
         assert!(!permissions.to_string().contains("HTTP(S)_PROXY"));

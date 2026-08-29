@@ -72,11 +72,17 @@ export interface AppCommandError {
   i18n_params?: Record<string, string> | null
 }
 
+export interface RemoteWorkspaceHeader {
+  name: string
+  value: string
+}
+
 export interface RemoteWorkspaceConnection {
   id: number
   name: string
   base_url: string
   token: string
+  headers: RemoteWorkspaceHeader[]
   sort_order: number
   created_at: string
   updated_at: string
@@ -86,6 +92,7 @@ export interface RemoteWorkspaceConnectionInput {
   name: string
   baseUrl: string
   token: string
+  headers: RemoteWorkspaceHeader[]
 }
 
 export interface ConversationSummary {
@@ -184,6 +191,8 @@ export type ContentBlock =
       revised_prompt?: string | null
       image?: ImageData | null
       status?: ToolCallStatus | null
+      /** Real tool/page name when this card is not Codex image generation. */
+      label?: string | null
     }
   | {
       type: "tool_use"
@@ -1510,6 +1519,10 @@ export interface ForgeIssueRow {
   draft: boolean
   labels: ForgeLabel[]
   author: string | null
+  /** The author's picture, `http(s)` only — under the same rule (and from the
+   *  same sanitizer) as `ForgeComment.author_avatar`. Rides along with the list
+   *  row on both forges, so the panel's author avatar costs no request. */
+  author_avatar: string | null
   updated_at: string | null
   html_url: string
   is_pr: boolean
@@ -1539,6 +1552,216 @@ export interface ForgeIssueList {
   has_next: boolean
   /** GitHub search timed out; this page is partial. */
   incomplete: boolean
+}
+
+/** Who a write against a folder goes out as (mirrors Rust ForgeIdentity).
+ *
+ *  Resolved by the backend from the origin remote's host and an optional
+ *  pinned account — the panel has no way to work it out, and the default
+ *  account would be the wrong answer on any folder that is not on it.
+ *  Deliberately carries no token: it is derived from the value that holds one. */
+export interface ForgeIdentity {
+  username: string
+  /** `http(s)` only, like every other avatar the panel renders. */
+  avatar_url: string | null
+}
+
+/** One human comment on a work item (mirrors Rust ForgeComment).
+ *
+ *  "Human" is the selection rule the backend applies: GitHub's review comments
+ *  live on another endpoint and GitLab's system events ("changed the
+ *  milestone") are filtered out, so this thread is exactly the set
+ *  `ForgeIssueRow.comments` counts. */
+export interface ForgeComment {
+  /** The forge's own id, stringified — a React key and the de-duplication
+   *  handle across pages, never a number to do arithmetic with. */
+  id: string
+  author: string | null
+  /** `http(s)` only; null when the forge sent nothing usable. */
+  author_avatar: string | null
+  body: string
+  created_at: string | null
+  /** Present only when the comment was EDITED — both forges stamp an
+   *  `updated_at` on creation, and the backend drops the ones that merely
+   *  repeat `created_at`. */
+  updated_at: string | null
+  html_url: string | null
+}
+
+/** One page of an item's discussion (mirrors Rust ForgeCommentList). No total:
+ *  neither forge counts this collection cheaply, and the count the panel shows
+ *  is `ForgeIssueRow.comments`, which the list already paid for. */
+export interface ForgeCommentList {
+  comments: ForgeComment[]
+  page: number
+  per_page: number
+  /** Whether the FORGE has another page. Not "the page came back full": GitLab
+   *  drops system notes after paginating, so a page can hold no comments at
+   *  all and still have a discussion behind it. */
+  has_next: boolean
+}
+
+/** What the panel's state button does to an item (mirrors Rust
+ *  ForgeStateAction). Two VERBS rather than a target state — that is what
+ *  GitLab's API takes and what a button means. Merging is deliberately absent:
+ *  it is a different operation with its own preconditions, not a state. It has
+ *  its own door — see `ForgeMergeMethod`. */
+export type ForgeStateAction = "close" | "reopen"
+
+/** How a change is joined to its base branch (mirrors Rust ForgeMergeMethod).
+ *
+ *  One vocabulary, two very different offers behind it. GitHub takes the method
+ *  per merge and lets a repository forbid any of the three. GitLab takes no
+ *  method at all — the PROJECT picks between a merge commit, a rebase-merge and
+ *  a fast-forward — and the only thing a caller chooses is whether to squash,
+ *  so `rebase` never reaches it. Which is why the menu is built from
+ *  `ForgeMergeOptions` rather than from this union. */
+export type ForgeMergeMethod = "merge" | "squash" | "rebase"
+
+/** What `merge` actually DOES to the history (mirrors Rust
+ *  ForgeMergeStrategy).
+ *
+ *  The method and the result are the same question on GitHub — `merge` writes a
+ *  merge commit, full stop. On GitLab they are not: the project's own setting
+ *  picks between a merge commit, a rebase-then-merge and a fast-forward, and
+ *  the API offers no override. This is what stops the menu promising a merge
+ *  commit to a fast-forward-only project. */
+export type ForgeMergeStrategy =
+  | "merge_commit"
+  | "rebase_merge"
+  | "fast_forward"
+
+/** The merge methods one repository permits (mirrors Rust ForgeMergeOptions).
+ *
+ *  Asked for separately from `ForgeChangeDetail` and only when the panel is
+ *  about to draw the button: it is a REPOSITORY fact, and folding it into the
+ *  detail would spend a request on every change opened merely to read it. */
+export interface ForgeMergeOptions {
+  /** In the order to offer them. EMPTY means the forge would not say — a token
+   *  that reads the change but not the repository's settings gets this — and
+   *  the panel then offers `merge` alone rather than entries that can only
+   *  fail. */
+  methods: ForgeMergeMethod[]
+  /** Which one starts selected. Always a member of `methods` when that is
+   *  non-empty. */
+  default_method: ForgeMergeMethod
+  /** What `merge` will do here — see `ForgeMergeStrategy`. */
+  merge_strategy: ForgeMergeStrategy
+}
+
+/** How a check ended up, in ONE vocabulary (mirrors Rust ForgeCheckState).
+ *
+ *  GitHub crosses `status` with `conclusion` and keeps a second legacy
+ *  commit-status vocabulary; GitLab has its own eleven job statuses. All three
+ *  are folded by the backend, so this switches on five values instead of
+ *  eighteen. `neutral` is deliberately not `success`: a skipped required check
+ *  is not a pass. */
+export type ForgeCheckState =
+  | "queued"
+  | "running"
+  | "success"
+  | "failure"
+  | "neutral"
+
+/** One CI check on a change's head commit (mirrors Rust ForgeCheck). */
+export interface ForgeCheck {
+  id: string
+  name: string
+  state: ForgeCheckState
+  /** One-line detail — GitHub's status description, GitLab's stage. */
+  summary: string | null
+  /** `http(s)` only; null when the forge sent nothing usable. */
+  url: string | null
+  /** A failure here does not block the change (GitLab's `allow_failure`;
+   *  always false on GitHub, which has no per-check equivalent). */
+  allow_failure: boolean
+}
+
+/** A change's checks, and how much of the answer arrived (mirrors Rust
+ *  ForgeCheckList).
+ *
+ *  `available: false` is NOT "no checks ran" — it means the forge would not
+ *  say (a token without `checks:read`, CI disabled). An empty list under
+ *  `available: true` means nothing is configured. Collapsing the two prints
+ *  "no checks" over a repository whose pipeline is red.
+ *
+ *  `partial` is the same distinction one level down: GitHub keeps its checks
+ *  in TWO collections behind TWO fine-grained permissions, so a token granted
+ *  only one of them gets a 403 from one endpoint and an empty list from the
+ *  other. That half answer must not be drawn as a complete one. */
+export interface ForgeCheckList {
+  checks: ForgeCheck[]
+  available: boolean
+  /** Some checks could not be read; this list may be missing entries. Always
+   *  false when `available` is false — there is no partial answer to qualify. */
+  partial: boolean
+}
+
+/** What a proposed change is, beyond what its list row says (mirrors Rust
+ *  ForgeChangeDetail).
+ *
+ *  Every counter is nullable because the two forges answer different halves:
+ *  GitHub's pull object carries additions/deletions/changed_files/commits,
+ *  GitLab's merge request carries none of them. A zero would claim the change
+ *  touches nothing, so absent stays absent. */
+export interface ForgeChangeDetail {
+  number: number
+  /** Where it would land. */
+  base_ref: string
+  /** What would land. */
+  head_ref: string
+  /** `owner/repo` of the head, present ONLY when it is a fork. */
+  head_repo: string | null
+  head_sha: string | null
+  draft: boolean
+  state: string
+  /** Tri-state on BOTH forges: null is "the server has not worked it out yet"
+   *  (GitHub computes it asynchronously, GitLab says `unchecked`), which is a
+   *  different answer from false. */
+  mergeable: boolean | null
+  /** The forge's own word for the situation, for a tooltip — the two
+   *  vocabularies do not line up and a translation would read as a diagnosis. */
+  merge_state: string | null
+  additions: number | null
+  deletions: number | null
+  changed_files: number | null
+  commits: number | null
+  checks: ForgeCheckList
+}
+
+/** How a file was touched (mirrors Rust ForgeFileStatus). */
+export type ForgeFileStatus = "added" | "removed" | "modified" | "renamed"
+
+/** One file a change touches (mirrors Rust ForgeChangedFile). */
+export interface ForgeChangedFile {
+  /** Path AFTER the change (the old one for a deletion). */
+  path: string
+  /** Where a rename came from; null otherwise. */
+  previous_path: string | null
+  status: ForgeFileStatus
+  /** Null when the forge does not count — a binary file has no line counts on
+   *  either forge. */
+  additions: number | null
+  deletions: number | null
+  binary: boolean
+  /** The file's own unified diff, as the forge shipped it with the page — it
+   *  costs no extra request, the backend simply stopped discarding it.
+   *
+   *  Null means there is nothing to open onto, for either of two reasons: the
+   *  content is binary, or the forge WITHHELD the diff (GitHub omits it past
+   *  its own size limit while still reporting the line counts). Neither is an
+   *  empty diff, which is why the row offers no reveal rather than a reveal
+   *  onto nothing. */
+  patch: string | null
+}
+
+/** One page of a change's file list (mirrors Rust ForgeChangedFileList). */
+export interface ForgeChangedFileList {
+  files: ForgeChangedFile[]
+  page: number
+  per_page: number
+  /** From the forge's own pagination signal, never from the row count. */
+  has_next: boolean
 }
 
 /** A folder's `origin` remote parsed into forge coordinates. */
@@ -2156,7 +2379,10 @@ export type AcpEvent =
       type: "session_load_failed"
       session_id: string
       message: string
-      /** Stable backend identifier — currently `"resource_not_found"`. */
+      /**
+       * Stable backend identifier: `"resource_not_found"`,
+       * `"session_unavailable"`, or `"session_archived"`.
+       */
       code: string
     }
   | {
@@ -4124,4 +4350,108 @@ export function serializeCodexModelConfig(
   // expand time and falls back if it names no listed model.
   if (obj.default && obj.default.trim()) out.default = obj.default.trim()
   return JSON.stringify(out)
+}
+
+/** Whether a catalog entry is offered in codex's model picker. Codex flips
+ *  retired models to `hide` rather than deleting them (they keep an `upgrade`
+ *  migration stub), so "official the user can see" always means listable. */
+function isListableModel(m: CodexModelInfo): boolean {
+  return (m.visibility ?? "list") === "list"
+}
+
+/** Drop `excludedOfficials` entries that no longer name a **listable** official.
+ *
+ *  Codex retires models by flipping them to `visibility:"hide"` (0.147 did this
+ *  to `gpt-5.4` / `gpt-5.4-mini`), which turns a past removal into a *ghost*: it
+ *  is invisible in the editor yet still counts as a customization, so codeg goes
+ *  on replacing codex's whole model table for no benefit. Pruning lets the
+ *  config heal itself on the next save.
+ *
+ *  `officials` empty (catalog still loading, or codex unreachable) means "we
+ *  can't tell" — the config is returned untouched so an offline session never
+ *  destroys the user's removals. The trade-off when we *can* tell: temporarily
+ *  running an older codex that lacks a model forgets that model's removal. That
+ *  is rarer and far less harmful than ghosts accumulating forever. */
+export function pruneCodexGhostExclusions(
+  config: CodexModelConfig,
+  officials: CodexModelInfo[]
+): CodexModelConfig {
+  const excluded = config.excludedOfficials ?? []
+  if (!excluded.length || !officials.length) return config
+  const listable = new Set(officials.filter(isListableModel).map((m) => m.slug))
+  const kept = excluded.filter((slug) => listable.has(slug))
+  if (kept.length === excluded.length) return config
+  const next: CodexModelConfig = { ...config }
+  if (kept.length) next.excludedOfficials = kept
+  else delete next.excludedOfficials
+  return next
+}
+
+/** Whether the user has deviated from codex's own catalog in a way that still
+ *  applies — i.e. what actually justifies taking over `model_catalog_json`.
+ *  Ghost exclusions (see [[pruneCodexGhostExclusions]]) don't count. */
+export function hasCodexCustomization(
+  config: CodexModelConfig,
+  officials: CodexModelInfo[]
+): boolean {
+  if (config.customs.length > 0) return true
+  return (
+    (pruneCodexGhostExclusions(config, officials).excludedOfficials ?? [])
+      .length > 0
+  )
+}
+
+/** ModelInfo overrides that make a cloned GPT entry speak **plain** OpenAI
+ *  Responses, for third-party gateways that only implement the public API.
+ *
+ *  Verified by capturing what codex 0.147 actually puts on the wire: a stock
+ *  `gpt-5.6-sol` sends `tools: []` plus a non-standard `additional_tools`
+ *  developer input item, no `instructions`, and `reasoning.context` — nothing a
+ *  compatible endpoint can serve. With these overrides the same request becomes
+ *  standard: `instructions` + a plain `function` tool array + `reasoning:
+ *  {effort}`. `apply_patch_tool_type:null` additionally drops the
+ *  `type:"custom"` freeform-grammar tool.
+ *
+ *  Not included on purpose: the residual `tool_search` / `web_search` /
+ *  `namespace` tools come from codex's global feature flags, not from ModelInfo,
+ *  so a per-model template cannot (and shouldn't) touch them. */
+export const CODEX_COMPAT_OVERRIDES: Record<string, unknown> = {
+  tool_mode: null,
+  multi_agent_version: null,
+  use_responses_lite: false,
+  apply_patch_tool_type: null,
+  supports_image_detail_original: false,
+}
+
+/** Apply (or clear) the compatibility bundle on an entry's overrides, keeping
+ *  the sparse-write rule the editor uses everywhere: a value equal to the clone
+ *  base carries no override, so `serialize` stays byte-stable. Overrides outside
+ *  the bundle are left alone. Clearing drops the bundle keys so each field falls
+ *  back to the base again. */
+export function applyCodexCompatOverrides(
+  entry: CodexCustomEntry,
+  base: Record<string, unknown>,
+  enabled: boolean
+): Record<string, unknown> | undefined {
+  const next = { ...(entry.overrides ?? {}) }
+  for (const [key, value] of Object.entries(CODEX_COMPAT_OVERRIDES)) {
+    if (!enabled || Object.is(value, base[key])) delete next[key]
+    else next[key] = value
+  }
+  return Object.keys(next).length ? next : undefined
+}
+
+/** Whether an entry's **effective** values (override, else clone base) match the
+ *  compatibility bundle. Derived rather than stored, so the persisted shape
+ *  stays "sparse overrides only" — and a base that already ships a compat value
+ *  (e.g. `gpt-5.2` has `use_responses_lite:false`) still reads as compatible
+ *  even though no override records it. */
+export function isCodexCompatEntry(
+  entry: CodexCustomEntry,
+  base: Record<string, unknown>
+): boolean {
+  const overrides = entry.overrides ?? {}
+  return Object.entries(CODEX_COMPAT_OVERRIDES).every(([key, value]) =>
+    Object.is(key in overrides ? overrides[key] : base[key], value)
+  )
 }

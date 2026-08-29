@@ -36,6 +36,7 @@ import {
   splitAbsPath,
 } from "@/lib/file-open-target"
 import { isAbsoluteFilePath } from "@/lib/file-path-display"
+import { pushClosedTab, snapshotFileTab } from "@/lib/closed-tab-stack"
 import {
   isHiddenPath,
   isHtmlPreviewable,
@@ -254,8 +255,12 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/")
 }
 
+// Most callers pass an already-normalized path, but the working-diff overview
+// titles the tab after the FOLDER path, which is native — on Windows a
+// "/"-only split handed back `C:\work\repo` as the file name.
 function fileName(path: string): string {
-  return path.split("/").pop() || path
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
+  return (index >= 0 ? path.slice(index + 1) : path) || path
 }
 
 function isDirtyFileTab(tab: FileWorkspaceTab): boolean {
@@ -2153,6 +2158,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           if (!confirmed) return prev
         }
 
+        // `pushClosedTab` keys on the tab id and moves an existing entry to the
+        // top, so recording from inside this updater survives React invoking it
+        // more than once (StrictMode, or a discarded render replayed).
+        const closed = snapshotFileTab(tab)
+        if (closed) pushClosedTab(closed)
+
         const next = prev.filter((candidate) => candidate.id !== tabId)
 
         setActiveFileTabId((current) => {
@@ -2200,6 +2211,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         }
 
         for (const closing of closingTabs) {
+          // `pushClosedTab` is idempotent per tab id, which is what makes this
+          // safe inside an updater React may invoke more than once.
+          const closed = snapshotFileTab(closing)
+          if (closed) pushClosedTab(closed)
           inFlightLoadsRef.current.delete(closing.id)
         }
 
@@ -2216,6 +2231,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (prev.some(isDirtyFileTab)) {
         const confirmed = window.confirm(t("confirmCloseAllDirtyTabs"))
         if (!confirmed) return prev
+      }
+
+      for (const tab of prev) {
+        const closed = snapshotFileTab(tab)
+        if (closed) pushClosedTab(closed)
       }
 
       inFlightLoadsRef.current.clear()
