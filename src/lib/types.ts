@@ -592,11 +592,17 @@ export interface ImportResult {
   imported: number
   updated: number
   skipped: number
+  /** Soft-deleted conversations this import brought back. Only ever non-zero
+   *  for the picker, which imports sessions the user checked one by one. */
+  restored: number
 }
 
 /** Mirrors Rust `ScanSessionStatus` — how one locally-discovered session
  *  reconciles against the DB by `(external_id, agent_type)`. `deleted` means
- *  only soft-deleted rows exist; import never resurrects those. */
+ *  only soft-deleted rows exist — deletion is a soft delete, so importing such
+ *  a session RESTORES the existing row (id, history and all) instead of
+ *  inserting a second one. The picker gates that behind an explicit
+ *  "include deleted" opt-in so a select-all can never mass-resurrect. */
 export type ScanSessionStatus = "new" | "imported" | "deleted"
 
 /** Mirrors Rust `ScanSession`: one locally-discovered agent session in the
@@ -649,6 +655,7 @@ export interface ImportFolderOutcome {
   imported: number
   updated: number
   skipped: number
+  restored: number
 }
 
 /** Mirrors Rust `ImportSelectedResult` — response of
@@ -657,6 +664,8 @@ export interface ImportSelectedResult {
   imported: number
   updated: number
   skipped: number
+  /** Soft-deleted conversations the user re-selected, brought back in place. */
+  restored: number
   not_found: number
   failed: number
   created_folders: number
@@ -2576,7 +2585,7 @@ export type AcpEvent =
       record: SessionFailureRecord
     }
   /**
-   * A JetBrains AIR async-task delta (claude only — see `AsyncTaskDelta`).
+   * A JetBrains AIR async-task delta (claude + codex — see `AsyncTaskDelta`).
    * PARTIAL by design: the reducer merges it into the connection's task table
    * by the same rule the backend snapshot applies, and only a `spawned` delta
    * may create a row.
@@ -2894,6 +2903,15 @@ export interface FeedbackItem {
   created_at: string
   status: FeedbackStatus
   delivered_at?: string | null
+  /** What the user actually sent, when the note carried more than plain text
+   *  (image attachments). Absent for a text-only note — every pull-channel one,
+   *  and the historical native one — where `text` is the whole message.
+   *
+   *  Needed because `text` is the DISPLAY form the composer collapses a draft
+   *  into, so a steered image would otherwise reach the live transcript as
+   *  words about an image. Backend-projected by `user_blocks_from_prompt`
+   *  after hydration, the same shape `user_message` broadcasts. */
+  blocks?: UserMessageBlock[] | null
 }
 
 /** Snapshot of the most recent ACP runtime error. */
@@ -2960,22 +2978,30 @@ export interface AsyncTaskUsage {
 
 /**
  * One JetBrains AIR async task (mirror of Rust `AsyncTaskRecord`;
- * claude-agent-acp 0.73+, published only because codeg advertises the
- * `asyncTasks` AIR capability — codex-acp has no such channel).
+ * claude-agent-acp 0.73+ and codex-acp 1.10+, published only because codeg
+ * advertises the `asyncTasks` AIR capability).
  *
- * Claude's NON-AGENT background work: background shells, workflows, monitors.
- * Sub-agents are excluded by the adapter itself. This is the MERGED row, not a
- * wire frame — the adapter announces a task once and then revises it with
- * partial deltas (`AsyncTaskDelta`), and the reducer applies the same merge as
- * the backend's `SessionState::apply_event` so a client hydrating from the
- * snapshot and one that saw every delta agree.
+ * The agent's NON-AGENT background work: Claude's background shells, workflows
+ * and monitors; codex's background terminals. Sub-agents are excluded by the
+ * adapters themselves. This is the MERGED row, not a wire frame — the adapter
+ * announces a task once and then revises it with partial deltas
+ * (`AsyncTaskDelta`), and the reducer applies the same merge as the backend's
+ * `SessionState::apply_event` so a client hydrating from the snapshot and one
+ * that saw every delta agree.
+ *
+ * codex fills in far less than claude: no `description`, `usage` or
+ * `output_file_path`, and `task_id` simply EQUALS `tool_call_id` for a
+ * root-session task. Every one of those is optional by design, so the strip
+ * degrades to a name-only row rather than rendering blanks.
  */
 export interface AsyncTaskRecord {
   task_id: string
-  /** Adapter-authored label — the workflow name, else the description. */
+  /** Adapter-authored label — claude: the workflow name, else the description;
+   *  codex: the launching tool call's title, else the raw command. */
   name: string
   /** Already friendly: `shell` | `workflow` | `monitor` | `task`, or an
-   *  unmapped future value rendered as itself. NOT the SDK's raw type. */
+   *  unmapped future value rendered as itself. NOT the SDK's raw type.
+   *  codex publishes `shell` for every background terminal. */
   task_type: string
   description: string
   /** Whether the task earns its own transcript card upstream. The strip renders
@@ -3758,7 +3784,10 @@ export interface GitHubAccount {
   provider?: ForgeProviderId | null
 }
 
-export type ForgeProviderId = "github" | "gitlab"
+/** Mirrors `forge::ForgeProvider`. `"gitea"` covers Forgejo too — it is a
+ *  Gitea fork serving the same `/api/v1`, and one wire value keeps one
+ *  instance's accounts and provenance keys from splitting in two. */
+export type ForgeProviderId = "github" | "gitlab" | "gitea"
 
 export interface GitHubAccountsSettings {
   accounts: GitHubAccount[]
@@ -3792,6 +3821,22 @@ export interface LocalMcpServer {
   id: string
   spec: Record<string, unknown>
   apps: McpAppType[]
+}
+
+/** One agent whose MCP config the scan could not read. */
+export interface LocalMcpSourceWarning {
+  app: McpAppType
+  message: string
+}
+
+/**
+ * A local MCP scan: everything codeg could read, plus a warning per source it
+ * could not. A single unreadable config degrades to a warning instead of
+ * failing the whole scan (issue #632).
+ */
+export interface LocalMcpScan {
+  servers: LocalMcpServer[]
+  warnings: LocalMcpSourceWarning[]
 }
 
 export interface McpMarketplaceProvider {

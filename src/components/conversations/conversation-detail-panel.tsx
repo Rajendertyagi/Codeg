@@ -111,6 +111,7 @@ import {
   type MessageTurn,
   type PlanApprovalAnswer,
   type PromptDraft,
+  type PromptInputBlock,
   type QuestionAnswer,
   type UserMessageBlock,
 } from "@/lib/types"
@@ -119,6 +120,7 @@ import {
   lastUserPromptText,
   type SessionFailureAction,
 } from "@/lib/session-failures"
+import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   getSavedModeId,
@@ -209,15 +211,10 @@ function buildUserTurnFromMessageBlocks(
   messageId: string,
   blocks: UserMessageBlock[]
 ): MessageTurn {
-  const contentBlocks: ContentBlock[] = blocks.map((b) =>
-    b.type === "image"
-      ? { type: "image", data: b.data, mime_type: b.mime_type, uri: null }
-      : { type: "text", text: b.text }
-  )
   return {
     id: messageId,
     role: "user",
-    blocks: contentBlocks,
+    blocks: contentBlocksFromUserMessage(blocks),
     timestamp: new Date().toISOString(),
   }
 }
@@ -1252,18 +1249,26 @@ const ConversationTabView = memo(function ConversationTabView({
     handleSendRef.current = handleSend
   }, [handleSend])
 
-  // "Fork from here": fork at a rendered assistant turn instead of at the tail,
-  // and DON'T send anything. Unlike fork-send there is no draft to protect, so a
-  // failure is just reported — the session is untouched, and the same click can
-  // be retried or aimed at a different turn.
+  // "Fork from here": fork at a rendered assistant turn, sending nothing. The
+  // ONLY fork entry point — the composer's fork-and-send was removed once this
+  // existed, since the tail is just one of the turns this can be aimed at.
+  //
+  // No draft is at stake, so a failure is simply reported: the session is
+  // untouched and the same click can be retried, or aimed elsewhere.
   //
   // Which turns the agent can actually name is the backend's call
   // (`resolve_fork_point`): a turn it cannot name forks at the tail rather than
   // failing, so this never has to reason about per-agent identity.
+  //
+  // Liveness is read off `connStatusRef` rather than captured: this callback is
+  // handed to every rendered reply, so taking `connStatus` as a dependency
+  // would swap its identity at both ends of every turn and re-render the whole
+  // mounted transcript window for nothing. The ref is also the fresher answer
+  // at click time.
   const handleForkFromTurn = useCallback(
     async (turnId: string) => {
       const connectionId = conn.connectionId
-      if (!connectionId || connStatus !== "connected") return
+      if (!connectionId || connStatusRef.current !== "connected") return
       // Snapshot which live turns belong to the PRE-fork session, before the
       // await. The fork RPC is a window in which a send can still start — a
       // queued auto-flush, a fast typist, another client — and such a turn
@@ -1293,11 +1298,11 @@ const ConversationTabView = memo(function ConversationTabView({
         )
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
-        // Same two-row reshuffle as fork-send: the current row now points at
-        // S2 and a sibling preserves S1.
+        // The backend's two-row reshuffle: the current row now points at S2
+        // and a freshly inserted sibling preserves S1.
         refreshConversations()
-        // Unlike fork-send, this row's HISTORY just changed: the whole point is
-        // that S2 ends at the chosen turn. The turns rendered right now came
+        // This row's HISTORY just changed — the whole point is that S2 ends
+        // at the chosen turn. The turns rendered right now came
         // from S1 — the persisted detail plus every turn this session streamed
         // — so leaving them would show the fork with the parent's full history
         // until the tab is closed and reopened.
@@ -1332,7 +1337,6 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [
       conn.connectionId,
-      connStatus,
       effectiveConversationId,
       folderId,
       refetchDetail,
@@ -1967,8 +1971,15 @@ const ConversationTabView = memo(function ConversationTabView({
         // not at risk of being jumped and needs no guard here. A turn in
         // flight is still rejected, by the backend, which is the only place
         // that can see it without racing.
+        //
+        // "prompting" belongs on this side of the gate (same shape as the
+        // goal-control gate above): this answers "can this surface fork at
+        // all", and a turn in flight is a passing "not right now" that the
+        // view greys the button out for. Dropping the handler instead made
+        // every reply's fork icon disappear for the length of each reply.
+        // `handleForkFromTurn` re-checks liveness at click time.
         onForkFromTurn={
-          connStatus === "connected" &&
+          (connStatus === "connected" || connStatus === "prompting") &&
           hasPersistedConversation &&
           conn.supportsFork
             ? handleForkFromTurn
@@ -1999,15 +2010,22 @@ const ConversationTabView = memo(function ConversationTabView({
     connectionId: conn.connectionId,
     connStatus,
     enabled: feedbackEnabled,
+    // Notes the transcript adopted as mid-turn user turns show as messages,
+    // not as strips above the composer.
+    steeredMessageIds: conn.steeredMessageIds,
     onResendAsPrompt: resendFeedbackAsPrompt,
   })
-  // Composer "insert into current turn" (native steering only). Rethrows —
-  // MessageInput owns the enqueue fallback and draft-preservation policy, so
-  // this wrapper must not swallow the turn-end race the way `submit` does.
+  // Composer mid-turn send, over whichever live-feedback channel this session
+  // has (native push or the pull tool). Rethrows — MessageInput owns the
+  // enqueue fallback and draft-preservation policy, so this wrapper must not
+  // swallow the turn-end race the way `submit` does. `blocks` rides along when
+  // the draft carries attachments (images steer natively; the pull path
+  // rejects them into the composer's queue fallback); `text` stays the
+  // recorded/display form.
   const feedbackSteer = feedback.steer
   const handleSteer = useCallback(
-    async (text: string) => {
-      await feedbackSteer(text)
+    async (text: string, blocks?: PromptInputBlock[]) => {
+      await feedbackSteer(text, blocks)
     },
     [feedbackSteer]
   )
@@ -2076,7 +2094,15 @@ const ConversationTabView = memo(function ConversationTabView({
       composerBanner={acpLoadErrorBanner}
       feedbackList={
         feedback.showList ? (
-          <FeedbackNotesDisplay notes={feedback.notes} />
+          <FeedbackNotesDisplay
+            notes={feedback.notes}
+            // Past the turn the list is the only place an unread note still
+            // exists on screen, so it carries its own recovery actions rather
+            // than disappearing with the turn that never read it.
+            expired={feedback.notesExpired}
+            onResend={feedback.resendNote}
+            onDismiss={feedback.dismissNote}
+          />
         ) : null
       }
       onAddFeedback={feedback.featureEnabled ? feedback.openDialog : undefined}
@@ -2095,13 +2121,17 @@ const ConversationTabView = memo(function ConversationTabView({
       onSaveQueueEdit={handleSaveQueueEdit}
       onCancelQueueEdit={handleQueueCancelEdit}
       onSteer={
-        // Native channel only: on pull sessions the prompting branch must
-        // stay pixel-identical (Stop button alone). The prompting scope
-        // itself is enforced where the button renders.
-        feedback.featureEnabled && feedback.channel === "native"
+        // Any working delivery channel, not just the native push: the pull
+        // tool records a waiting note the agent reads on its next check, and
+        // `steerChannel` swaps the copy so pull sessions never promise an
+        // instant insert. Sessions with NEITHER channel keep the historical
+        // prompting branch (Stop button alone, Enter queues). The prompting
+        // scope itself is enforced where the button renders.
+        feedback.featureEnabled && feedback.steerAvailable
           ? handleSteer
           : undefined
       }
+      steerChannel={feedback.channel}
     >
       {isWelcomeMode ? (
         // Same overlay scrollbar as the sidebar / file lists (os-theme-codeg)

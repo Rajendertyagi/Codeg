@@ -24,11 +24,11 @@ use sacp::schema::{
 use sacp::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use sacp::util::MatchDispatch;
 use sacp::{
-    on_receive_request, Agent, Client, ConnectionTo, Dispatch, JsonRpcRequest, Responder,
-    SessionMessage, UntypedMessage,
+    on_receive_notification, on_receive_request, Agent, Client, ConnectionTo, Dispatch,
+    JsonRpcRequest, Responder, SessionMessage, UntypedMessage,
 };
 use sacp_tokio::AcpAgent;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::acp::agent_mentions::append_agent_routes;
 use crate::acp::background_watch;
@@ -965,30 +965,33 @@ pub enum ConnectionCommand {
         reply:
             tokio::sync::oneshot::Sender<Result<crate::acp::types::ForkProtocolResult, AcpError>>,
     },
-    /// Inject a live-feedback note into the RUNNING turn over the ACP
+    /// Inject a live-feedback message into the RUNNING turn over the ACP
     /// `_session/steering` extension (native push channel — see
-    /// `manager::submit_feedback`). The loop does the protocol round-trip
-    /// only and replies the parsed outcome; recording the note + the
-    /// `FeedbackSubmitted` broadcast happen in the manager's
-    /// cancellation-shielded task, mirroring Fork's protocol/persistence
-    /// split. The idle arm replies `Err(NoActiveTurn)` so the oneshot can
-    /// never hang.
+    /// `manager::submit_feedback`). Carries the same `PromptInputBlock`s a
+    /// normal prompt does (text plus image attachments), mapped onto the wire
+    /// with the same conversion, so a steered draft keeps its attachments.
+    /// The loop does the protocol round-trip only and replies the parsed
+    /// outcome; recording the note + the `FeedbackSubmitted` broadcast happen
+    /// in the manager's cancellation-shielded task, mirroring Fork's
+    /// protocol/persistence split. The idle arm replies `Err(NoActiveTurn)`
+    /// so the oneshot can never hang.
     Steer {
-        text: String,
+        blocks: Vec<PromptInputBlock>,
         reply: tokio::sync::oneshot::Sender<Result<SteerOutcome, AcpError>>,
     },
     /// Stop one AIR async task (`_session/async_task/stop`; claude-agent-acp
-    /// 0.73+). Handled in BOTH loops on purpose: background work is normally
-    /// launched by — and outlives — a turn, so the user is as likely to reach
-    /// for the stop button mid-turn as between turns.
+    /// 0.73+, codex-acp 1.10+ — identical params and response on both).
+    /// Handled in BOTH loops on purpose: background work is normally launched
+    /// by — and outlives — a turn, so the user is as likely to reach for the
+    /// stop button mid-turn as between turns.
     ///
     /// The reply is the adapter's own `stopped` flag, not "did the request
     /// succeed": it answers `false` for a task it will not stop (unknown,
     /// already terminal, or a stop already in flight). The visible result
-    /// arrives on the normal channel either way — the adapter follows a
-    /// successful stop with an `async_task_state_update` and a transcript line
-    /// — so this is only what the caller needs to avoid claiming it stopped
-    /// something it didn't.
+    /// arrives on the normal channel either way — a successful stop is followed
+    /// by an `async_task_state_update` (and, on codex, by the launching tool
+    /// call finally settling `failed` with exit code -1) — so this is only what
+    /// the caller needs to avoid claiming it stopped something it didn't.
     StopAsyncTask {
         task_id: String,
         reply: tokio::sync::oneshot::Sender<Result<bool, AcpError>>,
@@ -2335,6 +2338,26 @@ struct PermissionQueue<R = PendingPermission> {
     /// The card currently published to clients. `None` = nothing on screen.
     showing: Option<String>,
     waiting: VecDeque<QueuedPermission>,
+    /// Abort handles for permission requests this connection answers on ANOTHER
+    /// surface — today only pi's extension-UI `select`, which renders on the
+    /// interactive question card (`try_bridge_pi_select_ask`). They publish no
+    /// permission card, so they are deliberately outside `responders` /
+    /// `showing` / `waiting` and the invariant above.
+    ///
+    /// They still have to be parked HERE rather than tracked separately,
+    /// because a drain is the connection's "everything waiting on the user is
+    /// moot now" signal and fires from several places (both turn-completion
+    /// paths, an idle cancel, a mid-turn disconnect). pi is the first asker that
+    /// can outlive its turn — pi-acp dispatches the dialog detached, and pi
+    /// resolves a timed / aborted one locally without telling it — so a missed
+    /// drain leaves the agent blocked AND wedges the connection's
+    /// one-ask-at-a-time slot, sending every later select back to the raw
+    /// approval card this bridge exists to replace. Sitting in the queue makes
+    /// that coverage structural: a new drain site cannot forget them.
+    ///
+    /// Dropping the sender is the signal; the bridged task then cancels its
+    /// question and answers the agent `Cancelled`.
+    detached: Vec<oneshot::Sender<()>>,
 }
 
 // Hand-written rather than derived: `#[derive(Default)]` would demand
@@ -2345,6 +2368,7 @@ impl<R> Default for PermissionQueue<R> {
             responders: HashMap::new(),
             showing: None,
             waiting: VecDeque::new(),
+            detached: Vec::new(),
         }
     }
 }
@@ -2404,13 +2428,25 @@ impl<R: PermissionResponder> PermissionQueue<R> {
     /// key forever (the pre-existing idle-`Cancel` ghost, #442).
     ///
     /// Queued cards need no compensation: they were never published, so no
-    /// client rendered them and `track_request` never counted them.
+    /// client rendered them and `track_request` never counted them. Neither do
+    /// the `detached` ones — dropping their abort senders lets each bridged
+    /// task clear its own surface.
     fn drain(&mut self) -> Option<String> {
         for (_, pending) in self.responders.drain() {
             pending.respond_cancelled();
         }
         self.waiting.clear();
+        self.detached.clear();
         self.showing.take()
+    }
+
+    /// Park an abort handle for a request answered on another surface — see
+    /// [`Self::detached`].
+    fn park_detached(&mut self, abort: oneshot::Sender<()>) {
+        // A fired/dropped handle is a task that already finished; sweeping them
+        // here keeps a long connection from accumulating dead entries.
+        self.detached.retain(|tx| !tx.is_closed());
+        self.detached.push(abort);
     }
 
     /// How many cards are waiting BEHIND the one on screen.
@@ -3189,9 +3225,9 @@ fn build_grok_set_model_params(
 async fn send_steer_request(
     cx: &ConnectionTo<Agent>,
     session_id: &SessionId,
-    text: &str,
+    blocks: &[PromptInputBlock],
 ) -> Result<SteerOutcome, AcpError> {
-    let params = build_steer_params(session_id.0.as_ref(), text);
+    let params = build_steer_params(session_id.0.as_ref(), blocks);
     let untyped_req = UntypedMessage::new("_session/steering", params).map_err(|e| {
         AcpError::protocol(format!("Failed to build steering request: {e}"))
     })?;
@@ -3203,15 +3239,19 @@ async fn send_steer_request(
     parse_steer_outcome(&raw)
 }
 
-/// Build the `_session/steering` params. The prompt is a single text block
-/// (codeg steering is text-only), and `_meta.steering.idleBehavior =
-/// "promptRequired"` opts into the turn-end-race contract: a turn that
-/// settled first yields `{outcome:"promptRequired"}` WITHOUT consuming the
-/// content, so the host resubmits it through a normal `session/prompt`.
-fn build_steer_params(session_id: &str, text: &str) -> serde_json::Value {
+/// Build the `_session/steering` params. The prompt carries the caller's
+/// blocks through [`map_prompt_blocks`] — the SAME conversion a
+/// `session/prompt` uses — so a steered draft's image attachments reach the
+/// adapter in the exact encoding its prompt path already accepts (a plain
+/// note is still a single text block, as before). `_meta.steering
+/// .idleBehavior = "promptRequired"` opts into the turn-end-race contract: a
+/// turn that settled first yields `{outcome:"promptRequired"}` WITHOUT
+/// consuming the content, so the host resubmits it through a normal
+/// `session/prompt`.
+fn build_steer_params(session_id: &str, blocks: &[PromptInputBlock]) -> serde_json::Value {
     serde_json::json!({
         "sessionId": session_id,
-        "prompt": [{ "type": "text", "text": text }],
+        "prompt": map_prompt_blocks(blocks.to_vec()),
         "_meta": { "steering": { "idleBehavior": "promptRequired" } },
     })
 }
@@ -3792,11 +3832,9 @@ fn build_client_capabilities(
     if agent_type == AgentType::ClaudeCode {
         meta.insert("subagent-transcript".to_string(), serde_json::Value::Bool(true));
     }
-    // claude-agent-acp 0.73.0 added "asyncTasks", and it is advertised — to
-    // claude ONLY, because codex-acp 1.8.0 does not implement the channel
-    // (its bundle contains no `asyncTasks` string at all). It publishes the
-    // lifecycle of Claude's NON-AGENT background work (background shells,
-    // workflows, monitors) as `async_task_spawned` / `_progress` /
+    // claude-agent-acp 0.73.0 added "asyncTasks", and codex-acp 1.10.0 joined
+    // it, so BOTH are advertised. It publishes the lifecycle of an agent's
+    // NON-AGENT background work as `async_task_spawned` / `_progress` /
     // `_state_update`, all on the parent session id. Unlike the two capabilities
     // below, this one adds something codeg cannot get anywhere else: the
     // transcript watcher (`background_watch`) can see that a task was launched
@@ -3807,6 +3845,42 @@ fn build_client_capabilities(
     // `_session/async_task/stop` control. Sub-agent tasks stay out of it by the
     // adapter's own filter (`taskType: "local_agent"` is marked ignored), so
     // advertising this does not disturb the sub-agent surfaces.
+    //
+    // For claude those tasks are background shells, workflows and monitors; for
+    // codex they are BACKGROUND TERMINALS — a shell process the model leaves
+    // running past the tool call, which codex core tracks under
+    // `thread/backgroundTerminals/*`. codex-acp only announces a terminal that
+    // its own `thread/backgroundTerminals/list` still reports as alive, so an
+    // ordinary foreground command never appears here.
+    //
+    // The codex half was captured off a live 1.10.0 over stdio, and the control
+    // run (identical prompt, capability withheld) is what settles the trade:
+    //
+    //   WITHOUT the advertisement — one frame, then silence for the rest of the
+    //   connection:
+    //     tool_call        {toolCallId:"exec-…", status:"in_progress",
+    //                       kind:"execute", title:"sleep 400"}
+    //   The turn ends `end_turn` with that call still `in_progress`. There is no
+    //   completion, no terminal edge, and nothing that says why.
+    //
+    //   WITH it, the same run adds:
+    //     tool_call_update {toolCallId:"exec-…",
+    //                       _meta.jetbrains.air.asyncTasks.backgrounded:true}
+    //     async_task_spawned {asyncTaskId:"exec-…", name:"sleep 400",
+    //                         taskType:"shell", showInTranscript:false,
+    //                         canStop:true, toolCallId:"exec-…"}
+    //     …and on `_session/async_task/stop` → {stopped:true}:
+    //     async_task_state_update {asyncTaskId:"exec-…", state:"stopped",
+    //                              toolCallId:"exec-…"}
+    //     tool_call_update {toolCallId:"exec-…", status:"failed", exit_code:-1}
+    //
+    // Three details of the codex shape that the shared reader already absorbs:
+    // `asyncTaskId` EQUALS the `toolCallId` for a root-session task (the adapter
+    // only prefixes `<threadId>:` for a sub-agent thread); there is no
+    // `description`, `usage` or `outputFilePath`, so the strip row is name-only;
+    // and the `backgrounded` marker rides a `_meta` block with NO `version` key,
+    // unlike its `sessionFailure` sibling — the frontend's
+    // `toolCallMovedToBackground` must not gate on one.
     //
     // The remaining two AIR capabilities are deliberately still out.
     // claude-agent-acp 0.69.0 and codex-acp 1.4.0 added
@@ -3864,14 +3938,13 @@ fn build_client_capabilities(
     // to rebuild the capsule — a parent tool-use id, or the child tool calls
     // arriving with one codeg has seen.
     if matches!(agent_type, AgentType::ClaudeCode | AgentType::Codex) {
-        let mut capabilities = vec!["sessionFailure"];
-        if agent_type == AgentType::ClaudeCode {
-            capabilities.push("asyncTasks");
-        }
         meta.insert(
             "jetbrains".to_string(),
             serde_json::json!({
-                "air": { "version": 1, "capabilities": capabilities }
+                "air": {
+                    "version": 1,
+                    "capabilities": ["sessionFailure", "asyncTasks"],
+                }
             }),
         );
     }
@@ -4686,14 +4759,16 @@ async fn run_connection(
     let perms = pending_perms.clone();
     let state_outer = Arc::clone(&state);
 
-    // Grok's native `ask_user_question` (verified against 0.2.101) arrives as an
-    // `_x.ai/ask_user_question` ACP ext request that BLOCKS on the reply — rather
-    // than the codeg-mcp tool. Capture the shared question access + feature toggle
-    // (both live on the delegation injection) so the ext handler can register the
-    // questions through the SAME interactive-card pipeline and answer grok once the
-    // user submits. `None` when the companion isn't injected — the handler then
-    // lets grok fall back to its inert rendering.
-    let grok_ask_access = delegation_injection
+    // Shared question access + feature toggle (both live on the delegation
+    // injection) for the agents that ask NATIVELY, over a blocking request of
+    // their own rather than the codeg-mcp tool: grok's `_x.ai/ask_user_question`
+    // ext request (verified against 0.2.101) and pi's extension-UI `select`,
+    // which pi-acp folds into `session/request_permission`. Both handlers
+    // register the questions through the SAME interactive-card pipeline and
+    // answer the blocked request once the user submits. `None` when the
+    // companion isn't injected — the handlers then leave the agent on its
+    // pre-bridge rendering.
+    let native_ask_access = delegation_injection
         .as_ref()
         .map(|inj| (Arc::clone(&inj.questions), inj.ask.clone()));
     let grok_ask_conn_id = connection_id.clone();
@@ -4744,9 +4819,33 @@ async fn run_connection(
                 let perms = perms.clone();
                 let perm_cwd = cwd_string.clone();
                 let state_inner = Arc::clone(&state);
+                // pi routes its `ctx.ui.select` questions through this channel;
+                // diverting them needs the shared question access (and the ask
+                // feature toggle).
+                let perm_ask_access = native_ask_access.clone();
+                let perm_conn_id = connection_id.clone();
                 async move |req: RequestPermissionRequest,
                             responder: Responder<RequestPermissionResponse>,
                             _cx: ConnectionTo<Agent>| {
+                    // pi asks the user a question THROUGH this channel (see
+                    // `try_bridge_pi_select_ask`); route it to the interactive
+                    // question card instead of an approval card. Every reject
+                    // path hands the responder back, so the request continues
+                    // down the normal permission path untouched.
+                    let responder = match try_bridge_pi_select_ask(
+                        &perm_ask_access,
+                        &perm_conn_id,
+                        &state_inner,
+                        &emitter_inner,
+                        &perms,
+                        &req,
+                        responder,
+                    )
+                    .await
+                    {
+                        Ok(()) => return Ok(()),
+                        Err(responder) => responder,
+                    };
                     handle_permission_request(
                         &state_inner,
                         &emitter_inner,
@@ -4897,7 +4996,7 @@ async fn run_connection(
         )
         .on_receive_request(
             {
-                let access = grok_ask_access.clone();
+                let access = native_ask_access.clone();
                 let conn_id = grok_ask_conn_id.clone();
                 let card_state = Arc::clone(&grok_ask_state);
                 let card_emitter = grok_ask_emitter.clone();
@@ -4939,7 +5038,7 @@ async fn run_connection(
                 // access + kill switch); approval-style requests (MCP
                 // tool-call approvals, message-only confirms) route through
                 // the permission card via `pending_perms`.
-                let access = grok_ask_access.clone();
+                let access = native_ask_access.clone();
                 let conn_id = grok_ask_conn_id.clone();
                 let perms = perms.clone();
                 let state_inner = Arc::clone(&state);
@@ -4961,6 +5060,13 @@ async fn run_connection(
                 }
             },
             on_receive_request!(),
+        )
+        .on_receive_notification(
+            async move |notif: AuthStatusUpdateNotification, _cx: ConnectionTo<Agent>| {
+                handle_auth_status_update(agent_type, notif);
+                Ok(())
+            },
+            on_receive_notification!(),
         )
         .connect_with(agent, async move |cx| -> Result<(), sacp::Error> {
             let state = state_outer;
@@ -5989,6 +6095,173 @@ async fn handle_grok_ask_user_question(
             }
         }
     });
+}
+
+/// Bridge pi's extension-UI `select` — the way a pi extension asks the user a
+/// multiple-choice question (`ctx.ui.select`) — into codeg's interactive question
+/// card.
+///
+/// pi has no dedicated ask channel: pi-acp turns the dialog into a plain
+/// `session/request_permission` (see
+/// [`crate::acp::question::parse_pi_select_ask`] for the wire shape), so codeg
+/// used to render it as a generic approval card that dumped the synthetic tool
+/// call as raw JSON, and — because pi never emits a `session/update` for that
+/// `pi-ui-*` id — left NO record of the answer once the card was dismissed
+/// (#644). This registers the choices through the shared
+/// [`crate::acp::question::SessionQuestionAccess`] (the SAME path the codeg-mcp
+/// ask tool uses), answers the blocked permission request with the option the
+/// user picked, and emits the answered `AskQuestionResultCard` into the stream.
+///
+/// `Err(responder)` hands the request back for the ordinary permission path,
+/// which is the outcome for everything that isn't a pi select, for a select the
+/// card cannot represent faithfully, and for a connection with an ask already
+/// pending — none of those are worse than the pre-bridge behavior.
+///
+/// A bridged select still parks an abort handle on `perms`, so every permission
+/// drain reclaims it exactly as it reclaimed the approval card this replaces —
+/// see [`PermissionQueue::detached`] for why that matters for pi specifically.
+async fn try_bridge_pi_select_ask(
+    access: &Option<(
+        Arc<dyn crate::acp::question::SessionQuestionAccess>,
+        crate::acp::question::QuestionRuntimeConfig,
+    )>,
+    connection_id: &str,
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    perms: &PendingPermissions,
+    req: &RequestPermissionRequest,
+    responder: Responder<RequestPermissionResponse>,
+) -> Result<(), Responder<RequestPermissionResponse>> {
+    // Gated on pi's OWN marker rather than `AgentType::Pi`: the id prefix +
+    // `method: "select"` + `choice-*` option ids are pi-acp's fingerprint, and
+    // that also covers a pi registered under a custom agent id (which does not
+    // resolve to `AgentType::Pi`).
+    let tool_call_id = req.tool_call.tool_call_id.to_string();
+    if !tool_call_id.starts_with(crate::acp::question::PI_EXTENSION_UI_ID_PREFIX) {
+        return Err(responder);
+    }
+    let Some((questions, ask_cfg)) = access else {
+        return Err(responder);
+    };
+    // Same kill switch as the codeg-mcp ask tool: when the feature is off, the
+    // approval card stays the way to answer.
+    if !ask_cfg.is_enabled().await {
+        return Err(responder);
+    }
+    let tool_call = serde_json::to_value(&req.tool_call).unwrap_or_default();
+    let options: Vec<(String, String)> = req
+        .options
+        .iter()
+        .map(|o| (o.option_id.to_string(), o.name.clone()))
+        .collect();
+    let Some(ask) = crate::acp::question::parse_pi_select_ask(&tool_call, &options) else {
+        return Err(responder);
+    };
+    // Park the abort handle BEFORE registering, never after: both are await
+    // points, so a drain can land between them, and a handle parked afterwards
+    // would be one the drain never saw — leaving the ask alive across it, which
+    // is the wedge this exists to prevent. Ordering it first is what closes the
+    // window rather than narrowing it: dropping the sender is STICKY, so a drain
+    // in the gap is still observed by the task below on its first poll, which
+    // then cancels the question it just registered. (A re-check after parking
+    // would not close it — the same reasoning as `PermissionQueue`'s emit-inside-
+    // the-lock note.) An early return from here leaves the handle behind with its
+    // receiver dropped; `park_detached` sweeps those, and a drain clears them.
+    let (abort_tx, abort_rx) = oneshot::channel();
+    perms.lock().await.park_detached(abort_tx);
+    // `register_question` consumes the spec; keep the ask to map the answer back
+    // to pi's option id and to render the answered in-stream card.
+    let Some(registered) = questions
+        .register_question(connection_id, vec![ask.spec.clone()])
+        .await
+    else {
+        return Err(responder);
+    };
+    let state = Arc::clone(state);
+    let emitter = emitter.clone();
+    let questions = Arc::clone(questions);
+    let connection_id = connection_id.to_string();
+    let question_id = registered.question_id;
+    // The user answers out-of-band (the `answer_question` endpoint resolves the
+    // one-shot below), so await it on a task — keeping the ACP dispatch loop free
+    // — then unblock pi.
+    tokio::spawn(async move {
+        // `biased` so an answer that lands in the same instant as a drain still
+        // counts: the user clicked, and pi can still be told what they picked.
+        let answer = tokio::select! {
+            biased;
+            answered = registered.answer_rx => answered.ok(),
+            _ = abort_rx => None,
+        };
+        match answer {
+            Some(outcome) => {
+                let option_id = crate::acp::question::pi_select_option_id(&outcome, &ask);
+                // Keep the record honest: an answer pi could not be given (a
+                // decline, or free text typed into the card's always-present
+                // "Other" box) is reported as a decline, which is exactly what
+                // pi is about to be told.
+                let recorded = if option_id.is_some() {
+                    outcome
+                } else {
+                    crate::acp::question::QuestionOutcome {
+                        answers: Vec::new(),
+                        declined: true,
+                    }
+                };
+                // The in-stream "提问回答" capsule. pi resolves the answer over
+                // THIS permission round-trip and never emits a tool_call for the
+                // `pi-ui-*` id, so without this the pick vanishes with the card.
+                // Emitted BEFORE unblocking pi so it lands ahead of pi's
+                // follow-up output; pi is blocked on the reply, so nothing races.
+                emit_with_state(
+                    &state,
+                    &emitter,
+                    AcpEvent::ToolCall {
+                        // pi's own id for the dialog, so the one card is keyed
+                        // to the request it answers.
+                        tool_call_id,
+                        title: "ask_user_question".to_string(),
+                        kind: "other".to_string(),
+                        status: "completed".to_string(),
+                        content: None,
+                        raw_input: Some(
+                            crate::acp::question::grok_result_card_input(std::slice::from_ref(
+                                &ask.spec,
+                            ))
+                            .to_string(),
+                        ),
+                        raw_output: Some(
+                            crate::acp::question::grok_result_card_output(&recorded).to_string(),
+                        ),
+                        locations: None,
+                        meta: None,
+                        images: None,
+                    },
+                )
+                .await;
+                let outcome = match option_id {
+                    Some(option_id) => {
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
+                    }
+                    None => RequestPermissionOutcome::Cancelled,
+                };
+                let _ = responder.respond(RequestPermissionResponse::new(outcome));
+            }
+            // Either the ask was canceled outright (turn cancel, teardown) or a
+            // permission drain reclaimed it — the connection's "everything
+            // waiting on the user is moot now" signal, which for pi also means
+            // pi has abandoned the dialog on its side. Nothing to render; clear
+            // the ask so the NEXT select can register, and unblock pi with the
+            // cancel it would have gotten from the drained permission queue.
+            None => {
+                questions.cancel_question(&connection_id, &question_id).await;
+                let _ = responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ));
+            }
+        }
+    });
+    Ok(())
 }
 
 /// Bridge grok's native `_x.ai/exit_plan_mode` ext request into codeg's
@@ -8326,6 +8599,9 @@ fn finish_turn_reason<'a>(
 /// `empty` is a synthesized reason emitted by `run_conversation_loop` when the
 /// agent reports `EndTurn` without producing any agent output; `empty` carries
 /// an `EmptyTurnReport` that refines the code and attaches redacted evidence.
+/// `auth_required` is the other synthesized reason: the agent REJECTED the
+/// prompt with ACP's -32000 instead of ending the turn, which asks the user to
+/// sign in and retry rather than reporting anything wrong with the turn itself.
 fn turn_failure_error_event(
     reason_str: &str,
     agent_type: AgentType,
@@ -8350,6 +8626,11 @@ fn turn_failure_error_event(
         "unknown" => (
             "turn_failed_unknown",
             format!("{agent_type} ended the turn with an unrecognized stop reason."),
+            None,
+        ),
+        "auth_required" => (
+            "turn_failed_auth_required",
+            format!("{agent_type} needs you to sign in again before it can run this turn."),
             None,
         ),
         "empty" => {
@@ -8915,7 +9196,110 @@ async fn run_conversation_loop<'a>(
                             }
                         }
                         prompt_result = &mut prompt_response => {
-                            let response = prompt_result?;
+                            // ACP defines the `authRequired` rejection as the
+                            // signal that the CLIENT should run its auth flow
+                            // and come back — the session survives it, so this
+                            // one error code must not unwind the connection the
+                            // way `?` unwinds every other prompt failure
+                            // (terminal `Error` → `Disconnected`, and the
+                            // lifecycle worker flips the conversation row to
+                            // Cancelled). It is a TURN failure, so it takes the
+                            // turn-failure exit instead and the loop goes back
+                            // to idle with the session intact.
+                            //
+                            // claude-agent-acp 0.74.0 made this reachable in the
+                            // ordinary case: through 0.73.0 a mid-session
+                            // sign-out settled an AIR client's turn with a
+                            // disguised `end_turn` carrying the failure record,
+                            // and 0.74.0 publishes that record on the update
+                            // channel and rejects the prompt as well. The
+                            // adapter deliberately keeps the session addressable
+                            // across the refusal ("the client can sign in and
+                            // retry on the same session"), which is only true if
+                            // the client keeps its end too. Agent-agnostic on
+                            // purpose: every agent that answers -32000 here is
+                            // asking for credentials, not reporting a dead
+                            // process — which is why `session/load` already
+                            // treats "Authentication required" as an expected
+                            // outcome rather than an error to surface.
+                            let response = match prompt_result {
+                                Ok(response) => response,
+                                Err(e)
+                                    if matches!(
+                                        e.code,
+                                        sacp::schema::ErrorCode::AuthRequired
+                                    ) =>
+                                {
+                                    tracing::warn!(
+                                        "[ACP] session/prompt refused with authRequired ({e}); \
+                                         ending the turn and keeping the session"
+                                    );
+                                    if !tracked_terminal_tool_calls.is_empty() {
+                                        poll_tracked_terminal_tool_calls(
+                                            terminal_runtime.as_ref(),
+                                            &sid,
+                                            state,
+                                            emitter,
+                                            &mut tracked_terminal_tool_calls,
+                                        )
+                                        .await;
+                                    }
+                                    // Synthesized like `empty`: no `StopReason`
+                                    // ever arrives for a rejected prompt, so the
+                                    // turn needs a reason of its own. AIR-capable
+                                    // agents ALSO publish an `access` failure
+                                    // record with a `login` action, which the
+                                    // banner renders — the two are complementary
+                                    // (a transient alert plus a persistent strip
+                                    // with the way back in), and this Error is
+                                    // the only surface for agents with no AIR.
+                                    if let Some(err_event) = turn_failure_error_event(
+                                        "auth_required",
+                                        agent_type,
+                                        None,
+                                    ) {
+                                        emit_with_state(state, emitter, err_event).await;
+                                    }
+                                    // Not journaled (that is `end_turn` only),
+                                    // but still recorded: the transcript's turn
+                                    // ended here, and omitting it would leave the
+                                    // history parser reading the next prompt as a
+                                    // continuation of this one.
+                                    record_turn_end(
+                                        agent_type,
+                                        &sid.0,
+                                        "auth_required",
+                                        turn_started_at_ms,
+                                        current_session_model_id(state).await,
+                                    )
+                                    .await;
+                                    // Same wedge guard as the two sibling turn
+                                    // exits — see the `StopReason` branch above
+                                    // for why the drain and the event must share
+                                    // one critical section.
+                                    drain_permissions_then_emit(
+                                        perms,
+                                        state,
+                                        emitter,
+                                        AcpEvent::TurnComplete {
+                                            session_id: sid.0.to_string(),
+                                            stop_reason: "auth_required".into(),
+                                            agent_type: agent_type.to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    // Non-`end_turn`, so cascade-cancel like
+                                    // every other turn-failure exit: the parent
+                                    // will never consume an in-flight delegation
+                                    // result. Turn-scoped — the connection is
+                                    // still alive.
+                                    if let Some(inj) = delegation_injection {
+                                        inj.broker.cancel_by_parent_turn(conn_id).await;
+                                    }
+                                    break;
+                                }
+                                Err(e) => return Err(e),
+                            };
                             // A turn's terminal AIR failure rides on the
                             // response `_meta` (see `response_session_failure`
                             // — the update channel only carries the retry
@@ -9132,7 +9516,7 @@ async fn run_conversation_loop<'a>(
                                         let _ = reply.send(landed);
                                     }
                                 }
-                                Some(ConnectionCommand::Steer { text, reply }) => {
+                                Some(ConnectionCommand::Steer { blocks, reply }) => {
                                     // Protocol round-trip only — the manager's
                                     // cancellation-shielded task records the
                                     // note + broadcasts `FeedbackSubmitted`
@@ -9144,7 +9528,7 @@ async fn run_conversation_loop<'a>(
                                     // commands, not session updates. A dead
                                     // receiver is fine — the reply is then
                                     // moot (teardown), nothing to unwind.
-                                    let outcome = send_steer_request(&cx, &sid, &text).await;
+                                    let outcome = send_steer_request(&cx, &sid, &blocks).await;
                                     // A steered message still lands in the
                                     // agent's OWN transcript as a user record,
                                     // which `group_into_turns` reads as the
@@ -9168,7 +9552,7 @@ async fn run_conversation_loop<'a>(
                                     // — the overlay is the only place its work
                                     // can surface at all.
                                     if matches!(outcome, Ok(SteerOutcome::Injected)) {
-                                        prompt_ledger.record_text(&text);
+                                        prompt_ledger.record_prompt_blocks(&blocks);
                                     }
                                     let _ = reply.send(outcome);
                                 }
@@ -9419,7 +9803,7 @@ async fn run_conversation_loop<'a>(
                     let _ = reply.send(landed);
                 }
             }
-            Some(ConnectionCommand::Steer { text: _, reply }) => {
+            Some(ConnectionCommand::Steer { blocks: _, reply }) => {
                 // Steering only means something for a RUNNING turn. Reply —
                 // never drop — so the manager's shielded task can't hang on
                 // the oneshot; the caller falls back to a normal prompt (the
@@ -11972,6 +12356,80 @@ fn grok_ext_notification_is_alert(dispatch: &Dispatch, agent_type: AgentType) ->
     }
 }
 
+/// codex-acp 1.9.0's `_auth/status_update` — the agent reporting which identity
+/// IT is logged in with.
+///
+/// Connection-level: unlike every other agent push codeg reads, the params carry
+/// NO `sessionId`, which is exactly why it needs a handler of its own (see
+/// [`handle_auth_status_update`]). Only `authStatus` is modelled; the payload is
+/// kept as a raw value so a new `kind` or an added field can never turn a
+/// well-formed push into a deserialization failure.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sacp::JsonRpcNotification)]
+#[notification(method = "_auth/status_update")]
+#[serde(rename_all = "camelCase")]
+struct AuthStatusUpdateNotification {
+    auth_status: serde_json::Value,
+}
+
+/// Claim `_auth/status_update` and drop it, loudly enough to be greppable.
+///
+/// codex-acp pushes this unconditionally — once right after the `initialize`
+/// response, then on every authenticate / logout / session create, and whenever
+/// the app-server reports `account/updated`. It is not gated on anything codeg
+/// advertises; the agent merely ANNOUNCES the channel with
+/// `agentCapabilities._meta.authStatus = {}`.
+///
+/// A handler is registered rather than letting it fall through because falling
+/// through is not free. sacp walks the handler chain, finds no claimant (the
+/// per-session `ActiveSessionHandler` only matches frames carrying its own
+/// `sessionId`, and this one carries none), and then does two things for every
+/// such notification: logs `Rejecting message with error, no handler` at INFO,
+/// and calls `Dispatch::respond_with_error`, which for a NOTIFICATION means
+/// `send_error_notification` — codeg writes a bare JSON-RPC error object back to
+/// an agent that never asked a question. Claiming the frame here is what keeps
+/// the bump from introducing that.
+///
+/// Nothing consumes the payload yet, and that is a deliberate stop: the status
+/// describes the AGENT-owned login only (routing codeg itself configured through
+/// `providers/set` is explicitly excluded upstream), and every failure it could
+/// warn about already arrives as an AIR `sessionFailure` carrying an actionable
+/// `login`. The shape is recorded here so a future consumer does not have to
+/// re-derive it:
+///
+///   {"authStatus": {"kind": "account" | "api_key" | "external" | "gateway"
+///                           | "none",
+///                   "label": "ChatGPT Pro" | "OpenAI API key"
+///                            | "Custom model gateway" | "Not logged in" | …,
+///                   "detail"?: "<gateway provider id>",
+///                   "account"?: {"email"?, "plan"?, "organization"?},
+///                   "vendor"?: {…}}}
+///
+/// Observed against a live 1.10.0 whose `~/.codex/config.toml` selects a custom
+/// provider: `{"kind":"gateway","label":"Custom model gateway","detail":"codeg"}`.
+/// The payload is NOT logged whole: `account.email` and `account.organization`
+/// are the signed-in person's identity, and codeg's log file is user-visible
+/// (and shipped in diagnostics). `kind` and `label` are the two fields that
+/// answer "which identity is this connection using", and neither identifies a
+/// person — `label` is one of a fixed vocabulary ("ChatGPT Pro", "OpenAI API
+/// key", "Custom model gateway", "Not logged in") plus, for a gateway, the
+/// provider id the user configured locally.
+fn handle_auth_status_update(agent_type: AgentType, notif: AuthStatusUpdateNotification) {
+    let field = |key: &str| {
+        notif
+            .auth_status
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    tracing::debug!(
+        agent = %agent_type,
+        kind = %field("kind"),
+        label = %field("label"),
+        "[ACP] agent reported its auth status (no consumer)"
+    );
+}
+
 /// Whether codeg has a mapper for this ext-notification method.
 ///
 /// Used ONLY to keep the unrecognized-method log quiet about methods we do know
@@ -12088,11 +12546,13 @@ fn fix_usage_update_nulls(mut dispatch: Dispatch) -> Dispatch {
 /// would be reported as an agent that said nothing. Same raw-rewrite seam as
 /// [`fix_usage_update_nulls`].
 ///
-/// Deliberately NOT gated on `agent_type`. Only claude-agent-acp is offered the
-/// `asyncTasks` capability today (see `build_client_capabilities`), so nothing
-/// else should send these — but if something does, reading the frame is
-/// strictly better than dropping it, and both adapters implement the same AIR
-/// vocabulary.
+/// Deliberately NOT gated on `agent_type`. claude-agent-acp and codex-acp are
+/// the two adapters offered the `asyncTasks` capability (see
+/// `build_client_capabilities`), so nothing else should send these — but if
+/// something does, reading the frame is strictly better than dropping it, since
+/// every AIR speaker uses the same vocabulary. The two shapes differ only in how
+/// much they fill in: claude names a `description`, `usage` and
+/// `outputFilePath`; codex sends the command as `name` and stops there.
 fn air_async_task_delta(dispatch: &Dispatch) -> Option<AsyncTaskDelta> {
     let Dispatch::Notification(msg) = dispatch else {
         return None;
@@ -13176,6 +13636,64 @@ mod tests {
     }
 
     #[test]
+    fn permission_queue_drain_aborts_detached_requests_and_leaves_no_dead_handles() {
+        // pi's extension-UI select is answered on the question card, so it parks
+        // only an abort handle here (#644). A drain MUST fire it: pi dispatches
+        // the dialog detached and resolves a timed one locally, so an unreclaimed
+        // bridge leaves pi blocked and wedges the connection's one-ask slot,
+        // sending every later select back to the raw approval card.
+        let (mut q, log) = stub_queue();
+        admit_stub(&mut q, &log, "a");
+        let (tx, mut rx) = oneshot::channel::<()>();
+        q.park_detached(tx);
+        assert!(rx.try_recv().is_err() && !rx.is_terminated(), "still parked");
+
+        assert_eq!(q.drain().as_deref(), Some("a"));
+        assert!(
+            matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)),
+            "the drain must drop the abort handle so the bridged task wakes"
+        );
+
+        // Parking sweeps handles whose task already finished, so a long-lived
+        // connection doesn't accumulate them.
+        let (dead_tx, dead_rx) = oneshot::channel::<()>();
+        q.park_detached(dead_tx);
+        drop(dead_rx);
+        let (live_tx, _live_rx) = oneshot::channel::<()>();
+        q.park_detached(live_tx);
+        assert_eq!(q.detached.len(), 1, "the closed handle must be swept");
+    }
+
+    #[tokio::test]
+    async fn a_detached_request_drained_before_its_task_starts_still_aborts() {
+        // Why `try_bridge_pi_select_ask` parks its abort handle BEFORE
+        // registering the question: registration and parking are separate await
+        // points, so a drain can land between them. Parking first makes that
+        // window safe rather than merely narrow — dropping the sender is sticky,
+        // so the bridged task, which only starts afterwards, still observes it on
+        // its first poll and reclaims the ask instead of parking forever.
+        let (mut q, _log) = stub_queue();
+        let (abort_tx, abort_rx) = oneshot::channel::<()>();
+        q.park_detached(abort_tx);
+        q.drain();
+
+        // The answer channel is deliberately left OPEN and unresolved, so the
+        // only thing that can settle this select is the drained abort handle.
+        let (_answer_tx, answer_rx) = oneshot::channel::<u8>();
+        let answered = tokio::select! {
+            biased;
+            answered = answer_rx => answered.ok(),
+            _ = abort_rx => None,
+        };
+        assert!(
+            answered.is_none(),
+            "a drain that lands before the task starts must still abort it — \
+             otherwise the ask survives the drain and wedges the connection's \
+             one-ask slot, sending every later select back to the raw card"
+        );
+    }
+
+    #[test]
     fn permission_queue_drain_with_nothing_shown_needs_no_compensation() {
         let (mut q, _log) = stub_queue();
         assert!(
@@ -13858,6 +14376,51 @@ mod tests {
         assert_eq!(record.actions, vec!["retry".to_string(), "sing".to_string()]);
     }
 
+    /// claude-agent-acp 0.74.0's mid-session sign-out record, verbatim off the
+    /// `session_info_update` channel (`sessionFailureMeta`: id, revision,
+    /// category, severity, title, details, actions — `kind`/`recoveryPolicy`
+    /// stay agent-internal). Two things in it changed with that release and
+    /// are worth pinning:
+    ///
+    /// * the CLI's own "… Please run /login" prose moved OUT of `title` into
+    ///   `details`, leaving the policy's client-neutral fallback as the title —
+    ///   so the strip reads as a heading with the TUI advice behind its
+    ///   expander, not the other way round;
+    /// * the record may carry a `reason` refinement. codeg never produces one
+    ///   (it is `--hide-claude-auth`-only; see the registry entry), and the
+    ///   parser reads fields individually, so an unknown key must simply ride
+    ///   through instead of failing the record.
+    #[test]
+    fn parse_session_failure_record_reads_claude_074_sign_out() {
+        let signed_out = serde_json::json!({
+            "id": "sess-7:session-error:epoch-1:1",
+            "revision": 1,
+            "category": "access",
+            "severity": "error",
+            "title": "Sign in to continue using Claude.",
+            "details": "Invalid API key · Please run /login",
+            "actions": ["login"],
+        });
+        let record = parse_session_failure_record(&signed_out).expect("record");
+        assert_eq!(record.category, "access");
+        assert_eq!(record.severity, "error");
+        assert_eq!(record.title, "Sign in to continue using Claude.");
+        assert_eq!(
+            record.details.as_deref(),
+            Some("Invalid API key · Please run /login")
+        );
+        // The banner renders a Login button off exactly this.
+        assert_eq!(record.actions, vec!["login".to_string()]);
+
+        // Same record plus the release's new refinement: parsed identically.
+        let mut with_reason = signed_out.clone();
+        with_reason["reason"] = serde_json::json!("claude_subscription_not_supported");
+        assert_eq!(
+            parse_session_failure_record(&with_reason).expect("record"),
+            record
+        );
+    }
+
     #[test]
     fn client_capabilities_advertise_air_for_claude_and_codex_only() {
         // Both AIR speakers must send EXACTLY the shape the adapters gate on:
@@ -13884,10 +14447,10 @@ mod tests {
             // And exactly this much. Adding a capability here is not free — it
             // is what turns the corresponding behavior on.
             //
-            // "asyncTasks" (claude-agent-acp 0.73.0) IS wanted, and only claude
-            // has it: codex-acp 1.8.0 contains no async-task code at all, so
-            // advertising it there would be a promise about a channel that
-            // cannot answer.
+            // "asyncTasks" IS wanted, from BOTH (claude-agent-acp 0.73.0,
+            // codex-acp 1.10.0): it is the only channel that reports whether an
+            // agent's background work is still alive, and the only one that can
+            // stop it.
             //
             // The other two stay out. "agentFileChangeReport"
             // (claude-agent-acp 0.69.0 / codex-acp 1.4.0) buys an extra model
@@ -13898,11 +14461,8 @@ mod tests {
             // rendering around, replacing it with an announcement that carries
             // no parent tool-use id to rebuild it from. See the reasoning at
             // the advertisement site before relaxing this.
-            let expected: Vec<serde_json::Value> = if agent == AgentType::ClaudeCode {
-                vec!["sessionFailure".into(), "asyncTasks".into()]
-            } else {
-                vec!["sessionFailure".into()]
-            };
+            let expected: Vec<serde_json::Value> =
+                vec!["sessionFailure".into(), "asyncTasks".into()];
             assert_eq!(
                 capabilities, &expected,
                 "{agent:?} advertises an unexpected AIR capability set"
@@ -14153,12 +14713,51 @@ mod tests {
 
     #[test]
     fn build_steer_params_shape_carries_the_prompt_required_opt_in() {
-        let params = build_steer_params("sess-1", "use the staging db");
+        let params = build_steer_params(
+            "sess-1",
+            &[crate::acp::types::PromptInputBlock::Text {
+                text: "use the staging db".into(),
+            }],
+        );
         assert_eq!(params["sessionId"], "sess-1");
-        assert_eq!(params["prompt"][0]["type"], "text");
-        assert_eq!(params["prompt"][0]["text"], "use the staging db");
+        // EXACT equality, not field probes: routing a text-only note through
+        // `map_prompt_blocks` must stay byte-identical to the hand-built
+        // `[{type,text}]` this used to emit. A future schema bump that starts
+        // serializing `annotations`/`_meta` as null would change the wire for
+        // every existing steer, and a field probe would not notice.
+        assert_eq!(
+            params["prompt"],
+            serde_json::json!([{ "type": "text", "text": "use the staging db" }])
+        );
         // The opt-in is what keeps the idle race host-owned — its absence
         // would regress to detached `startedNewTurn` turns.
+        assert_eq!(params["_meta"]["steering"]["idleBehavior"], "promptRequired");
+    }
+
+    #[test]
+    fn build_steer_params_maps_image_blocks_like_a_prompt() {
+        // A steered draft with an attachment must hit the wire in the SAME
+        // encoding `session/prompt` uses (`map_prompt_blocks`): the adapter's
+        // steering handler feeds the array through its normal prompt
+        // conversion, so ACP camelCase (`mimeType`) is what it reads.
+        let params = build_steer_params(
+            "sess-1",
+            &[
+                crate::acp::types::PromptInputBlock::Text {
+                    text: "match this mock".into(),
+                },
+                crate::acp::types::PromptInputBlock::Image {
+                    data: "aGk=".into(),
+                    mime_type: "image/png".into(),
+                    uri: None,
+                },
+            ],
+        );
+        assert_eq!(params["prompt"][0]["type"], "text");
+        assert_eq!(params["prompt"][0]["text"], "match this mock");
+        assert_eq!(params["prompt"][1]["type"], "image");
+        assert_eq!(params["prompt"][1]["data"], "aGk=");
+        assert_eq!(params["prompt"][1]["mimeType"], "image/png");
         assert_eq!(params["_meta"]["steering"]["idleBehavior"], "promptRequired");
     }
 
@@ -16413,6 +17012,86 @@ mod tests {
         assert_eq!(state.summary.as_deref(), Some("3 files changed"));
     }
 
+    /// codex-acp 1.10.0's frames, verbatim off a live stdio session (`sleep 400`
+    /// left running in a persistent shell, then stopped). codex fills in far
+    /// less than claude — no `description`, `usage` or `outputFilePath`, and the
+    /// task id EQUALS the tool call id — so the reader has to survive on the
+    /// spawn frame's four fields alone, and `to_record`'s defaults must not
+    /// invent anything the strip would then render.
+    #[test]
+    fn async_task_reader_handles_the_codex_spawn_and_stop_frames() {
+        let spawn = air_async_task_delta(&async_task_notif(serde_json::json!({
+            "sessionUpdate": "async_task_spawned",
+            "asyncTaskId": "exec-74096479-1a0d-4c6d-bbfa-ae10fce94da2",
+            "name": "sleep 400",
+            "taskType": "shell",
+            "showInTranscript": false,
+            "canStop": true,
+            "toolCallId": "exec-74096479-1a0d-4c6d-bbfa-ae10fce94da2",
+        })))
+        .expect("codex spawn frame");
+        assert!(spawn.spawned);
+        assert_eq!(spawn.name.as_deref(), Some("sleep 400"));
+        assert_eq!(spawn.task_type.as_deref(), Some("shell"));
+        assert_eq!(spawn.can_stop, Some(true));
+        // Absent upstream, and they must stay absent rather than become empty
+        // strings the strip would render as a blank meta line.
+        assert!(spawn.description.is_none());
+        assert!(spawn.usage.is_none());
+        assert!(spawn.output_file_path.is_none());
+        assert_eq!(spawn.tool_call_id.as_deref(), Some(spawn.task_id.as_str()));
+
+        let record = spawn.to_record();
+        assert_eq!(record.name, "sleep 400");
+        assert_eq!(record.task_type, "shell");
+        // No `state` on the wire: the row must start LIVE, or the strip would
+        // never show a task that codex only ever revises at its terminal edge.
+        assert_eq!(record.state, "running");
+        assert!(record.can_stop);
+        assert!(!crate::acp::types::async_task_state_is_terminal(
+            &record.state
+        ));
+
+        let stopped = air_async_task_delta(&async_task_notif(serde_json::json!({
+            "sessionUpdate": "async_task_state_update",
+            "asyncTaskId": "exec-74096479-1a0d-4c6d-bbfa-ae10fce94da2",
+            "state": "stopped",
+            "toolCallId": "exec-74096479-1a0d-4c6d-bbfa-ae10fce94da2",
+        })))
+        .expect("codex stop frame");
+        assert!(!stopped.spawned);
+        assert_eq!(stopped.state.as_deref(), Some("stopped"));
+        assert!(crate::acp::types::async_task_state_is_terminal("stopped"));
+    }
+
+    /// The `_auth/status_update` payload codex-acp 1.9+ pushes, unchanged. The
+    /// only contract that matters is that it DESERIALIZES — sacp answers an
+    /// unclaimed notification with a `method_not_found` error notification
+    /// written back to the agent, and a strict struct here would put codeg back
+    /// on that path the first time OpenAI adds a field.
+    #[test]
+    fn auth_status_update_deserializes_every_observed_kind() {
+        for payload in [
+            // Observed live: a `~/.codex/config.toml` selecting a custom provider.
+            serde_json::json!({"authStatus": {
+                "kind": "gateway", "label": "Custom model gateway", "detail": "codeg"
+            }}),
+            serde_json::json!({"authStatus": {
+                "kind": "account", "label": "ChatGPT Pro",
+                "account": {"email": "a@b.c", "plan": "pro"}
+            }}),
+            serde_json::json!({"authStatus": {"kind": "none", "label": "Not logged in"}}),
+            // A future kind, and a future sibling field, must both still parse.
+            serde_json::json!({"authStatus": {"kind": "something_new"}, "extra": 1}),
+        ] {
+            let notif: AuthStatusUpdateNotification =
+                serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
+                    panic!("must not reject {payload}: {e}");
+                });
+            assert!(notif.auth_status.is_object());
+        }
+    }
+
     /// The interceptor sits in front of EVERY dispatch, so a false positive
     /// would silently swallow ordinary session updates.
     #[test]
@@ -16903,6 +17582,30 @@ mod tests {
             assert_eq!(code.as_deref(), Some(expected));
             assert!(details.is_none(), "{reason} must not carry details");
         }
+    }
+
+    /// The synthesized reason for an `authRequired` prompt REJECTION
+    /// (claude-agent-acp 0.74.0's mid-session sign-out). It must produce its
+    /// own code — reusing `refusal` would tell the user the agent declined the
+    /// work, when it actually declined the credentials — and it must stay
+    /// non-terminal, because the whole point of that arm in
+    /// `run_conversation_loop` is that the connection outlives the turn.
+    #[test]
+    fn turn_failure_error_event_maps_auth_required_without_killing_the_connection() {
+        let Some(AcpEvent::Error {
+            code,
+            details,
+            terminal,
+            message,
+            ..
+        }) = turn_failure_error_event("auth_required", AgentType::ClaudeCode, None)
+        else {
+            panic!("auth_required should produce an error event");
+        };
+        assert_eq!(code.as_deref(), Some("turn_failed_auth_required"));
+        assert!(details.is_none());
+        assert!(!terminal, "a sign-out never kills the connection");
+        assert!(message.contains("sign in"), "message was {message:?}");
     }
 
     #[test]
