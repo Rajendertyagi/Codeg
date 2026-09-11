@@ -66,6 +66,18 @@ pub fn build_router(
             post(handlers::delegation::set_delegation_settings),
         )
         .route(
+            "/get_codeg_mcp_service_status",
+            post(handlers::mcp_service::get_codeg_mcp_service_status),
+        )
+        .route(
+            "/start_codeg_mcp_service",
+            post(handlers::mcp_service::start_codeg_mcp_service),
+        )
+        .route(
+            "/set_codeg_mcp_tool_group",
+            post(handlers::mcp_service::set_codeg_mcp_tool_group),
+        )
+        .route(
             "/get_feedback_settings",
             post(handlers::feedback::get_feedback_settings),
         )
@@ -384,6 +396,10 @@ pub fn build_router(
             post(handlers::git::git_commit_branches),
         )
         .route("/git_show_file", post(handlers::git::git_show_file))
+        .route(
+            "/git_show_file_base64",
+            post(handlers::git::git_show_file_base64),
+        )
         .route("/git_diff", post(handlers::git::git_diff))
         .route(
             "/git_diff_with_branch",
@@ -834,6 +850,14 @@ pub fn build_router(
             post(handlers::acp::acp_load_pi_config),
         )
         .route(
+            "/acp_load_deepseek_model_catalog",
+            post(handlers::acp::acp_load_deepseek_model_catalog),
+        )
+        .route(
+            "/acp_update_deepseek_model_catalog",
+            post(handlers::acp::acp_update_deepseek_model_catalog),
+        )
+        .route(
             "/acp_validate_pi_command",
             post(handlers::acp::acp_validate_pi_command),
         )
@@ -852,6 +876,10 @@ pub fn build_router(
         .route(
             "/acp_antigravity_login_cancel",
             post(handlers::acp::acp_antigravity_login_cancel),
+        )
+        .route(
+            "/acp_antigravity_sign_out",
+            post(handlers::acp::acp_antigravity_sign_out),
         )
         .route(
             "/acp_pi_project_trust_state",
@@ -1574,6 +1602,18 @@ pub fn build_router(
             "/background_clear",
             post(handlers::background::background_clear),
         )
+        .route(
+            "/background_market_search",
+            post(handlers::background::background_market_search),
+        )
+        .route(
+            "/background_market_asset",
+            post(handlers::background::background_market_asset),
+        )
+        .route(
+            "/background_market_download",
+            post(handlers::background::background_market_download),
+        )
         // ─── Pet ───
         .route("/pet_list", post(handlers::pet::pet_list))
         .route("/pet_get", post(handlers::pet::pet_get))
@@ -1630,6 +1670,10 @@ pub fn build_router(
         .route(
             "/terminal_resize",
             post(handlers::terminal::terminal_resize),
+        )
+        .route(
+            "/terminal_snapshot",
+            post(handlers::terminal::terminal_snapshot),
         )
         .route("/terminal_kill", post(handlers::terminal::terminal_kill))
         .route("/terminal_list", post(handlers::terminal::terminal_list))

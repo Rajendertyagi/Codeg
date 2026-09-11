@@ -196,7 +196,33 @@
       "panelOpacityHint": "サイドバー・パネル・タブバーの不透明度です。低いほど画像が透けて見えます。",
       "errorTooLarge": "画像が大きすぎます（最大 16 MB）。",
       "errorUnsupportedFormat": "対応していない画像形式です。PNG・JPEG・WebP・GIF から選んでください。",
-      "errorUploadFailed": "背景画像の設定に失敗しました。"
+      "errorUploadFailed": "背景画像の設定に失敗しました。",
+      "market": {
+        "open": "壁紙マーケット",
+        "title": "壁紙マーケット",
+        "description": "Wallhaven の公開ギャラリーを閲覧し、クリックでダウンロードして適用。",
+        "searchPlaceholder": "壁紙を検索…",
+        "categories": {
+          "all": "すべて",
+          "general": "風景",
+          "anime": "アニメ",
+          "people": "人物"
+        },
+        "pageInfo": "{page} / {lastPage} ページ",
+        "prevPage": "前へ",
+        "nextPage": "次へ",
+        "refresh": "更新",
+        "empty": "一致する壁紙がありません。",
+        "error": "壁紙マーケットの読み込みに失敗しました。",
+        "retry": "再試行",
+        "cardLabel": "壁紙 {id} を適用",
+        "applied": "使用中",
+        "unavailable": "利用不可",
+        "tooLarge": "背景に使うには大きすぎます：{actual}（上限 {limit}）",
+        "downloadFailed": "ダウンロードに失敗しました。再試行してください。",
+        "appliedToast": "壁紙を適用しました",
+        "credit": "画像提供 wallhaven.cc · SFW のみ"
+      }
     }
   },
   "SystemSettings": {
@@ -935,6 +961,13 @@
         "failed": "サインインが完了しませんでした。",
         "startFailed": "サインインを開始できませんでした",
         "credentialHint": "トークンはここにキャッシュされます。このファイルを別のデスクトップなしマシンにコピーすれば、そちらもサインイン済みになります。"
+      },
+      "signOut": {
+        "title": "間違ったアカウントでサインインしましたか？",
+        "description": "Antigravity はサインインした Google アカウントをキャッシュして黙って再利用するため、再度サインインしても別のアカウントには切り替わりません。サインアウトすると保存された認証情報が破棄されます。実行中の Antigravity セッションは先に終了します。そのままだと古いアカウントが書き戻されるためです。",
+        "action": "サインアウト",
+        "done": "サインアウトしました。サインインし直すと別のアカウントを選べます。",
+        "failed": "サインアウトできませんでした"
       }
     },
     "deepseek": {
@@ -1483,6 +1516,7 @@
       "installing": "インストール中…",
       "recheck": "再確認",
       "configDirSkillsNote": "カスタム設定ディレクトリを指定すると、設定画面で管理するスキル・エキスパート・オフィスツールはこの pi に適用されません。スキルはそのフォルダー内で直接管理してください。",
+      "dirHistoryNote": "これらのディレクトリは pi プロセスにのみ適用されます。codeg の会話履歴は pi の既定の場所を読むため、カスタムディレクトリに書き込まれたセッションは一覧に表示されません。",
       "projectTrustTitle": "プロジェクトの信頼",
       "projectTrustDescription": "pi にプロジェクトファイルの読み込みを許可したフォルダーです。信頼したフォルダーでは、そのリポジトリの .pi/extensions が pi の起動時にコードを実行します。配下のすべてのフォルダーに適用され、ターミナルで pi を実行するときにも使われます。",
       "projectTrustLoading": "読み込み中…",
@@ -1575,6 +1609,8 @@
     "terminalShellNotInstalled": "未インストール",
     "terminalShellNotFoundWarning": "このパスはホスト上に存在しません。",
     "terminalCurrentShell": "現在使用中: {path}",
+    "colorizeCommandOutput": "コマンド出力に色を付ける",
+    "colorizeCommandOutputDescription": "エージェントが実行するコマンドに ANSI カラーを強制し、その出力をトランスクリプト上でプレーンテキストではなくカラーで表示します。新しいセッションから有効になります。",
     "renderingDescription": "アプリで黒画面や描画不具合が発生する場合（Windows では一部の AMD GPU や Intel 内蔵 GPU、Linux では NVIDIA プロプライエタリドライバーで報告あり）、ハードウェアアクセラレーションを無効化してください。Windows と Linux のデスクトップ版のみ有効です。",
     "disableHardwareAcceleration": "ハードウェアアクセラレーションを無効化",
     "renderingSaveFailed": "レンダリング設定の保存に失敗しました: {message}",
@@ -2015,6 +2051,49 @@
           "more": "その他"
         },
         "showPet": "ペットを表示"
+      },
+      "mcp": {
+        "title": "codeg-mcp サービス",
+        "state": {
+          "running": "実行中",
+          "stopped": "停止中",
+          "disabled": "ツール無効",
+          "unavailable": "コンパニオン未検出",
+          "unknown": "不明"
+        },
+        "hint": {
+          "running": "ここから起動したエージェントは codeg のツールを使えます。",
+          "stopped": "Broker ソケットが応答していません。",
+          "disabled": "すべてのツールグループが無効です。",
+          "unavailable": "codeg-mcp の実行ファイルが見つかりません。",
+          "unknown": "状態を読み取れませんでした。"
+        },
+        "socketPath": "アドレス",
+        "binary": "コンパニオン",
+        "binaryMissing": "見つかりません",
+        "sessions": "セッション",
+        "activeDelegations": "委任",
+        "depthLimit": "深さ上限",
+        "tools": "ツール",
+        "groupDelegation": "委任",
+        "descDelegation": "タスクを別のエージェントに任せます。",
+        "groupFeedback": "ライブフィードバック",
+        "descFeedback": "実行を止めずに補足を送れます。",
+        "groupAsk": "ユーザーに質問",
+        "descAsk": "判断に迷ったら質問させます。",
+        "groupSessions": "セッション参照",
+        "descSessions": "過去のセッションと結果を調べます。",
+        "groupAutomations": "自動化を作成",
+        "descAutomations": "定期自動化を作成・管理します。",
+        "groupTaskboard": "タスクを作成",
+        "descTaskboard": "作業タスクを作成・管理します。",
+        "start": "サービスを起動",
+        "starting": "起動中…",
+        "actionFailed": "操作に失敗しました: {message}",
+        "lastError": "前回のエラー: {message}",
+        "loadFailed": "状態を取得できませんでした: {message}",
+        "openSettings": "詳細設定を開く",
+        "refresh": "更新"
       }
     },
     "auxPanel": {
@@ -2892,6 +2971,9 @@
         "cut": "切り取り",
         "copy": "コピー",
         "selectAll": "すべて選択",
+        "openLink": "リンクを開く",
+        "openFile": "ファイルを開く",
+        "sendEmail": "メールを送信",
         "pasteUnavailable": "クリップボードを読み取れませんでした。Ctrl/⌘V で貼り付けてください。",
         "clipboardWriteFailed": "クリップボードに書き込めませんでした。キーボードショートカットをご利用ください。",
         "quickMessageUntitled": "無題",
@@ -3167,9 +3249,12 @@
         "openInFileManager": "ファイルマネージャーで開く",
         "copyRelativePath": "相対パスをコピー",
         "copyAbsolutePath": "絶対パスをコピー",
+        "download": "ファイルをダウンロード",
         "pathCopied": "パスをコピーしました",
         "copyPathFailed": "パスのコピーに失敗しました",
-        "openFailed": "ローカルファイルを開けませんでした"
+        "openFailed": "ローカルファイルを開けませんでした",
+        "downloadSaved": "{name} をダウンロードしました",
+        "downloadFailed": "{name} のダウンロードに失敗しました"
       },
       "messageList": {
         "attachedResources": "添付リソース",
@@ -3339,7 +3424,10 @@
         "agentSessionLoading": "サブエージェントの記録を読み込んでいます…",
         "agentSessionEmpty": "サブエージェントはまだ何も書き込んでいません。",
         "agentFallbackTitle": "サブエージェント起動中…",
-        "agentCodexLaunchOnly": "起動しました。Codex はこのサブエージェントの進捗をこれ以上通知しません。結果はこの会話のメッセージとして届きます。",
+        "agentCodexLaunchOnly": "起動しました。Codex はこのサブエージェントの結末をまだ報告していません。セッションを開くと作業を追えます。",
+        "agentSubagentDone": "完了",
+        "agentSubagentInterrupted": "中断",
+        "agentSubagentUnknown": "結果不明",
         "agentStatsBash": "コマンド",
         "agentStatsRead": "ファイル読取",
         "agentStatsSearch": "検索",
@@ -3605,13 +3693,16 @@
         "opSpawn": "サブエージェントを起動中",
         "opWait": "サブエージェントの結果を取得中",
         "opClose": "サブエージェントを終了中",
-        "opResume": "サブエージェントを再開中"
+        "opResume": "サブエージェントを再開中",
+        "opList": "サブエージェント一覧"
       },
       "contextCompaction": {
         "compacting": "コンテキストを圧縮しています…",
         "compacted": "コンテキストを圧縮しました",
         "compactedTokens": "コンテキストを圧縮 · {before} → {after} トークン",
-        "failed": "コンテキストの圧縮に失敗しました"
+        "failed": "コンテキストの圧縮に失敗しました",
+        "triggerManual": "手動で実行",
+        "triggerAutomatic": "自動で実行"
       },
       "sessionFailure": {
         "category": {
@@ -3669,6 +3760,16 @@
       "viewMode": {
         "split": "左右分割ビューに切り替え",
         "unified": "インラインビューに切り替え"
+      },
+      "binaryFile": "バイナリファイル — 内容は表示されません",
+      "image": {
+        "sideBySide": "左右分割ビューに切り替え",
+        "swipe": "スワイプ比較ビューに切り替え",
+        "swipeHandle": "画像比較スライダー",
+        "noImage": "このリビジョンに画像はありません",
+        "unavailable": "この側を読み込めませんでした",
+        "tooLarge": "画像が大きすぎてプレビューできません（{size}）",
+        "loading": "画像を読み込み中..."
       }
     },
     "conversationContextBar": {
@@ -4952,6 +5053,7 @@
     "phaseRetry": "再実行",
     "phaseReturn": "追加指示",
     "phaseMerge": "マージ",
+    "phaseCompact": "コンテキスト圧縮",
     "titleLabel": "タイトル",
     "titlePlaceholder": "何をしますか？",
     "promptLabel": "タスクの説明",
@@ -4982,6 +5084,7 @@
     "mergeDeleteWorktree": "マージ後に worktree を削除",
     "mergeSubmit": "マージ",
     "mergeSubmitQueue": "マージ待ちに追加",
+    "mergeSubmitting": "開始中…",
     "mergeQueuedToast": "マージ待ちに追加しました。実行中のマージが終わり次第開始します。",
     "completeTitle": "タスクを完了",
     "completeDescription": "このタスクはファイルを変更していないため、マージするものはありません。そのまま完了にします。",
@@ -5003,6 +5106,7 @@
     "settingsMaxConcurrentHint": "0 = 無制限",
     "settingsAutoCompact": "自動コンパクトのしきい値",
     "settingsAutoCompactHint": "フォローアップ・再試行・マージの前に、コンテキストウィンドウの使用率がこの値以上ならセッションを圧縮してから送信します。0 で無効。",
+    "compactingNote": "セッションのコンテキストを圧縮中…",
     "settingsCompactCommand": "コンパクトコマンド",
     "settingsCompactCommandHint": "空欄ならエージェントが提供するコマンド（または既知の既定値）を自動で使います。",
     "settingsCompactCommandPlaceholder": "/compact",
@@ -5245,6 +5349,47 @@
     "groupInstructions": "説明とシステムプロンプト",
     "fieldDescription": "説明",
     "baseInstructions": "システムプロンプト（base_instructions）"
+  },
+  "DeepSeekModelEditor": {
+    "title": "モデル一覧",
+    "description": "DeepSeek セッションで切り替えられるモデルです。harness の設定ドキュメントに保存され、エージェントは起動時に読み込みます——保存後に開始されたセッションから反映されます。",
+    "inheritedBadge": "エージェント既定",
+    "inheritedHint": "まだ一覧が保存されていないため、これはエージェント内蔵のモデルです。保存すると固定され、以降のエージェント更新でも自動では変わりません。ファイル：",
+    "storedHint": "harness の設定ドキュメントに保存されています。この一覧の外にあるキーと、その周りのコメントはそのまま残ります。ファイル：",
+    "unreadable": "この設定ドキュメントは、既存の内容を失わずにここから編集することができません。手動で編集してください。",
+    "invalidStored": "保存されているこの一覧はエージェントに拒否されています。直すまでセッションは内蔵モデルで動きます：",
+    "loading": "設定ドキュメントを読み込み中…",
+    "loadFailed": "設定ドキュメントを読み込めませんでした。",
+    "empty": "モデルがありません。追加するか、そのまま保存してエージェント内蔵の一覧に戻してください。",
+    "addModel": "モデルを追加",
+    "remove": "モデルを削除",
+    "advanced": "詳細",
+    "save": "モデル一覧を保存",
+    "saving": "保存中…",
+    "restoreDefaults": "エージェント既定を使う",
+    "fieldId": "モデル id",
+    "fieldName": "表示名",
+    "fieldContextWindow": "コンテキストウィンドウ",
+    "fieldDescription": "説明",
+    "fieldMaxTokens": "最大出力トークン",
+    "fieldAcceptsImages": "画像を受け付ける",
+    "fieldImagePixelBudget": "画像ピクセル上限",
+    "imageBudgetPixels": "ピクセル数",
+    "imageBudgetLow": "低精細（512×512）",
+    "fieldImageMaxBytes": "画像バイト上限",
+    "placeholderId": "deepseek-flash",
+    "placeholderName": "選択時に表示される名前",
+    "placeholderInherit": "エージェント既定",
+    "errorMissingId": "すべてのモデルに id が必要です。",
+    "errorDuplicateId": "「{id}」という id のモデルが 2 つあります。",
+    "errorBadContextWindow": "「{id}」のコンテキストウィンドウは 0 より大きい整数にしてください。",
+    "errorBadMaxTokens": "「{id}」の最大出力トークンは 0 より大きい整数にしてください。",
+    "errorBadImageLimit": "「{id}」の画像上限は 0 より大きい整数にしてください。",
+    "warnSingleModel": "モデルが 1 つだけの場合、エージェントはモデル選択そのものを表示しなくなります。",
+    "warnLaunchModelMissing": "新しいセッションは「{model}」で開始されますが、この一覧にありません。追加するか、上の環境変数で {variable} を設定してください。",
+    "toastSaved": "モデル一覧を保存しました",
+    "toastRestored": "エージェント内蔵のモデル一覧を使用します",
+    "toastSaveFailed": "モデル一覧を保存できませんでした"
   },
   "DiagnosticsSettings": {
     "title": "環境診断",
@@ -5677,6 +5822,23 @@
     "confirmDeleteCancel": "キャンセル",
     "confirmDeleteConfirm": "削除",
     "canvasActions": "キャンバス操作",
-    "mergeIntoNewRegion": "新しい領域"
+    "mergeIntoNewRegion": "新しい領域",
+    "addFileCard": "ファイルカード",
+    "addTerminalCard": "ターミナルカード",
+    "searchFiles": "ファイルを検索…",
+    "searchFilesIn": "{folder} 内を検索…",
+    "searchingFiles": "検索中…",
+    "noFiles": "ファイルが見つかりません",
+    "noOpenFiles": "開いているファイルはありません — 入力して検索",
+    "browseForFile": "参照…",
+    "filePreview": "プレビュー",
+    "fileSource": "ソース",
+    "reloadFile": "再読み込み",
+    "removeFileCard": "ファイルカードを削除",
+    "restartTerminal": "ターミナルを再起動",
+    "removeTerminalCard": "ターミナルカードを削除",
+    "terminalNoDirectory": "このカードには作業ディレクトリがありません",
+    "confirmDeleteTerminals": "実行中のターミナル {count} 個が閉じられ、そのプロセスも終了します。",
+    "confirmDeleteNotesAndTerminals": "書き込んだメモ {notes} 件が完全に削除され、実行中のターミナル {terminals} 個も終了します。"
   }
 }

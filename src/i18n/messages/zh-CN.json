@@ -196,7 +196,33 @@
       "panelOpacityHint": "侧栏、面板与标签栏的不透明程度。越低，透出的图片越多。",
       "errorTooLarge": "图片太大（最大 16 MB）。",
       "errorUnsupportedFormat": "不支持的图片格式，请选择 PNG、JPEG、WebP 或 GIF。",
-      "errorUploadFailed": "设置背景图片失败。"
+      "errorUploadFailed": "设置背景图片失败。",
+      "market": {
+        "open": "壁纸市场",
+        "title": "壁纸市场",
+        "description": "浏览 Wallhaven 公开图库，点击即可下载并应用。",
+        "searchPlaceholder": "搜索壁纸…",
+        "categories": {
+          "all": "全部",
+          "general": "风景",
+          "anime": "二次元",
+          "people": "人物"
+        },
+        "pageInfo": "第 {page} / {lastPage} 页",
+        "prevPage": "上一页",
+        "nextPage": "下一页",
+        "refresh": "刷新",
+        "empty": "没有找到匹配的壁纸。",
+        "error": "壁纸市场加载失败。",
+        "retry": "重试",
+        "cardLabel": "应用壁纸 {id}",
+        "applied": "使用中",
+        "unavailable": "不可用",
+        "tooLarge": "超出背景图上限：{actual}（上限 {limit}）",
+        "downloadFailed": "下载失败，请重试。",
+        "appliedToast": "壁纸已应用",
+        "credit": "图片来源 wallhaven.cc · 仅 SFW 内容"
+      }
     }
   },
   "SystemSettings": {
@@ -935,6 +961,13 @@
         "failed": "登录未完成。",
         "startFailed": "无法开始登录",
         "credentialHint": "令牌缓存在这里。把这个文件复制到其他无桌面机器，那台也就登录好了。"
+      },
+      "signOut": {
+        "title": "登录了错误的账号？",
+        "description": "Antigravity 会缓存登录时使用的 Google 账号并静默复用，所以再次登录也换不到别的账号。退出登录会清除已保存的凭据；正在运行的 Antigravity 会话会先被结束，否则它们会把旧账号写回去。",
+        "action": "退出登录",
+        "done": "已退出登录。重新登录即可选择其他账号。",
+        "failed": "退出登录失败"
       }
     },
     "deepseek": {
@@ -1483,6 +1516,7 @@
       "installing": "安装中…",
       "recheck": "重新检测",
       "configDirSkillsNote": "设置了自定义配置目录后，设置页中管理的技能、专家与办公工具将不会作用于该 pi；请直接在该目录中管理其技能。",
+      "dirHistoryNote": "这两个目录只对 pi 进程生效。codeg 的历史会话列表读取的是 pi 的默认位置，写入自定义目录的会话不会出现在列表中。",
       "projectTrustTitle": "项目信任",
       "projectTrustDescription": "你允许 pi 从中加载项目文件的目录。被信任的目录会让该仓库的 .pi/extensions 在 pi 启动时执行代码，且对其下所有子目录同样生效，你在终端里运行 pi 时也会沿用。",
       "projectTrustLoading": "加载中…",
@@ -1575,6 +1609,8 @@
     "terminalShellNotInstalled": "未安装",
     "terminalShellNotFoundWarning": "当前主机上不存在此路径。",
     "terminalCurrentShell": "当前使用：{path}",
+    "colorizeCommandOutput": "为命令输出着色",
+    "colorizeCommandOutputDescription": "强制智能体运行的命令输出 ANSI 颜色，使其在会话记录中以彩色而非纯文本呈现。对新建会话生效。",
     "renderingDescription": "如果应用出现黑屏或渲染异常（Windows 上常见于 AMD 显卡或部分 Intel 集成显卡，Linux 上常见于 NVIDIA 闭源驱动），可关闭硬件加速。仅 Windows 与 Linux 桌面端生效。",
     "disableHardwareAcceleration": "禁用硬件加速",
     "renderingSaveFailed": "渲染设置保存失败：{message}",
@@ -2015,6 +2051,49 @@
           "more": "更多"
         },
         "showPet": "显示宠物"
+      },
+      "mcp": {
+        "title": "codeg-mcp 服务",
+        "state": {
+          "running": "运行中",
+          "stopped": "未运行",
+          "disabled": "未启用工具",
+          "unavailable": "伴生程序缺失",
+          "unknown": "未知"
+        },
+        "hint": {
+          "running": "从这里启动的智能体可使用 codeg 自带的工具。",
+          "stopped": "Broker 套接字没有响应，伴生进程连不回 codeg。",
+          "disabled": "所有工具组都已关闭，不会注入伴生进程。",
+          "unavailable": "磁盘上找不到 codeg-mcp 可执行文件。",
+          "unknown": "无法读取状态。"
+        },
+        "socketPath": "地址",
+        "binary": "伴生程序",
+        "binaryMissing": "未找到",
+        "sessions": "智能体会话",
+        "activeDelegations": "进行中的委派",
+        "depthLimit": "深度上限",
+        "tools": "工具",
+        "groupDelegation": "多智能体委派",
+        "descDelegation": "把任务交给另一个智能体处理。",
+        "groupFeedback": "实时反馈",
+        "descFeedback": "回合进行中补充说明，不打断执行。",
+        "groupAsk": "向用户提问",
+        "descAsk": "让智能体拿不准时先问你。",
+        "groupSessions": "会话查询",
+        "descSessions": "查询历史会话及其结果。",
+        "groupAutomations": "创建自动化",
+        "descAutomations": "创建和管理定时自动化。",
+        "groupTaskboard": "创建任务",
+        "descTaskboard": "创建和管理工作任务。",
+        "start": "启动服务",
+        "starting": "正在启动…",
+        "actionFailed": "操作失败：{message}",
+        "lastError": "上次错误：{message}",
+        "loadFailed": "无法读取状态：{message}",
+        "openSettings": "打开详细设置",
+        "refresh": "刷新"
       }
     },
     "auxPanel": {
@@ -2894,6 +2973,9 @@
         "cut": "剪切",
         "copy": "复制",
         "selectAll": "全选",
+        "openLink": "打开链接",
+        "openFile": "打开文件",
+        "sendEmail": "发送邮件",
         "pasteUnavailable": "无法读取剪贴板，请改用 Ctrl/⌘V 粘贴。",
         "clipboardWriteFailed": "无法写入剪贴板，请改用键盘快捷键。",
         "quickMessageUntitled": "未命名",
@@ -3167,9 +3249,12 @@
         "openInFileManager": "在文件管理器打开",
         "copyRelativePath": "复制相对路径",
         "copyAbsolutePath": "复制绝对路径",
+        "download": "下载文件",
         "pathCopied": "已复制路径",
         "copyPathFailed": "复制路径失败",
-        "openFailed": "打开本地文件失败"
+        "openFailed": "打开本地文件失败",
+        "downloadSaved": "已下载 {name}",
+        "downloadFailed": "下载 {name} 失败"
       },
       "messageList": {
         "attachedResources": "附加资源",
@@ -3339,7 +3424,10 @@
         "agentSessionLoading": "正在加载子智能体的会话记录…",
         "agentSessionEmpty": "子智能体还没有写入任何内容。",
         "agentFallbackTitle": "子智能体启动中…",
-        "agentCodexLaunchOnly": "已启动。Codex 不会再报告这个子智能体的进展——它的结果会作为一条消息出现在本会话中。",
+        "agentCodexLaunchOnly": "已启动。Codex 尚未报告这个子智能体的结局——打开它的会话可以跟进进展。",
+        "agentSubagentDone": "已完成",
+        "agentSubagentInterrupted": "已中断",
+        "agentSubagentUnknown": "结果未知",
         "agentStatsBash": "命令",
         "agentStatsRead": "读取文件",
         "agentStatsSearch": "搜索",
@@ -3605,13 +3693,16 @@
         "opSpawn": "启动子智能体",
         "opWait": "获取子智能体结果",
         "opClose": "结束子智能体",
-        "opResume": "恢复子智能体"
+        "opResume": "恢复子智能体",
+        "opList": "查看子智能体"
       },
       "contextCompaction": {
         "compacting": "正在压缩上下文…",
         "compacted": "上下文已压缩",
         "compactedTokens": "上下文已压缩 · {before} → {after} tokens",
-        "failed": "上下文压缩失败"
+        "failed": "上下文压缩失败",
+        "triggerManual": "手动触发",
+        "triggerAutomatic": "自动触发"
       },
       "sessionFailure": {
         "category": {
@@ -3669,6 +3760,16 @@
       "viewMode": {
         "split": "切换为左右分栏视图",
         "unified": "切换为内联视图"
+      },
+      "binaryFile": "二进制文件 — 不显示内容",
+      "image": {
+        "sideBySide": "切换为左右分栏视图",
+        "swipe": "切换为滑动对比视图",
+        "swipeHandle": "图片对比滑块",
+        "noImage": "此版本没有图片",
+        "unavailable": "无法加载此侧内容",
+        "tooLarge": "图片过大，无法预览（{size}）",
+        "loading": "正在加载图片..."
       }
     },
     "conversationContextBar": {
@@ -4952,6 +5053,7 @@
     "phaseRetry": "重试执行",
     "phaseReturn": "继续处理",
     "phaseMerge": "合并变更",
+    "phaseCompact": "压缩上下文",
     "titleLabel": "标题",
     "titlePlaceholder": "要做什么？",
     "promptLabel": "任务描述",
@@ -4982,6 +5084,7 @@
     "mergeDeleteWorktree": "合并后删除 worktree",
     "mergeSubmit": "合并",
     "mergeSubmitQueue": "加入合并队列",
+    "mergeSubmitting": "启动中…",
     "mergeQueuedToast": "已加入合并队列，等当前合并完成后自动开始。",
     "completeTitle": "完成任务",
     "completeDescription": "该任务没有改动任何文件，无需合并，将直接标记为已完成。",
@@ -5003,6 +5106,7 @@
     "settingsMaxConcurrentHint": "0 表示不限制",
     "settingsAutoCompact": "自动压缩上下文阈值",
     "settingsAutoCompactHint": "继续处理、重试或合并前，若会话上下文占用达到该比例，先压缩再发送任务消息。0 表示关闭。",
+    "compactingNote": "正在压缩会话上下文…",
     "settingsCompactCommand": "压缩命令",
     "settingsCompactCommandHint": "留空则按智能体自身提供的命令（或已知默认值）自动选择。",
     "settingsCompactCommandPlaceholder": "/compact",
@@ -5245,6 +5349,47 @@
     "groupInstructions": "描述与系统提示词",
     "fieldDescription": "描述",
     "baseInstructions": "系统提示词（base_instructions）"
+  },
+  "DeepSeekModelEditor": {
+    "title": "模型列表",
+    "description": "DeepSeek 会话可切换的模型。保存在 harness 的设置文档里，代理在启动时读取——保存后对之后新建的会话生效。",
+    "inheritedBadge": "代理默认",
+    "inheritedHint": "尚未保存过列表，这些是代理内置的模型。保存会把它们固定下来，之后升级代理也不再自动变化。文件：",
+    "storedHint": "已保存在 harness 设置文档中。这份列表之外的键、以及它们周围的注释都不会被改动。文件：",
+    "unreadable": "无法在这里安全地编辑该设置文档（会有丢失已有内容的风险），请手动编辑。",
+    "invalidStored": "代理拒绝了这份已保存的列表，在修好之前，会话用的都是它内置的模型：",
+    "loading": "正在读取设置文档…",
+    "loadFailed": "无法读取设置文档。",
+    "empty": "没有模型。添加一个，或直接保存以退回代理内置列表。",
+    "addModel": "添加模型",
+    "remove": "删除模型",
+    "advanced": "更多",
+    "save": "保存模型列表",
+    "saving": "保存中…",
+    "restoreDefaults": "使用代理默认",
+    "fieldId": "模型 id",
+    "fieldName": "显示名称",
+    "fieldContextWindow": "上下文窗口",
+    "fieldDescription": "描述",
+    "fieldMaxTokens": "最大输出 token",
+    "fieldAcceptsImages": "接受图片",
+    "fieldImagePixelBudget": "图片像素预算",
+    "imageBudgetPixels": "像素数",
+    "imageBudgetLow": "低精度（512×512）",
+    "fieldImageMaxBytes": "图片字节上限",
+    "placeholderId": "deepseek-flash",
+    "placeholderName": "选择器中显示的名字",
+    "placeholderInherit": "代理默认",
+    "errorMissingId": "每个模型都需要一个 id。",
+    "errorDuplicateId": "有两个模型都叫“{id}”。",
+    "errorBadContextWindow": "“{id}”的上下文窗口必须是大于 0 的整数。",
+    "errorBadMaxTokens": "“{id}”的最大输出 token 必须是大于 0 的整数。",
+    "errorBadImageLimit": "“{id}”的图片限制必须是大于 0 的整数。",
+    "warnSingleModel": "只有一个模型时，代理不会再提供模型选择器。",
+    "warnLaunchModelMissing": "新会话会以“{model}”启动，而它不在这个列表里。可以把它加进来，或在上方环境变量里设置 {variable}。",
+    "toastSaved": "模型列表已保存",
+    "toastRestored": "已改用代理内置模型列表",
+    "toastSaveFailed": "保存模型列表失败"
   },
   "DiagnosticsSettings": {
     "title": "环境诊断",
@@ -5677,6 +5822,23 @@
     "confirmDeleteCancel": "取消",
     "confirmDeleteConfirm": "删除",
     "canvasActions": "画布操作",
-    "mergeIntoNewRegion": "新建区域"
+    "mergeIntoNewRegion": "新建区域",
+    "addFileCard": "文件卡片",
+    "addTerminalCard": "终端卡片",
+    "searchFiles": "搜索文件…",
+    "searchFilesIn": "在 {folder} 中搜索…",
+    "searchingFiles": "搜索中…",
+    "noFiles": "未找到文件",
+    "noOpenFiles": "没有已打开的文件——输入以搜索",
+    "browseForFile": "浏览…",
+    "filePreview": "预览",
+    "fileSource": "源码",
+    "reloadFile": "重新加载",
+    "removeFileCard": "移除文件卡片",
+    "restartTerminal": "重启终端",
+    "removeTerminalCard": "移除终端卡片",
+    "terminalNoDirectory": "这张卡片没有工作目录",
+    "confirmDeleteTerminals": "{count} 个正在运行的终端会被关闭，其中的进程也会一并结束。",
+    "confirmDeleteNotesAndTerminals": "你写下的 {notes} 条便签将被永久删除，另有 {terminals} 个正在运行的终端会被结束。"
   }
 }

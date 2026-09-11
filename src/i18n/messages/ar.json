@@ -196,7 +196,33 @@
       "panelOpacityHint": "مدى عتامة الشريط الجانبي واللوحات وأشرطة التبويب. الأقل يُظهر المزيد من الصورة.",
       "errorTooLarge": "الصورة كبيرة جدًا (16 ميجابايت كحد أقصى).",
       "errorUnsupportedFormat": "صيغة صورة غير مدعومة. اختر ملف PNG أو JPEG أو WebP أو GIF.",
-      "errorUploadFailed": "فشل تعيين صورة الخلفية."
+      "errorUploadFailed": "فشل تعيين صورة الخلفية.",
+      "market": {
+        "open": "سوق الخلفيات",
+        "title": "سوق الخلفيات",
+        "description": "تصفح معرض Wallhaven العام؛ انقر للتنزيل والتطبيق.",
+        "searchPlaceholder": "ابحث عن خلفيات…",
+        "categories": {
+          "all": "الكل",
+          "general": "مناظر",
+          "anime": "أنمي",
+          "people": "أشخاص"
+        },
+        "pageInfo": "صفحة {page} من {lastPage}",
+        "prevPage": "السابق",
+        "nextPage": "التالي",
+        "refresh": "تحديث",
+        "empty": "لا توجد خلفيات مطابقة.",
+        "error": "فشل تحميل سوق الخلفيات.",
+        "retry": "إعادة المحاولة",
+        "cardLabel": "تطبيق الخلفية {id}",
+        "applied": "قيد الاستخدام",
+        "unavailable": "غير متاح",
+        "tooLarge": "أكبر من أن تُستخدم كخلفية: {actual} (الحد {limit})",
+        "downloadFailed": "فشل التنزيل، حاول مجددًا.",
+        "appliedToast": "تم تطبيق الخلفية",
+        "credit": "الصور من wallhaven.cc · محتوى آمن فقط"
+      }
     }
   },
   "SystemSettings": {
@@ -935,6 +961,13 @@
         "failed": "لم يكتمل تسجيل الدخول.",
         "startFailed": "تعذّر بدء تسجيل الدخول",
         "credentialHint": "يُخزَّن الرمز هنا. انسخ هذا الملف إلى جهاز آخر بلا سطح مكتب لتسجيل دخوله أيضاً."
+      },
+      "signOut": {
+        "title": "هل سجّلت الدخول بحساب خاطئ؟",
+        "description": "يحتفظ Antigravity بحساب Google الذي سجّل الدخول به ويعيد استخدامه بصمت، لذا فإن تسجيل الدخول مرة أخرى لا يصل إلى حساب آخر. يؤدي تسجيل الخروج إلى حذف بيانات الاعتماد المخزّنة، وتُنهى جلسات Antigravity الجارية أولاً، وإلا فإنها ستعيد كتابة الحساب القديم.",
+        "action": "تسجيل الخروج",
+        "done": "تم تسجيل الخروج. سجّل الدخول مرة أخرى لاختيار حساب آخر.",
+        "failed": "تعذّر تسجيل الخروج"
       }
     },
     "deepseek": {
@@ -1483,6 +1516,7 @@
       "installing": "جارٍ التثبيت…",
       "recheck": "إعادة التحقق",
       "configDirSkillsNote": "عند تحديد دليل إعدادات مخصص، لن تنطبق المهارات والخبراء وأدوات المكتب المُدارة في الإعدادات على pi هذا — أدِر مهاراته مباشرةً في ذلك المجلد.",
+      "dirHistoryNote": "هذان الدليلان يصلان إلى عملية pi فقط. يقرأ سجل محادثات codeg الموقع الافتراضي لـ pi، لذا لن تظهر الجلسات المكتوبة في دليل مخصص ضمن القائمة.",
       "projectTrustTitle": "ثقة المشروع",
       "projectTrustDescription": "المجلدات التي سمحت لـ pi بتحميل ملفات المشروع منها. المجلد الموثوق يتيح لملفات ‎.pi/extensions في ذلك المستودع تنفيذ التعليمات البرمجية عند بدء pi، ويسري على كل المجلدات داخله، ويُستخدم أيضًا عند تشغيل pi في الطرفية.",
       "projectTrustLoading": "جارٍ التحميل…",
@@ -1575,6 +1609,8 @@
     "terminalShellNotInstalled": "غير مثبّت",
     "terminalShellNotFoundWarning": "هذا المسار غير موجود على هذا المضيف.",
     "terminalCurrentShell": "قيد الاستخدام: {path}",
+    "colorizeCommandOutput": "تلوين مُخرجات الأوامر",
+    "colorizeCommandOutputDescription": "فرض ألوان ANSI على الأوامر التي تنفّذها الوكلاء، بحيث تظهر مخرجاتها ملوّنة في السجل بدلاً من نص عادي. يسري على الجلسات الجديدة.",
     "renderingDescription": "أوقف تشغيل تسريع الأجهزة إذا ظهرت شاشة سوداء أو أخطاء في العرض (شائع على بعض كروت AMD أو كروت Intel المدمجة على ويندوز، وعلى تعريف NVIDIA المغلق على لينكس). يسري على إصدارات سطح المكتب لويندوز ولينكس فقط.",
     "disableHardwareAcceleration": "تعطيل تسريع الأجهزة",
     "renderingSaveFailed": "فشل حفظ إعدادات العرض: {message}",
@@ -2015,6 +2051,49 @@
           "more": "المزيد"
         },
         "showPet": "إظهار الحيوان الأليف"
+      },
+      "mcp": {
+        "title": "خدمة codeg-mcp",
+        "state": {
+          "running": "قيد التشغيل",
+          "stopped": "متوقفة",
+          "disabled": "لا أدوات مفعّلة",
+          "unavailable": "المرافق مفقود",
+          "unknown": "غير معروف"
+        },
+        "hint": {
+          "running": "الوكلاء المشغّلون من هنا يمكنهم استخدام أدوات codeg.",
+          "stopped": "مقبس الوسيط لا يستجيب.",
+          "disabled": "جميع مجموعات الأدوات معطّلة.",
+          "unavailable": "ملف codeg-mcp التنفيذي غير موجود على القرص.",
+          "unknown": "تعذّرت قراءة الحالة."
+        },
+        "socketPath": "العنوان",
+        "binary": "المرافق",
+        "binaryMissing": "غير موجود",
+        "sessions": "الجلسات",
+        "activeDelegations": "التفويضات",
+        "depthLimit": "حد العمق",
+        "tools": "الأدوات",
+        "groupDelegation": "التفويض",
+        "descDelegation": "يسلّم مهمة إلى وكيل آخر.",
+        "groupFeedback": "الملاحظات الحية",
+        "descFeedback": "يضيف ملاحظات دون مقاطعة الدور.",
+        "groupAsk": "سؤال المستخدم",
+        "descAsk": "يدع الوكيل يسألك قبل أن يقرر.",
+        "groupSessions": "الاطلاع على الجلسات",
+        "descSessions": "يبحث في الجلسات السابقة ونتائجها.",
+        "groupAutomations": "إنشاء أتمتة",
+        "descAutomations": "ينشئ الأتمتة المجدولة ويديرها.",
+        "groupTaskboard": "إنشاء مهمة",
+        "descTaskboard": "ينشئ مهام العمل ويديرها.",
+        "start": "بدء الخدمة",
+        "starting": "جارٍ البدء…",
+        "actionFailed": "فشلت العملية: {message}",
+        "lastError": "آخر خطأ: {message}",
+        "loadFailed": "تعذّرت قراءة الحالة: {message}",
+        "openSettings": "فتح الإعدادات الكاملة",
+        "refresh": "تحديث"
       }
     },
     "auxPanel": {
@@ -2892,6 +2971,9 @@
         "cut": "قص",
         "copy": "نسخ",
         "selectAll": "تحديد الكل",
+        "openLink": "فتح الرابط",
+        "openFile": "فتح الملف",
+        "sendEmail": "إرسال بريد",
         "pasteUnavailable": "تعذّر قراءة الحافظة. استخدم Ctrl/⌘V للصق.",
         "clipboardWriteFailed": "تعذّرت الكتابة إلى الحافظة. استخدم اختصار لوحة المفاتيح.",
         "quickMessageUntitled": "بدون عنوان",
@@ -3167,9 +3249,12 @@
         "openInFileManager": "فتح في مدير الملفات",
         "copyRelativePath": "نسخ المسار النسبي",
         "copyAbsolutePath": "نسخ المسار المطلق",
+        "download": "تنزيل ملف",
         "pathCopied": "تم نسخ المسار",
         "copyPathFailed": "فشل نسخ المسار",
-        "openFailed": "فشل فتح الملف المحلي"
+        "openFailed": "فشل فتح الملف المحلي",
+        "downloadSaved": "تم تنزيل {name}",
+        "downloadFailed": "فشل تنزيل {name}"
       },
       "messageList": {
         "attachedResources": "الموارد المرفقة",
@@ -3339,7 +3424,10 @@
         "agentSessionLoading": "جارٍ تحميل سجل الوكيل الفرعي…",
         "agentSessionEmpty": "لم يكتب الوكيل الفرعي أي شيء بعد.",
         "agentFallbackTitle": "جارٍ تشغيل الوكيل الفرعي…",
-        "agentCodexLaunchOnly": "تم التشغيل. لا يبلّغ Codex عن أي تقدّم إضافي لهذا الوكيل الفرعي — وستصل نتيجته كرسالة في هذه المحادثة.",
+        "agentCodexLaunchOnly": "تم التشغيل. لم يبلّغ Codex بعد عن نتيجة هذا الوكيل الفرعي — افتح جلسته لمتابعة العمل.",
+        "agentSubagentDone": "انتهى",
+        "agentSubagentInterrupted": "تمت مقاطعته",
+        "agentSubagentUnknown": "النتيجة غير معروفة",
         "agentStatsBash": "الأوامر",
         "agentStatsRead": "الملفات المقروءة",
         "agentStatsSearch": "عمليات البحث",
@@ -3605,13 +3693,16 @@
         "opSpawn": "بدء تشغيل الوكيل الفرعي",
         "opWait": "جلب نتيجة الوكيل الفرعي",
         "opClose": "إغلاق الوكيل الفرعي",
-        "opResume": "استئناف الوكيل الفرعي"
+        "opResume": "استئناف الوكيل الفرعي",
+        "opList": "سرد الوكلاء الفرعيين"
       },
       "contextCompaction": {
         "compacting": "جارٍ ضغط السياق…",
         "compacted": "تم ضغط السياق",
         "compactedTokens": "تم ضغط السياق · {before} → {after} رمز",
-        "failed": "فشل ضغط السياق"
+        "failed": "فشل ضغط السياق",
+        "triggerManual": "تم التشغيل يدويًا",
+        "triggerAutomatic": "تم التشغيل تلقائيًا"
       },
       "sessionFailure": {
         "category": {
@@ -3669,6 +3760,16 @@
       "viewMode": {
         "split": "التبديل إلى العرض جنباً إلى جنب",
         "unified": "التبديل إلى العرض المضمّن"
+      },
+      "binaryFile": "ملف ثنائي — لا يتم عرض المحتوى",
+      "image": {
+        "sideBySide": "التبديل إلى العرض جنباً إلى جنب",
+        "swipe": "التبديل إلى عرض التمرير",
+        "swipeHandle": "شريط تمرير مقارنة الصور",
+        "noImage": "لا توجد صورة في هذه المراجعة",
+        "unavailable": "تعذر تحميل هذا الجانب",
+        "tooLarge": "الصورة كبيرة جدًا للمعاينة ({size})",
+        "loading": "جارٍ تحميل الصور..."
       }
     },
     "conversationContextBar": {
@@ -4952,6 +5053,7 @@
     "phaseRetry": "إعادة التنفيذ",
     "phaseReturn": "متابعة",
     "phaseMerge": "الدمج",
+    "phaseCompact": "ضغط السياق",
     "titleLabel": "العنوان",
     "titlePlaceholder": "ما الذي يجب إنجازه؟",
     "promptLabel": "وصف المهمة",
@@ -4982,6 +5084,7 @@
     "mergeDeleteWorktree": "حذف worktree بعد الدمج",
     "mergeSubmit": "دمج",
     "mergeSubmitQueue": "إضافة إلى طابور الدمج",
+    "mergeSubmitting": "جارٍ البدء…",
     "mergeQueuedToast": "تمت الإضافة إلى طابور الدمج — سيبدأ فور انتهاء الدمج الحالي.",
     "completeTitle": "إنهاء المهمة",
     "completeDescription": "لم تغيّر هذه المهمة أي ملف، لذا لا يوجد ما يُدمج — سيتم وضع علامة مكتملة عليها مباشرة.",
@@ -5003,6 +5106,7 @@
     "settingsMaxConcurrentHint": "0 = بلا حد",
     "settingsAutoCompact": "عتبة الضغط التلقائي",
     "settingsAutoCompactHint": "قبل جولة متابعة أو إعادة محاولة أو دمج، اضغط الجلسة إذا بلغ امتلاء نافذة السياق هذه النسبة. 0 يعني إيقاف.",
+    "compactingNote": "جارٍ ضغط سياق الجلسة…",
     "settingsCompactCommand": "أمر الضغط",
     "settingsCompactCommandHint": "اتركه فارغًا لاستخدام الأمر الذي يوفّره الوكيل أو قيمته الافتراضية المعروفة.",
     "settingsCompactCommandPlaceholder": "/compact",
@@ -5245,6 +5349,47 @@
     "groupInstructions": "الوصف وموجّه النظام",
     "fieldDescription": "الوصف",
     "baseInstructions": "موجّه النظام (base_instructions)"
+  },
+  "DeepSeekModelEditor": {
+    "title": "قائمة النماذج",
+    "description": "النماذج التي يمكن لجلسة DeepSeek التبديل بينها. تُحفظ في مستند إعدادات الـ harness الذي يقرأه الوكيل عند الإقلاع — ويسري الحفظ على الجلسات التي تبدأ بعده.",
+    "inheritedBadge": "افتراضيات الوكيل",
+    "inheritedHint": "لا توجد قائمة محفوظة بعد، لذا هذه هي نماذج الوكيل المدمجة. الحفظ يثبّتها، ولن تغيّرها إصدارات الوكيل اللاحقة من تلقاء نفسها. الملف:",
+    "storedHint": "محفوظة في مستند إعدادات الـ harness. تبقى المفاتيح خارج هذه القائمة — والتعليقات المحيطة بها — كما هي. الملف:",
+    "unreadable": "لا يمكن تحرير مستند الإعدادات هذا من هنا دون المخاطرة بما يحتويه. حرّره يدويًا.",
+    "invalidStored": "يرفض الوكيل هذه القائمة المحفوظة، لذا تعمل الجلسات بنماذجه المدمجة إلى أن تُصلَح:",
+    "loading": "جارٍ قراءة مستند الإعدادات…",
+    "loadFailed": "تعذّرت قراءة مستند الإعدادات.",
+    "empty": "لا توجد نماذج. أضف واحدًا، أو احفظ للعودة إلى قائمة الوكيل المدمجة.",
+    "addModel": "إضافة نموذج",
+    "remove": "إزالة النموذج",
+    "advanced": "المزيد",
+    "save": "حفظ قائمة النماذج",
+    "saving": "جارٍ الحفظ…",
+    "restoreDefaults": "استخدام افتراضيات الوكيل",
+    "fieldId": "معرّف النموذج",
+    "fieldName": "الاسم المعروض",
+    "fieldContextWindow": "نافذة السياق",
+    "fieldDescription": "الوصف",
+    "fieldMaxTokens": "أقصى رموز للمخرجات",
+    "fieldAcceptsImages": "يقبل الصور",
+    "fieldImagePixelBudget": "حد وحدات البكسل",
+    "imageBudgetPixels": "عدد البكسل",
+    "imageBudgetLow": "تفاصيل منخفضة (512×512)",
+    "fieldImageMaxBytes": "حد البايتات",
+    "placeholderId": "deepseek-flash",
+    "placeholderName": "يظهر في المُحدِّد",
+    "placeholderInherit": "افتراضي الوكيل",
+    "errorMissingId": "كل نموذج يحتاج إلى معرّف.",
+    "errorDuplicateId": "نموذجان يحملان المعرّف “{id}”.",
+    "errorBadContextWindow": "يجب أن تكون نافذة سياق “{id}” عددًا صحيحًا أكبر من صفر.",
+    "errorBadMaxTokens": "يجب أن يكون أقصى رموز مخرجات “{id}” عددًا صحيحًا أكبر من صفر.",
+    "errorBadImageLimit": "يجب أن تكون حدود صور “{id}” أعدادًا صحيحة أكبر من صفر.",
+    "warnSingleModel": "مع نموذج واحد فقط، يتوقف الوكيل عن عرض مُحدِّد النماذج أصلًا.",
+    "warnLaunchModelMissing": "تبدأ الجلسات الجديدة على “{model}” وهو غير موجود في هذه القائمة. أضِفه، أو اضبط {variable} في متغيّرات البيئة أعلاه.",
+    "toastSaved": "تم حفظ قائمة النماذج",
+    "toastRestored": "يجري استخدام قائمة نماذج الوكيل المدمجة",
+    "toastSaveFailed": "تعذّر حفظ قائمة النماذج"
   },
   "DiagnosticsSettings": {
     "title": "تشخيص البيئة",
@@ -5677,6 +5822,23 @@
     "confirmDeleteCancel": "إلغاء",
     "confirmDeleteConfirm": "حذف",
     "canvasActions": "إجراءات اللوحة",
-    "mergeIntoNewRegion": "منطقة جديدة"
+    "mergeIntoNewRegion": "منطقة جديدة",
+    "addFileCard": "بطاقة ملف",
+    "addTerminalCard": "بطاقة طرفية",
+    "searchFiles": "البحث عن الملفات…",
+    "searchFilesIn": "البحث في {folder}…",
+    "searchingFiles": "جارٍ البحث…",
+    "noFiles": "لم يتم العثور على ملفات",
+    "noOpenFiles": "لا توجد ملفات مفتوحة — اكتب للبحث",
+    "browseForFile": "استعراض…",
+    "filePreview": "معاينة",
+    "fileSource": "المصدر",
+    "reloadFile": "إعادة التحميل",
+    "removeFileCard": "إزالة بطاقة الملف",
+    "restartTerminal": "إعادة تشغيل الطرفية",
+    "removeTerminalCard": "إزالة بطاقة الطرفية",
+    "terminalNoDirectory": "لا يوجد دليل عمل لهذه البطاقة",
+    "confirmDeleteTerminals": "سيتم إغلاق {count} من الطرفيات قيد التشغيل وإنهاء عملياتها.",
+    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."
   }
 }

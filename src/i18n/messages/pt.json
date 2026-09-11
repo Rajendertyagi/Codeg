@@ -196,7 +196,33 @@
       "panelOpacityHint": "O quão opacos são a barra lateral, os painéis e as barras de abas. Mais baixo deixa a imagem transparecer mais.",
       "errorTooLarge": "A imagem é muito grande (máx. 16 MB).",
       "errorUnsupportedFormat": "Formato de imagem não suportado. Escolha um PNG, JPEG, WebP ou GIF.",
-      "errorUploadFailed": "Falha ao definir a imagem de fundo."
+      "errorUploadFailed": "Falha ao definir a imagem de fundo.",
+      "market": {
+        "open": "Mercado de papéis",
+        "title": "Mercado de papéis de parede",
+        "description": "Navegue pela galeria pública do Wallhaven; clique para baixar e aplicar.",
+        "searchPlaceholder": "Pesquisar papéis…",
+        "categories": {
+          "all": "Tudo",
+          "general": "Paisagens",
+          "anime": "Anime",
+          "people": "Pessoas"
+        },
+        "pageInfo": "Página {page} de {lastPage}",
+        "prevPage": "Anterior",
+        "nextPage": "Próxima",
+        "refresh": "Atualizar",
+        "empty": "Nenhum papel de parede correspondente.",
+        "error": "Falha ao carregar o mercado de papéis.",
+        "retry": "Tentar novamente",
+        "cardLabel": "Aplicar o papel de parede {id}",
+        "applied": "Em uso",
+        "unavailable": "Indisponível",
+        "tooLarge": "Grande demais para um plano de fundo: {actual} (limite {limit})",
+        "downloadFailed": "Falha no download. Tente novamente.",
+        "appliedToast": "Papel de parede aplicado",
+        "credit": "Imagens de wallhaven.cc · apenas SFW"
+      }
     }
   },
   "SystemSettings": {
@@ -935,6 +961,13 @@
         "failed": "O login não foi concluído.",
         "startFailed": "Não foi possível iniciar o login",
         "credentialHint": "O token fica em cache aqui. Copie este arquivo para outra máquina sem desktop para conectá-la também."
+      },
+      "signOut": {
+        "title": "Entrou com a conta errada?",
+        "description": "O Antigravity guarda em cache a conta Google usada para entrar e a reutiliza silenciosamente, então entrar de novo não chega a outra conta. Sair descarta a credencial armazenada; as sessões do Antigravity em andamento são encerradas antes, pois de outro modo gravariam a conta antiga de volta.",
+        "action": "Sair",
+        "done": "Sessão encerrada. Entre novamente para escolher outra conta.",
+        "failed": "Não foi possível sair"
       }
     },
     "deepseek": {
@@ -1483,6 +1516,7 @@
       "installing": "Instalando…",
       "recheck": "Verificar novamente",
       "configDirSkillsNote": "Com um diretório de configuração personalizado, as habilidades, os especialistas e as ferramentas de escritório gerenciados nas Configurações não se aplicam a este pi — gerencie as habilidades dele diretamente nessa pasta.",
+      "dirHistoryNote": "Estes diretórios só chegam ao processo do pi. O histórico de conversas do codeg lê a localização padrão do pi, portanto sessões gravadas num diretório personalizado não aparecerão na lista.",
       "projectTrustTitle": "Confiança do projeto",
       "projectTrustDescription": "Pastas das quais você permitiu que o pi carregue arquivos do projeto. Uma pasta confiável permite que as .pi/extensions daquele repositório executem código ao iniciar o pi, vale para todas as pastas dentro dela e também é usada quando você executa o pi no terminal.",
       "projectTrustLoading": "Carregando…",
@@ -1575,6 +1609,8 @@
     "terminalShellNotInstalled": "não instalado",
     "terminalShellNotFoundWarning": "Este caminho não existe neste host.",
     "terminalCurrentShell": "Em uso: {path}",
+    "colorizeCommandOutput": "Colorir a saída dos comandos",
+    "colorizeCommandOutputDescription": "Força cor ANSI nos comandos que os agentes executam, para que a saída apareça colorida na transcrição em vez de como texto simples. Vale para sessões novas.",
     "renderingDescription": "Desative a aceleração de hardware se o aplicativo apresentar tela preta ou falhas de renderização (comum em certas GPUs AMD ou GPUs Intel integradas no Windows e com o driver proprietário da NVIDIA no Linux). Aplica-se apenas às versões desktop do Windows e do Linux.",
     "disableHardwareAcceleration": "Desativar aceleração de hardware",
     "renderingSaveFailed": "Falha ao salvar as configurações de renderização: {message}",
@@ -2015,6 +2051,49 @@
           "more": "Mais"
         },
         "showPet": "Mostrar pet"
+      },
+      "mcp": {
+        "title": "Serviço codeg-mcp",
+        "state": {
+          "running": "Em execução",
+          "stopped": "Parado",
+          "disabled": "Sem ferramentas ativas",
+          "unavailable": "Companion ausente",
+          "unknown": "Desconhecido"
+        },
+        "hint": {
+          "running": "Agentes iniciados aqui usam as ferramentas do codeg.",
+          "stopped": "O socket do broker não responde.",
+          "disabled": "Todos os grupos de ferramentas estão desativados.",
+          "unavailable": "O binário codeg-mcp não está no disco.",
+          "unknown": "Não foi possível ler o estado."
+        },
+        "socketPath": "Endereço",
+        "binary": "Companion",
+        "binaryMissing": "Não encontrado",
+        "sessions": "Sessões",
+        "activeDelegations": "Delegações",
+        "depthLimit": "Profundidade",
+        "tools": "Ferramentas",
+        "groupDelegation": "Delegação",
+        "descDelegation": "Passa uma tarefa para outro agente.",
+        "groupFeedback": "Feedback ao vivo",
+        "descFeedback": "Acrescenta notas sem interromper o turno.",
+        "groupAsk": "Perguntar ao usuário",
+        "descAsk": "Deixa o agente perguntar antes de decidir.",
+        "groupSessions": "Consulta de sessões",
+        "descSessions": "Consulta sessões anteriores e seus resultados.",
+        "groupAutomations": "Criar automação",
+        "descAutomations": "Cria e gere automações agendadas.",
+        "groupTaskboard": "Criar tarefa",
+        "descTaskboard": "Cria e gere tarefas de trabalho.",
+        "start": "Iniciar serviço",
+        "starting": "Iniciando…",
+        "actionFailed": "Falhou: {message}",
+        "lastError": "Último erro: {message}",
+        "loadFailed": "Não foi possível ler o estado: {message}",
+        "openSettings": "Abrir configurações",
+        "refresh": "Atualizar"
       }
     },
     "auxPanel": {
@@ -2892,6 +2971,9 @@
         "cut": "Cortar",
         "copy": "Copiar",
         "selectAll": "Selecionar tudo",
+        "openLink": "Abrir link",
+        "openFile": "Abrir arquivo",
+        "sendEmail": "Enviar e-mail",
         "pasteUnavailable": "Não foi possível ler a área de transferência. Use Ctrl/⌘V para colar.",
         "clipboardWriteFailed": "Não foi possível escrever na área de transferência. Use o atalho de teclado.",
         "quickMessageUntitled": "Sem título",
@@ -3167,9 +3249,12 @@
         "openInFileManager": "Abrir no gerenciador de arquivos",
         "copyRelativePath": "Copiar caminho relativo",
         "copyAbsolutePath": "Copiar caminho absoluto",
+        "download": "Baixar arquivo",
         "pathCopied": "Caminho copiado",
         "copyPathFailed": "Falha ao copiar o caminho",
-        "openFailed": "Falha ao abrir o arquivo local"
+        "openFailed": "Falha ao abrir o arquivo local",
+        "downloadSaved": "{name} baixado",
+        "downloadFailed": "Falha ao baixar {name}"
       },
       "messageList": {
         "attachedResources": "Recursos anexados",
@@ -3339,7 +3424,10 @@
         "agentSessionLoading": "Carregando a transcrição do subagente…",
         "agentSessionEmpty": "O subagente ainda não escreveu nada.",
         "agentFallbackTitle": "Iniciando subagente…",
-        "agentCodexLaunchOnly": "Iniciado. O Codex não informa mais o progresso deste subagente — o resultado chega como uma mensagem nesta conversa.",
+        "agentCodexLaunchOnly": "Iniciado. O Codex ainda não informou o desfecho deste subagente — abra a sessão dele para acompanhar o trabalho.",
+        "agentSubagentDone": "Concluído",
+        "agentSubagentInterrupted": "Interrompido",
+        "agentSubagentUnknown": "Desfecho desconhecido",
         "agentStatsBash": "Comandos",
         "agentStatsRead": "Arquivos lidos",
         "agentStatsSearch": "Pesquisas",
@@ -3605,13 +3693,16 @@
         "opSpawn": "Iniciando subagente",
         "opWait": "Obtendo resultado do subagente",
         "opClose": "Encerrando subagente",
-        "opResume": "Retomando subagente"
+        "opResume": "Retomando subagente",
+        "opList": "Listando subagentes"
       },
       "contextCompaction": {
         "compacting": "Compactando o contexto…",
         "compacted": "Contexto compactado",
         "compactedTokens": "Contexto compactado · {before} → {after} tokens",
-        "failed": "Falha ao compactar o contexto"
+        "failed": "Falha ao compactar o contexto",
+        "triggerManual": "Acionada manualmente",
+        "triggerAutomatic": "Acionada automaticamente"
       },
       "sessionFailure": {
         "category": {
@@ -3669,6 +3760,16 @@
       "viewMode": {
         "split": "Alternar para a visualização lado a lado",
         "unified": "Alternar para a visualização em linha"
+      },
+      "binaryFile": "Arquivo binário — conteúdo não exibido",
+      "image": {
+        "sideBySide": "Alternar para a visualização lado a lado",
+        "swipe": "Alternar para a visualização deslizante",
+        "swipeHandle": "Controle deslizante de comparação de imagens",
+        "noImage": "Nenhuma imagem nesta revisão",
+        "unavailable": "Não foi possível carregar este lado",
+        "tooLarge": "Imagem muito grande para pré-visualizar ({size})",
+        "loading": "Carregando imagens..."
       }
     },
     "conversationContextBar": {
@@ -4952,6 +5053,7 @@
     "phaseRetry": "Nova tentativa",
     "phaseReturn": "Continuação",
     "phaseMerge": "Merge",
+    "phaseCompact": "Compactação de contexto",
     "titleLabel": "Título",
     "titlePlaceholder": "O que precisa ser feito?",
     "promptLabel": "Descrição da tarefa",
@@ -4982,6 +5084,7 @@
     "mergeDeleteWorktree": "Excluir o worktree após o merge",
     "mergeSubmit": "Merge",
     "mergeSubmitQueue": "Adicionar à fila",
+    "mergeSubmitting": "Iniciando…",
     "mergeQueuedToast": "Adicionada à fila de merge — começa assim que o merge atual terminar.",
     "completeTitle": "Concluir tarefa",
     "completeDescription": "Esta tarefa não alterou nenhum arquivo, então não há nada para fazer merge: ela é marcada como concluída.",
@@ -5003,6 +5106,7 @@
     "settingsMaxConcurrentHint": "0 = ilimitado",
     "settingsAutoCompact": "Limite de compactação automática",
     "settingsAutoCompactHint": "Antes de uma rodada de continuação, nova tentativa ou merge, compacta a sessão se a janela de contexto estiver ao menos assim cheia. 0 = desativado.",
+    "compactingNote": "Compactando o contexto da sessão…",
     "settingsCompactCommand": "Comando de compactação",
     "settingsCompactCommandHint": "Deixe em branco para usar o que o agente oferece, ou o padrão conhecido dele.",
     "settingsCompactCommandPlaceholder": "/compact",
@@ -5245,6 +5349,47 @@
     "groupInstructions": "Descrição e prompt do sistema",
     "fieldDescription": "Descrição",
     "baseInstructions": "Prompt do sistema (base_instructions)"
+  },
+  "DeepSeekModelEditor": {
+    "title": "Lista de modelos",
+    "description": "Os modelos entre os quais uma sessão do DeepSeek pode alternar. Ficam no documento de definições do harness, que o agente lê ao arrancar — guardar aplica-se às sessões iniciadas depois.",
+    "inheritedBadge": "Predefinições do agente",
+    "inheritedHint": "Ainda não há lista guardada, por isso estes são os modelos integrados do agente. Guardar fixa-os, e as versões seguintes do agente deixam de os alterar sozinhas. Ficheiro:",
+    "storedHint": "Guardada no documento de definições do harness. As chaves fora desta lista — e os comentários à volta delas — ficam intactas. Ficheiro:",
+    "unreadable": "Este documento de definições não pode ser editado aqui sem arriscar o que já contém. Edite-o à mão.",
+    "invalidStored": "O agente recusa esta lista guardada, por isso as sessões correm com os seus modelos integrados até ser corrigida:",
+    "loading": "A ler o documento de definições…",
+    "loadFailed": "Não foi possível ler o documento de definições.",
+    "empty": "Sem modelos. Adicione um, ou guarde para voltar à lista integrada do agente.",
+    "addModel": "Adicionar modelo",
+    "remove": "Remover modelo",
+    "advanced": "Mais",
+    "save": "Guardar lista de modelos",
+    "saving": "A guardar…",
+    "restoreDefaults": "Usar predefinições do agente",
+    "fieldId": "Id do modelo",
+    "fieldName": "Nome apresentado",
+    "fieldContextWindow": "Janela de contexto",
+    "fieldDescription": "Descrição",
+    "fieldMaxTokens": "Tokens de saída máx.",
+    "fieldAcceptsImages": "Aceita imagens",
+    "fieldImagePixelBudget": "Limite de píxeis",
+    "imageBudgetPixels": "Número de pixels",
+    "imageBudgetLow": "Detalhe baixo (512×512)",
+    "fieldImageMaxBytes": "Limite de bytes",
+    "placeholderId": "deepseek-flash",
+    "placeholderName": "Mostrado no seletor",
+    "placeholderInherit": "Predefinição do agente",
+    "errorMissingId": "Todos os modelos precisam de um id.",
+    "errorDuplicateId": "Dois modelos partilham o id “{id}”.",
+    "errorBadContextWindow": "A janela de contexto de “{id}” tem de ser um inteiro maior que zero.",
+    "errorBadMaxTokens": "Os tokens de saída máximos de “{id}” têm de ser um inteiro maior que zero.",
+    "errorBadImageLimit": "Os limites de imagem de “{id}” têm de ser inteiros maiores que zero.",
+    "warnSingleModel": "Com um único modelo, o agente deixa de oferecer seletor de modelo.",
+    "warnLaunchModelMissing": "As sessões novas começam em “{model}”, que não está nesta lista. Adicione-o, ou defina {variable} nas variáveis de ambiente acima.",
+    "toastSaved": "Lista de modelos guardada",
+    "toastRestored": "A usar a lista de modelos integrada do agente",
+    "toastSaveFailed": "Não foi possível guardar a lista de modelos"
   },
   "DiagnosticsSettings": {
     "title": "Diagnóstico do ambiente",
@@ -5677,6 +5822,23 @@
     "confirmDeleteCancel": "Cancelar",
     "confirmDeleteConfirm": "Excluir",
     "canvasActions": "Ações do quadro",
-    "mergeIntoNewRegion": "Nova região"
+    "mergeIntoNewRegion": "Nova região",
+    "addFileCard": "Cartão de arquivo",
+    "addTerminalCard": "Cartão de terminal",
+    "searchFiles": "Pesquisar arquivos…",
+    "searchFilesIn": "Pesquisar em {folder}…",
+    "searchingFiles": "Pesquisando…",
+    "noFiles": "Nenhum arquivo encontrado",
+    "noOpenFiles": "Nenhum arquivo aberto — digite para pesquisar",
+    "browseForFile": "Procurar…",
+    "filePreview": "Pré-visualização",
+    "fileSource": "Código",
+    "reloadFile": "Recarregar",
+    "removeFileCard": "Remover cartão de arquivo",
+    "restartTerminal": "Reiniciar terminal",
+    "removeTerminalCard": "Remover cartão de terminal",
+    "terminalNoDirectory": "Este cartão não tem diretório de trabalho",
+    "confirmDeleteTerminals": "{count} terminal(is) em execução serão fechados e seus processos encerrados.",
+    "confirmDeleteNotesAndTerminals": "{notes} nota(s) que você escreveu serão excluídas permanentemente e {terminals} terminal(is) em execução serão encerrados."
   }
 }

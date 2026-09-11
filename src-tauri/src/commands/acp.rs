@@ -5364,7 +5364,7 @@ pub(crate) async fn acp_fetch_kimi_models_core(
 
 /// Resolve pi's coding-agent dir: `PI_CODING_AGENT_DIR` if set (trimmed,
 /// non-empty), else `~/.pi/agent` (mirrors `codex_home_dir`/`resolve_kimi_*`).
-fn pi_agent_dir() -> PathBuf {
+pub(crate) fn pi_agent_dir() -> PathBuf {
     match std::env::var("PI_CODING_AGENT_DIR")
         .ok()
         .map(|raw| raw.trim().to_string())
@@ -5755,6 +5755,100 @@ pub(crate) async fn acp_antigravity_login_finish_core(
 /// Abandon a pending browser-free sign-in and stop its agent process.
 pub(crate) async fn acp_antigravity_login_cancel_core(handle: String) -> Result<(), AcpError> {
     crate::acp::antigravity_login::cancel(handle.trim()).await
+}
+
+/// Sign Antigravity out, so the next sign-in can reach a different account.
+///
+/// The counterpart to [`acp_antigravity_login_start_core`], and the thing that
+/// makes it usable twice: with a credential in hand the agent refreshes it
+/// silently, so `authenticate` returns without a link and the first Google
+/// account a user picks is the last one they get.
+///
+/// Three steps around the `logout`, each closing a way for the sign-out to look
+/// like it worked when it did not.
+///
+/// 1. **Refuse unless codeg knows the agent will clear something.** `logout`
+///    clears ONE flavor — the one `settings.json` names — and for a
+///    `gemini-api-key` or `agent-platform` connection that set is empty, since
+///    those read their key per request rather than storing anything. It answers
+///    `{}` regardless. Verified against 1.1.1: with `auth.type=gemini-api-key`
+///    and a `GEMINI_API_KEY` present, `logout` returns `{}`, deletes no token
+///    file, and still strips `auth.type` — so without this check codeg would
+///    report a sign-out that left the account exactly where it was.
+///
+///    The FILE is consulted rather than the stored row because it is the only
+///    thing the server infers from. And a file codeg cannot parse is refused
+///    rather than assumed harmless: the server reads Hjson and codeg does not,
+///    so "codeg sees no method" and "there is no method" are different facts,
+///    and only the second is safe to act on.
+/// 2. **Quiesce this agent first, and keep it quiesced.** Antigravity processes
+///    cache the OAuth credentials in memory behind a per-PROCESS lock and write
+///    them back on every silent refresh, so one left running restores the
+///    account being signed out of — or overwrites the account signed in next —
+///    as soon as its token expires. The lockout is taken BEFORE the connections
+///    are enumerated and held across the `logout`, so a session cannot be
+///    spawned into the window and inherit the credential being erased.
+/// 3. **Write the saved method back afterwards.** `logout` removes `auth.type`
+///    on its way out, and a session whose `auth.type` is missing fails outright
+///    with `Authentication required`. The report is returned for the same
+///    reason a save's is: when that file refuses to be rewritten the user has
+///    to fix it by hand, and this is the moment they are looking.
+pub(crate) async fn acp_antigravity_sign_out_core(
+    db: &AppDatabase,
+    connection_manager: &crate::acp::manager::ConnectionManager,
+) -> Result<crate::acp::connection::AntigravitySyncReport, AcpError> {
+    use crate::acp::connection::AntigravityAuthType;
+
+    let runtime_env = antigravity_runtime_env(db).await?;
+    match crate::acp::connection::antigravity_effective_auth_type(&runtime_env) {
+        AntigravityAuthType::Declared(active)
+            if !matches!(active.as_str(), "oauth-personal" | "oauth-business") =>
+        {
+            return Err(AcpError::protocol(format!(
+                "Antigravity's settings.json says it authenticates with {active}, not with a \
+                 Google account, so there is no signed-in account to leave. Choose a Google \
+                 sign-in method above and save first, then sign out."
+            )));
+        }
+        AntigravityAuthType::Unreadable => {
+            return Err(AcpError::protocol(
+                "codeg cannot read the authentication method out of Antigravity's settings.json, \
+                 so it cannot tell which account would be signed out — or whether anything would \
+                 be. Make that file strict JSON (the server also accepts comments and trailing \
+                 commas; codeg does not), or move it aside, then try again.",
+            ));
+        }
+        // Declared OAuth clears that flavor; `Absent` leaves the server nothing
+        // to infer from, so it clears BOTH — which is what "get me out of this
+        // account" asks for either way.
+        _ => {}
+    }
+
+    // Before the enumeration, and held across the `logout`: a connection
+    // spawned into that window would authenticate with the credential about to
+    // be erased and then write it back at its next refresh.
+    //
+    // The gate is global rather than per-agent, so this delays starting ANY
+    // agent while it is held — the same cost the external-restore gate accepts,
+    // and bounded the same way. Worth it here: the window is a few seconds in
+    // practice (the ceiling is a cold PAR unpack), it is a rare and explicit
+    // user action, and a blocked spawn merely waits where an admitted one would
+    // silently restore the account being left behind.
+    let _lockout = connection_manager.lock_out_new_connections().await;
+    let disconnected = connection_manager
+        .disconnect_by_agent_type(AgentType::Antigravity)
+        .await;
+    if disconnected > 0 {
+        tracing::info!("[ACP][Antigravity] sign-out ended {disconnected} live connection(s)");
+    }
+
+    let signed_out = crate::acp::antigravity_login::sign_out(&runtime_env).await;
+    drop(_lockout);
+    signed_out?;
+
+    Ok(crate::acp::connection::sync_antigravity_settings_for_env(
+        &runtime_env,
+    ))
 }
 
 pub(crate) async fn acp_pi_project_trust_state_core(
@@ -7102,7 +7196,7 @@ async fn hermes_setup_argvs() -> (Vec<String>, Vec<String>) {
         // Unreachable: Hermes is always an Npx distribution. Fall through to
         // the npx guidance with the same pinned spec so a future match-arm
         // change can't resurrect a stale recipe.
-        _ => "hermes-agent@0.21.0",
+        _ => "hermes-agent@0.21.1",
     };
     let build = |tail: &[&str]| -> Vec<String> {
         let mut argv = vec![
@@ -11605,6 +11699,16 @@ pub async fn acp_antigravity_login_finish(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_antigravity_login_cancel(handle: String) -> Result<(), AcpError> {
     acp_antigravity_login_cancel_core(handle).await
+}
+
+/// Clear the Antigravity credential so another account can be signed in.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_antigravity_sign_out(
+    db: tauri::State<'_, AppDatabase>,
+    manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
+) -> Result<crate::acp::connection::AntigravitySyncReport, AcpError> {
+    acp_antigravity_sign_out_core(&db, &manager).await
 }
 
 /// Record (or clear, with `trusted: null`) an explicit project-trust decision in
@@ -16125,7 +16229,7 @@ wire_api = "chat"
     // either one can be the spec that actually lands.
     #[test]
     fn the_latest_spec_still_names_the_package_downstream_readers_key_off() {
-        let (latest, pinned) = npm_install_attempts("hermes-agent@0.21.0", None, true).unwrap();
+        let (latest, pinned) = npm_install_attempts("hermes-agent@0.21.1", None, true).unwrap();
         assert_eq!(latest, "hermes-agent@latest");
         assert!(npm_package_requires_scripts(&latest));
         assert!(npm_package_requires_scripts(&pinned.unwrap()));
@@ -17593,7 +17697,7 @@ wire_api = "chat"
                     .expect("npx recipe must pin via --package");
                 assert_eq!(
                     argv.get(pkg_idx + 1).map(String::as_str),
-                    Some("hermes-agent@0.21.0")
+                    Some("hermes-agent@0.21.1")
                 );
                 assert_eq!(argv.get(pkg_idx + 2).map(String::as_str), Some("hermes"));
             } else {
@@ -18205,7 +18309,7 @@ model = "gpt"
             )
         };
 
-        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.21.0", download());
+        let annotated = annotate_npm_bootstrap_failure("hermes-agent@0.21.1", download());
         let text = annotated.to_string();
         assert!(text.contains("fetch failed"), "keeps the original error");
         assert!(text.contains("HTTP(S)_PROXY"), "adds the proxy hint");
@@ -18217,7 +18321,7 @@ model = "gpt"
 
         // A hermes failure that isn't a download stays untouched.
         let permissions = annotate_npm_bootstrap_failure(
-            "hermes-agent@0.21.0",
+            "hermes-agent@0.21.1",
             AcpError::Protocol("failed to install npm package globally: EACCES".to_string()),
         );
         assert!(!permissions.to_string().contains("HTTP(S)_PROXY"));

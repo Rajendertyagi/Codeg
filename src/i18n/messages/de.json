@@ -196,7 +196,33 @@
       "panelOpacityHint": "Wie deckend Seitenleiste, Panels und Tab-Leisten sind. Niedriger lässt mehr vom Bild durchscheinen.",
       "errorTooLarge": "Bild ist zu groß (max. 16 MB).",
       "errorUnsupportedFormat": "Nicht unterstütztes Bildformat. Wähle ein PNG, JPEG, WebP oder GIF.",
-      "errorUploadFailed": "Hintergrundbild konnte nicht festgelegt werden."
+      "errorUploadFailed": "Hintergrundbild konnte nicht festgelegt werden.",
+      "market": {
+        "open": "Hintergrund-Markt",
+        "title": "Hintergrund-Markt",
+        "description": "Durchsuche die öffentliche Wallhaven-Galerie; per Klick herunterladen und anwenden.",
+        "searchPlaceholder": "Hintergründe suchen…",
+        "categories": {
+          "all": "Alle",
+          "general": "Landschaften",
+          "anime": "Anime",
+          "people": "Personen"
+        },
+        "pageInfo": "Seite {page} von {lastPage}",
+        "prevPage": "Zurück",
+        "nextPage": "Weiter",
+        "refresh": "Aktualisieren",
+        "empty": "Keine passenden Hintergründe gefunden.",
+        "error": "Der Hintergrund-Markt konnte nicht geladen werden.",
+        "retry": "Erneut versuchen",
+        "cardLabel": "Hintergrund {id} anwenden",
+        "applied": "In Verwendung",
+        "unavailable": "Nicht verfügbar",
+        "tooLarge": "Zu groß für einen Hintergrund: {actual} (Grenze {limit})",
+        "downloadFailed": "Download fehlgeschlagen. Bitte erneut versuchen.",
+        "appliedToast": "Hintergrund angewendet",
+        "credit": "Bilder von wallhaven.cc · nur SFW"
+      }
     }
   },
   "SystemSettings": {
@@ -935,6 +961,13 @@
         "failed": "Die Anmeldung wurde nicht abgeschlossen.",
         "startFailed": "Anmeldung konnte nicht gestartet werden",
         "credentialHint": "Das Token liegt hier. Kopiere diese Datei auf weitere Rechner ohne Desktop, um sie ebenfalls anzumelden."
+      },
+      "signOut": {
+        "title": "Mit dem falschen Konto angemeldet?",
+        "description": "Antigravity speichert das angemeldete Google-Konto zwischen und verwendet es stillschweigend weiter, sodass eine erneute Anmeldung kein anderes Konto erreicht. Beim Abmelden werden die gespeicherten Anmeldedaten verworfen; laufende Antigravity-Sitzungen werden zuvor beendet, da sie sonst das alte Konto zurückschreiben würden.",
+        "action": "Abmelden",
+        "done": "Abgemeldet. Melde dich erneut an, um ein anderes Konto zu wählen.",
+        "failed": "Abmelden fehlgeschlagen"
       }
     },
     "deepseek": {
@@ -1483,6 +1516,7 @@
       "installing": "Wird installiert…",
       "recheck": "Erneut prüfen",
       "configDirSkillsNote": "Mit einem benutzerdefinierten Konfigurationsverzeichnis gelten die in den Einstellungen verwalteten Skills, Experten und Office-Tools nicht für dieses pi — verwalte seine Skills direkt in diesem Ordner.",
+      "dirHistoryNote": "Diese Verzeichnisse gelten nur für den pi-Prozess. Der Gesprächsverlauf von codeg liest den Standardpfad von pi – Sitzungen in einem eigenen Verzeichnis erscheinen daher nicht in der Liste.",
       "projectTrustTitle": "Projektvertrauen",
       "projectTrustDescription": "Ordner, aus denen pi Projektdateien laden darf. In einem vertrauten Ordner führt das Repository seine .pi/extensions beim Start von pi aus. Die Entscheidung gilt für alle enthaltenen Ordner und auch, wenn du pi im Terminal startest.",
       "projectTrustLoading": "Wird geladen…",
@@ -1575,6 +1609,8 @@
     "terminalShellNotInstalled": "nicht installiert",
     "terminalShellNotFoundWarning": "Dieser Pfad existiert auf diesem Host nicht.",
     "terminalCurrentShell": "Aktuell verwendet: {path}",
+    "colorizeCommandOutput": "Befehlsausgabe einfärben",
+    "colorizeCommandOutputDescription": "Erzwingt ANSI-Farben in den Befehlen, die Agenten ausführen, sodass deren Ausgabe im Verlauf farbig statt als reiner Text erscheint. Gilt ab neuen Sitzungen.",
     "renderingDescription": "Deaktivieren Sie die Hardwarebeschleunigung, wenn die App einen schwarzen Bildschirm oder Render-Fehler zeigt (häufig bei bestimmten AMD-GPUs oder integrierten Intel-GPUs unter Windows sowie beim proprietären NVIDIA-Treiber unter Linux). Wirkt sich nur auf die Windows- und Linux-Desktop-Versionen aus.",
     "disableHardwareAcceleration": "Hardwarebeschleunigung deaktivieren",
     "renderingSaveFailed": "Render-Einstellungen konnten nicht gespeichert werden: {message}",
@@ -2015,6 +2051,49 @@
           "more": "Mehr"
         },
         "showPet": "Pet anzeigen"
+      },
+      "mcp": {
+        "title": "codeg-mcp-Dienst",
+        "state": {
+          "running": "Läuft",
+          "stopped": "Läuft nicht",
+          "disabled": "Keine Tools aktiv",
+          "unavailable": "Companion fehlt",
+          "unknown": "Unbekannt"
+        },
+        "hint": {
+          "running": "Hier gestartete Agenten können codegs Tools nutzen.",
+          "stopped": "Der Broker-Socket antwortet nicht.",
+          "disabled": "Alle Tool-Gruppen sind ausgeschaltet.",
+          "unavailable": "Die codeg-mcp-Binärdatei fehlt auf der Festplatte.",
+          "unknown": "Der Status konnte nicht gelesen werden."
+        },
+        "socketPath": "Adresse",
+        "binary": "Companion",
+        "binaryMissing": "Nicht gefunden",
+        "sessions": "Sitzungen",
+        "activeDelegations": "Delegationen",
+        "depthLimit": "Max. Tiefe",
+        "tools": "Tools",
+        "groupDelegation": "Delegation",
+        "descDelegation": "Gibt eine Aufgabe an einen anderen Agenten ab.",
+        "groupFeedback": "Live-Feedback",
+        "descFeedback": "Ergänzt Hinweise, ohne den Zug zu unterbrechen.",
+        "groupAsk": "Rückfrage stellen",
+        "descAsk": "Lässt den Agenten vor einer Entscheidung nachfragen.",
+        "groupSessions": "Sitzungsabfrage",
+        "descSessions": "Schlägt frühere Sitzungen und Ergebnisse nach.",
+        "groupAutomations": "Automatisierung erstellen",
+        "descAutomations": "Erstellt und verwaltet geplante Automationen.",
+        "groupTaskboard": "Aufgabe erstellen",
+        "descTaskboard": "Erstellt und verwaltet Arbeitsaufgaben.",
+        "start": "Dienst starten",
+        "starting": "Wird gestartet…",
+        "actionFailed": "Fehlgeschlagen: {message}",
+        "lastError": "Letzter Fehler: {message}",
+        "loadFailed": "Status konnte nicht gelesen werden: {message}",
+        "openSettings": "Alle Einstellungen öffnen",
+        "refresh": "Aktualisieren"
       }
     },
     "auxPanel": {
@@ -2892,6 +2971,9 @@
         "cut": "Ausschneiden",
         "copy": "Kopieren",
         "selectAll": "Alles auswählen",
+        "openLink": "Link öffnen",
+        "openFile": "Datei öffnen",
+        "sendEmail": "E-Mail senden",
         "pasteUnavailable": "Zwischenablage konnte nicht gelesen werden. Mit Strg/⌘V einfügen.",
         "clipboardWriteFailed": "Schreiben in die Zwischenablage fehlgeschlagen. Bitte das Tastenkürzel verwenden.",
         "quickMessageUntitled": "Ohne Titel",
@@ -3167,9 +3249,12 @@
         "openInFileManager": "Im Dateimanager öffnen",
         "copyRelativePath": "Relativen Pfad kopieren",
         "copyAbsolutePath": "Absoluten Pfad kopieren",
+        "download": "Datei herunterladen",
         "pathCopied": "Pfad kopiert",
         "copyPathFailed": "Pfad konnte nicht kopiert werden",
-        "openFailed": "Lokale Datei konnte nicht geöffnet werden"
+        "openFailed": "Lokale Datei konnte nicht geöffnet werden",
+        "downloadSaved": "{name} heruntergeladen",
+        "downloadFailed": "Herunterladen von {name} fehlgeschlagen"
       },
       "messageList": {
         "attachedResources": "Angehängte Ressourcen",
@@ -3339,7 +3424,10 @@
         "agentSessionLoading": "Protokoll des Subagenten wird geladen…",
         "agentSessionEmpty": "Der Subagent hat noch nichts geschrieben.",
         "agentFallbackTitle": "Sub-Agent wird gestartet…",
-        "agentCodexLaunchOnly": "Gestartet. Codex meldet keinen weiteren Fortschritt dieses Sub-Agenten – sein Ergebnis trifft als Nachricht in dieser Unterhaltung ein.",
+        "agentCodexLaunchOnly": "Gestartet. Codex hat noch nicht gemeldet, wie dieser Sub-Agent geendet ist – öffne seine Sitzung, um die Arbeit zu verfolgen.",
+        "agentSubagentDone": "Fertig",
+        "agentSubagentInterrupted": "Unterbrochen",
+        "agentSubagentUnknown": "Ausgang unbekannt",
         "agentStatsBash": "Befehle",
         "agentStatsRead": "Dateien gelesen",
         "agentStatsSearch": "Suchen",
@@ -3605,13 +3693,16 @@
         "opSpawn": "Sub-Agent wird gestartet",
         "opWait": "Sub-Agent-Ergebnis wird abgerufen",
         "opClose": "Sub-Agent wird geschlossen",
-        "opResume": "Sub-Agent wird fortgesetzt"
+        "opResume": "Sub-Agent wird fortgesetzt",
+        "opList": "Sub-Agenten auflisten"
       },
       "contextCompaction": {
         "compacting": "Kontext wird komprimiert…",
         "compacted": "Kontext komprimiert",
         "compactedTokens": "Kontext komprimiert · {before} → {after} Tokens",
-        "failed": "Kontextkomprimierung fehlgeschlagen"
+        "failed": "Kontextkomprimierung fehlgeschlagen",
+        "triggerManual": "Manuell ausgelöst",
+        "triggerAutomatic": "Automatisch ausgelöst"
       },
       "sessionFailure": {
         "category": {
@@ -3669,6 +3760,16 @@
       "viewMode": {
         "split": "Zur Zwei-Spalten-Ansicht wechseln",
         "unified": "Zur Inline-Ansicht wechseln"
+      },
+      "binaryFile": "Binärdatei — Inhalt wird nicht angezeigt",
+      "image": {
+        "sideBySide": "Zur Zwei-Spalten-Ansicht wechseln",
+        "swipe": "Zur Wisch-Ansicht wechseln",
+        "swipeHandle": "Schieberegler für Bildvergleich",
+        "noImage": "Kein Bild in dieser Revision",
+        "unavailable": "Diese Seite konnte nicht geladen werden",
+        "tooLarge": "Bild zu groß für die Vorschau ({size})",
+        "loading": "Bilder werden geladen..."
       }
     },
     "conversationContextBar": {
@@ -4952,6 +5053,7 @@
     "phaseRetry": "Neuversuch",
     "phaseReturn": "Nachfassen",
     "phaseMerge": "Merge",
+    "phaseCompact": "Kontextverdichtung",
     "titleLabel": "Titel",
     "titlePlaceholder": "Was ist zu tun?",
     "promptLabel": "Aufgabenbeschreibung",
@@ -4982,6 +5084,7 @@
     "mergeDeleteWorktree": "Worktree nach dem Merge löschen",
     "mergeSubmit": "Mergen",
     "mergeSubmitQueue": "In die Warteschlange",
+    "mergeSubmitting": "Wird gestartet …",
     "mergeQueuedToast": "Zur Merge-Warteschlange hinzugefügt – startet, sobald der laufende Merge fertig ist.",
     "completeTitle": "Aufgabe abschließen",
     "completeDescription": "Diese Aufgabe hat keine Dateien geändert – es gibt nichts zu mergen, sie wird direkt als fertig markiert.",
@@ -5003,6 +5106,7 @@
     "settingsMaxConcurrentHint": "0 = unbegrenzt",
     "settingsAutoCompact": "Schwelle für automatisches Komprimieren",
     "settingsAutoCompactHint": "Vor einer Folge-, Wiederholungs- oder Merge-Runde die Sitzung komprimieren, wenn das Kontextfenster mindestens so voll ist. 0 = aus.",
+    "compactingNote": "Sitzungskontext wird verdichtet …",
     "settingsCompactCommand": "Komprimierungsbefehl",
     "settingsCompactCommandHint": "Leer lassen, um den vom Agenten angebotenen Befehl bzw. dessen bekannten Standard zu verwenden.",
     "settingsCompactCommandPlaceholder": "/compact",
@@ -5245,6 +5349,47 @@
     "groupInstructions": "Beschreibung & System-Prompt",
     "fieldDescription": "Beschreibung",
     "baseInstructions": "System-Prompt (base_instructions)"
+  },
+  "DeepSeekModelEditor": {
+    "title": "Modellliste",
+    "description": "Die Modelle, zwischen denen eine DeepSeek-Sitzung wechseln kann. Sie stehen im Einstellungsdokument des Harness, das der Agent beim Start liest – gespeicherte Änderungen greifen für danach gestartete Sitzungen.",
+    "inheritedBadge": "Agent-Standard",
+    "inheritedHint": "Es ist noch keine Liste gespeichert, dies sind die eingebauten Modelle des Agenten. Speichern legt sie fest; spätere Agent-Versionen ändern sie dann nicht mehr von selbst. Datei:",
+    "storedHint": "Im Einstellungsdokument des Harness gespeichert. Schlüssel außerhalb dieser Liste – und die Kommentare darum herum – bleiben unangetastet. Datei:",
+    "unreadable": "Dieses Einstellungsdokument lässt sich von hier aus nicht bearbeiten, ohne den vorhandenen Inhalt zu gefährden. Bitte von Hand bearbeiten.",
+    "invalidStored": "Der Agent weist diese gespeicherte Liste zurück; bis sie korrigiert ist, laufen Sitzungen auf seinen eingebauten Modellen:",
+    "loading": "Einstellungsdokument wird gelesen…",
+    "loadFailed": "Das Einstellungsdokument konnte nicht gelesen werden.",
+    "empty": "Keine Modelle. Füge eines hinzu oder speichere, um auf die eingebaute Liste des Agenten zurückzufallen.",
+    "addModel": "Modell hinzufügen",
+    "remove": "Modell entfernen",
+    "advanced": "Mehr",
+    "save": "Modellliste speichern",
+    "saving": "Wird gespeichert…",
+    "restoreDefaults": "Agent-Standard verwenden",
+    "fieldId": "Modell-ID",
+    "fieldName": "Anzeigename",
+    "fieldContextWindow": "Kontextfenster",
+    "fieldDescription": "Beschreibung",
+    "fieldMaxTokens": "Max. Ausgabe-Tokens",
+    "fieldAcceptsImages": "Nimmt Bilder an",
+    "fieldImagePixelBudget": "Pixelbudget",
+    "imageBudgetPixels": "Pixelanzahl",
+    "imageBudgetLow": "Geringes Detail (512×512)",
+    "fieldImageMaxBytes": "Byte-Obergrenze",
+    "placeholderId": "deepseek-flash",
+    "placeholderName": "Wird in der Auswahl angezeigt",
+    "placeholderInherit": "Agent-Standard",
+    "errorMissingId": "Jedes Modell braucht eine ID.",
+    "errorDuplicateId": "Zwei Modelle haben dieselbe ID „{id}“.",
+    "errorBadContextWindow": "Das Kontextfenster von „{id}“ muss eine ganze Zahl größer als null sein.",
+    "errorBadMaxTokens": "Die maximalen Ausgabe-Tokens von „{id}“ müssen eine ganze Zahl größer als null sein.",
+    "errorBadImageLimit": "Die Bildgrenzen von „{id}“ müssen ganze Zahlen größer als null sein.",
+    "warnSingleModel": "Bei nur einem Modell bietet der Agent gar keine Modellauswahl mehr an.",
+    "warnLaunchModelMissing": "Neue Sitzungen starten mit „{model}“, das nicht in dieser Liste steht. Füge es hinzu oder setze {variable} in den Umgebungsvariablen oben.",
+    "toastSaved": "Modellliste gespeichert",
+    "toastRestored": "Es wird die eingebaute Modellliste des Agenten verwendet",
+    "toastSaveFailed": "Die Modellliste konnte nicht gespeichert werden"
   },
   "DiagnosticsSettings": {
     "title": "Umgebungsdiagnose",
@@ -5677,6 +5822,23 @@
     "confirmDeleteCancel": "Abbrechen",
     "confirmDeleteConfirm": "Löschen",
     "canvasActions": "Leinwand-Aktionen",
-    "mergeIntoNewRegion": "Neuer Bereich"
+    "mergeIntoNewRegion": "Neuer Bereich",
+    "addFileCard": "Dateikarte",
+    "addTerminalCard": "Terminalkarte",
+    "searchFiles": "Dateien suchen…",
+    "searchFilesIn": "In {folder} suchen…",
+    "searchingFiles": "Wird gesucht…",
+    "noFiles": "Keine Dateien gefunden",
+    "noOpenFiles": "Keine Dateien geöffnet – tippen zum Suchen",
+    "browseForFile": "Durchsuchen…",
+    "filePreview": "Vorschau",
+    "fileSource": "Quelltext",
+    "reloadFile": "Neu laden",
+    "removeFileCard": "Dateikarte entfernen",
+    "restartTerminal": "Terminal neu starten",
+    "removeTerminalCard": "Terminalkarte entfernen",
+    "terminalNoDirectory": "Diese Karte hat kein Arbeitsverzeichnis",
+    "confirmDeleteTerminals": "{count} laufende Terminal(s) werden geschlossen und ihre Prozesse beendet.",
+    "confirmDeleteNotesAndTerminals": "{notes} von dir geschriebene Notiz(en) werden endgültig gelöscht und {terminals} laufende Terminal(s) beendet."
   }
 }
