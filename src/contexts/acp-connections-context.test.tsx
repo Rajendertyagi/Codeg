@@ -2292,6 +2292,8 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
       option_name: "Model",
       requested: "Composer 2.5",
       actual: "Grok 4.5",
+      requested_value: "composer-2.5",
+      actual_value: "grok-4.5",
     })
     emitAcpEvent(handlers, {
       seq: 3,
@@ -2370,6 +2372,153 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
     })
 
     expect(h.toastWarning).not.toHaveBeenCalled()
+  })
+})
+
+// Cline 3.x is the first agent to ship a `boolean` config option
+// ("Auto-approve tools"). Verified against cline 3.0.62 over stdio: it accepts
+// `session/set_config_option` with the flattened `{type:"boolean",value:true}`
+// payload, answers with the full option list carrying the new `currentValue`,
+// AND pushes the same list again as a `config_option_update`. So every wire leg
+// works — the toggle was dead entirely inside this reducer (#709).
+describe("AcpConnectionsProvider boolean config option (cline auto-approve)", () => {
+  function clineOptions(autoApprove: boolean): SessionConfigOptionInfo[] {
+    return [
+      {
+        id: "mode",
+        name: "Session Mode",
+        category: "mode",
+        kind: {
+          type: "select",
+          current_value: "act",
+          options: [
+            { value: "plan", name: "Plan" },
+            { value: "act", name: "Act" },
+          ],
+          groups: [],
+        },
+      },
+      {
+        id: "auto_approve",
+        name: "Auto-approve tools",
+        description: "Automatically approve all tool calls",
+        kind: { type: "boolean", current_value: autoApprove },
+      },
+    ]
+  }
+
+  function autoApproveValue(): boolean | string | undefined {
+    const option = h
+      .store!.getConnection(TAB)!
+      .configOptions?.find((o) => o.id === "auto_approve")
+    return option?.kind.current_value
+  }
+
+  async function connectClineOwner(): Promise<AttachHandlers> {
+    h.acpGetAgentStatus.mockResolvedValue({
+      agent_type: "cline",
+      enabled: true,
+      available: true,
+      installed_version: "3.0.62",
+      host_tools_agent_mode: false,
+      is_acp_adapter: false,
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "cline", "/tmp/x", "sess-1")
+    })
+    return latestAttachHandlers()
+  }
+
+  it("flips the toggle optimistically when the user clicks it", async () => {
+    const handlers = await connectClineOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(false),
+    })
+    expect(autoApproveValue()).toBe(false)
+
+    await act(async () => {
+      await h.actions!.setConfigOption(TAB, "auto_approve", "true")
+    })
+
+    expect(autoApproveValue()).toBe(true)
+    expect(saveConfigPreference).toHaveBeenCalledWith(
+      "cline",
+      "auto_approve",
+      "true"
+    )
+  })
+
+  it("applies the agent's own flip of a boolean option", async () => {
+    // The authoritative leg, independent of the optimistic one: cline answers
+    // every `set_config_option` with a fresh list and pushes a
+    // `config_option_update` besides. A value-blind equality check swallows
+    // both, which is what left the chip stuck even after a successful set.
+    const handlers = await connectClineOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(false),
+    })
+    expect(autoApproveValue()).toBe(false)
+
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(true),
+    })
+
+    expect(autoApproveValue()).toBe(true)
+  })
+
+  it("snaps back when the agent settles the toggle the other way", async () => {
+    // Optimism without reconciliation is worse than no optimism: the chip would
+    // claim tools are auto-approved while the agent still asks for permission.
+    const handlers = await connectClineOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(false),
+    })
+
+    await act(async () => {
+      await h.actions!.setConfigOption(TAB, "auto_approve", "true")
+    })
+    expect(autoApproveValue()).toBe(true)
+
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(false),
+    })
+
+    expect(autoApproveValue()).toBe(false)
+  })
+
+  it("ignores a value that is neither on nor off", async () => {
+    // The optimistic hop is the one place a value is interpreted without the
+    // agent; anything but the two the toggle emits is a caller bug, and
+    // guessing "off" would be a silent lie about what tools may run.
+    const handlers = await connectClineOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "session_config_options",
+      config_options: clineOptions(true),
+    })
+
+    await act(async () => {
+      await h.actions!.setConfigOption(TAB, "auto_approve", "act")
+    })
+
+    expect(autoApproveValue()).toBe(true)
   })
 })
 
@@ -4477,5 +4626,102 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
 
     expect(steeringBlocks()).toEqual([])
     expect(conn().steeredMessageIds).toEqual([])
+  })
+})
+
+describe("connect() is observable while it is still in flight", () => {
+  // `acpConnect` does not return until the agent has spawned, handshaken and
+  // resumed the session — seconds to a minute for a large historical session.
+  // `CONNECTION_CREATED` (the first `status: "connecting"`) only runs after it
+  // resolves, so for that whole stretch the connections map is empty and every
+  // consumer read `null` = "idle, nothing in flight". The pending marker is
+  // what closes that gap.
+  it("publishes a pending marker before the backend call and clears it after", async () => {
+    await mountProvider()
+    let resolveConnect: (id: string) => void = () => {}
+    h.acpConnect.mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolveConnect = res
+        })
+    )
+
+    let connectPromise: Promise<void> | undefined
+    await act(async () => {
+      connectPromise = h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "sess-1"
+      )
+    })
+
+    // Mid-flight: still no entry, but the key is demonstrably connecting —
+    // and it names the agent + cwd, so a status chip has something to show.
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+    expect(h.store!.getConnectPending(TAB)).toEqual({
+      agentType: "claude_code",
+      workingDir: "/tmp/x",
+    })
+
+    await act(async () => {
+      resolveConnect("spawned-conn")
+      await connectPromise
+    })
+
+    // The entry has taken over as the source of truth, so the marker retires.
+    expect(h.store!.getConnection(TAB)?.status).toBe("connecting")
+    expect(h.store!.getConnectPending(TAB)).toBeUndefined()
+  })
+
+  it("clears the marker when the connect fails, leaving no phantom `connecting`", async () => {
+    await mountProvider()
+    // The preflight rejection path: the agent is not installed, so connect()
+    // throws before it ever reaches the backend.
+    h.acpGetAgentStatus.mockResolvedValue({
+      agent_type: "claude_code",
+      enabled: true,
+      available: true,
+      installed_version: null,
+      host_tools_agent_mode: false,
+      is_acp_adapter: true,
+    })
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x").catch(() => {})
+    })
+
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+    expect(h.store!.getConnectPending(TAB)).toBeUndefined()
+  })
+
+  it("wakes the key's subscribers so a mounted surface re-renders on it", async () => {
+    await mountProvider()
+    const notifications: string[] = []
+    const unsub = h.store!.subscribeKey(TAB, () =>
+      notifications.push(
+        h.store!.getConnectPending(TAB) ? "pending" : "not-pending"
+      )
+    )
+    let resolveConnect: (id: string) => void = () => {}
+    h.acpConnect.mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolveConnect = res
+        })
+    )
+
+    let connectPromise: Promise<void> | undefined
+    await act(async () => {
+      connectPromise = h.actions!.connect(TAB, "claude_code", "/tmp/x")
+    })
+    expect(notifications[0]).toBe("pending")
+
+    await act(async () => {
+      resolveConnect("spawned-conn")
+      await connectPromise
+    })
+    unsub()
+    expect(notifications).toContain("not-pending")
   })
 })

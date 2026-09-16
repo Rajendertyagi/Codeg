@@ -22,6 +22,7 @@ import {
   getCachedSelectors,
   useAcpActions,
   useAcpEvent,
+  useConnectionStore,
 } from "@/contexts/acp-connections-context"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { useActiveFolder } from "@/contexts/active-folder-context"
@@ -83,6 +84,10 @@ import {
   openSettingsWindow,
 } from "@/lib/api"
 import { isWindowedDetail } from "@/lib/turn-window"
+import {
+  hasTranscriptOverlay,
+  isOutOfTurnContentEvent,
+} from "@/lib/background-agent"
 import {
   flushRetryDelayMs,
   isConnectionReady,
@@ -284,6 +289,7 @@ const ConversationTabView = memo(function ConversationTabView({
     removeOptimisticTurn,
     appendViewerUserTurn,
     completeTurn,
+    markOutOfTurnContent,
     refetchDetail,
     syncTurnMetadata,
     removeConversation,
@@ -295,6 +301,9 @@ const ConversationTabView = memo(function ConversationTabView({
     setSyncState,
   } = useConversationRuntimeActions()
   const acpActions = useAcpActions()
+  // Stable store handle, for event-time status reads that must not go through
+  // an effect-refreshed ref (see the out-of-turn subscriber below).
+  const connectionStore = useConnectionStore()
 
   // Stable runtime session key — set once at mount, never changes.
   // For new conversations this is a virtual (negative) ID; for existing
@@ -598,6 +607,11 @@ const ConversationTabView = memo(function ConversationTabView({
     // Drives cross-client viewer discovery: when another client is already
     // live on this conversation, attach to its connection instead of spawning.
     conversationId: dbConversationId ?? undefined,
+    // The auto-connect gate above is a WAIT, not an idle state: report it so the
+    // composer and the status bar can show the conversation is opening instead
+    // of an empty, connection-less composer. Scoped to the active tab — the
+    // status bar is global.
+    preparing: isActive && awaitingHistoricalSessionId,
     // A cross-group move / unsplit reparents this view (React remounts it)
     // while the tab stays open — that unmount must not tear the connection
     // down. See `isReparentUnmount` for why "still open" alone is too broad.
@@ -889,6 +903,49 @@ const ConversationTabView = memo(function ConversationTabView({
         )
       },
       [conn.connectionId, effectiveConversationId, appendViewerUserTurn]
+    )
+  )
+
+  // An agent can run a turn CODEG never started: CodeBuddy drains a finished
+  // background task by prompting itself, and streams a whole turn for it.
+  // `applyStreamingAction`'s out-of-turn guard drops that content because the
+  // `background_activity` overlay is supposed to own it — but that overlay only
+  // has a producer for Claude Code, so for every other agent the turn renders
+  // nowhere and the session looks frozen until it is reopened. The content IS
+  // on disk and the agent's own parser already reads it correctly, so flag the
+  // session and let the timeline offer a re-read.
+  //
+  // This runs per streamed token, so every step is O(1) and ordered cheapest
+  // first; the reducer also early-returns once the flag is set.
+  useAcpEvent(
+    useCallback(
+      (envelope: EventEnvelope) => {
+        if (!isOutOfTurnContentEvent(envelope)) return
+        if (envelope.connection_id !== conn.connectionId) return
+        // The same condition the guard drops on, read from the SAME place the
+        // guard read it. Not `connStatusRef`: that is refreshed in an effect,
+        // so it still says "connected" for any envelope that lands between the
+        // StatusChanged(prompting) dispatch and React committing — which is
+        // exactly the burst at the start of every turn, and would arm the pill
+        // on turns we started ourselves. `getConnection` reads the store the
+        // reducer just wrote, and subscribers fire after that write.
+        if (connectionStore.getConnection(tabId)?.status === "prompting") return
+        // Unknown agent (no connection bound yet) → no pill. A connection that
+        // is streaming content always carries its type, so this only degrades
+        // to today's behavior in a case that shouldn't arise.
+        if (conn.agentType == null || hasTranscriptOverlay(conn.agentType)) {
+          return
+        }
+        markOutOfTurnContent(effectiveConversationId)
+      },
+      [
+        conn.agentType,
+        conn.connectionId,
+        connectionStore,
+        tabId,
+        effectiveConversationId,
+        markOutOfTurnContent,
+      ]
     )
   )
 

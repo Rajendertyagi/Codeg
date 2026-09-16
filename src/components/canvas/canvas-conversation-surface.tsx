@@ -370,6 +370,10 @@ export function CanvasConversationSurface({
     // Without a cwd there is nothing to connect to yet (a chat draft before its
     // scratch dir lands); auto-connect would fire with an undefined dir.
     isActive: isActive && workingDir != null && !awaitingHistoricalSessionId,
+    // The historical-session wait is a WAIT, not idleness — surface it so the
+    // card's composer shows selector placeholders instead of a bare row (the
+    // cwd wait has nothing to report: a dormant draft card isn't opening).
+    preparing: isActive && awaitingHistoricalSessionId,
     workingDir,
     sessionId:
       dbConversationId != null && agentType !== "cline"
