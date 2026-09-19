@@ -2152,7 +2152,8 @@
         "output": "출력",
         "cacheRead": "캐시 읽기",
         "cacheWrite": "캐시 쓰기",
-        "total": "합계"
+        "total": "합계",
+        "cacheHit": "캐시 적중률"
       },
       "quickActions": {
         "title": "빠른 작업",
@@ -3709,7 +3710,9 @@
         "skip": "건너뛰기",
         "next": "다음",
         "submit": "제출",
-        "submitError": "제출하지 못했습니다. 다시 시도해 주세요."
+        "submitError": "제출하지 못했습니다. 다시 시도해 주세요.",
+        "collapse": "접기",
+        "expand": "펼치기"
       },
       "planApproval": {
         "title": "에이전트가 계획을 제시했습니다 — 검토하세요",

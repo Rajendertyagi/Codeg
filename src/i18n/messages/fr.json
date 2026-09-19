@@ -2152,7 +2152,8 @@
         "output": "Sortie",
         "cacheRead": "Lecture cache",
         "cacheWrite": "Écriture cache",
-        "total": "Total des tokens"
+        "total": "Total des tokens",
+        "cacheHit": "Taux de réussite du cache"
       },
       "quickActions": {
         "title": "Actions rapides",
@@ -3709,7 +3710,9 @@
         "skip": "Ignorer",
         "next": "Suivant",
         "submit": "Envoyer",
-        "submitError": "Échec de l'envoi. Veuillez réessayer."
+        "submitError": "Échec de l'envoi. Veuillez réessayer.",
+        "collapse": "Replier",
+        "expand": "Déplier"
       },
       "planApproval": {
         "title": "L'agent a un plan — à vérifier",

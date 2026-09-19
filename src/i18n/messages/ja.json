@@ -2152,7 +2152,8 @@
         "output": "出力",
         "cacheRead": "キャッシュ読み取り",
         "cacheWrite": "キャッシュ書き込み",
-        "total": "合計"
+        "total": "合計",
+        "cacheHit": "キャッシュヒット率"
       },
       "quickActions": {
         "title": "クイック操作",
@@ -3709,7 +3710,9 @@
         "skip": "スキップ",
         "next": "次へ",
         "submit": "送信",
-        "submitError": "送信できませんでした。もう一度お試しください。"
+        "submitError": "送信できませんでした。もう一度お試しください。",
+        "collapse": "折りたたむ",
+        "expand": "展開"
       },
       "planApproval": {
         "title": "エージェントが計画を提示しました — 確認してください",

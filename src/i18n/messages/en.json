@@ -2152,7 +2152,8 @@
         "output": "Output",
         "cacheRead": "Cache Read",
         "cacheWrite": "Cache Write",
-        "total": "Total"
+        "total": "Total",
+        "cacheHit": "Cache Hit Rate"
       },
       "quickActions": {
         "title": "Quick actions",
@@ -3709,7 +3710,9 @@
         "skip": "Skip",
         "next": "Next",
         "submit": "Submit",
-        "submitError": "Couldn't submit. Please try again."
+        "submitError": "Couldn't submit. Please try again.",
+        "collapse": "Collapse",
+        "expand": "Expand"
       },
       "planApproval": {
         "title": "The agent has a plan — review it",

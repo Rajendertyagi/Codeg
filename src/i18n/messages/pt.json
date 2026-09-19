@@ -2152,7 +2152,8 @@
         "output": "Saída",
         "cacheRead": "Leitura de cache",
         "cacheWrite": "Gravação de cache",
-        "total": "Total de tokens"
+        "total": "Total de tokens",
+        "cacheHit": "Taxa de acerto de cache"
       },
       "quickActions": {
         "title": "Ações rápidas",
@@ -3709,7 +3710,9 @@
         "skip": "Pular",
         "next": "Próxima",
         "submit": "Enviar",
-        "submitError": "Falha ao enviar. Tente novamente."
+        "submitError": "Falha ao enviar. Tente novamente.",
+        "collapse": "Recolher",
+        "expand": "Expandir"
       },
       "planApproval": {
         "title": "O agente tem um plano — revise",

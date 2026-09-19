@@ -120,6 +120,14 @@ mod tauri_app {
     /// [`system_settings::ClosePromptClaim::Expired`] hands the press back if a
     /// prompt that WAS sent goes unanswered, which is the only defence against
     /// everything readiness cannot see.
+    ///
+    /// The two branches that actually dismiss the window go through
+    /// [`windows::with_macos_fullscreen_drained`], because hiding or exiting
+    /// while the window still owns a macOS native-fullscreen Space leaves a
+    /// black blank plus leftover toolbar chrome (issue #507). Only those
+    /// branches: draining ahead of the prompt would cost the user their
+    /// fullscreen even when they answer "cancel". The dialog is a webview
+    /// overlay, so it is perfectly readable inside the Space.
     fn handle_main_close_request(window: &tauri::Window, label: &str) {
         use crate::commands::system_settings;
         use crate::models::CloseWindowBehavior;
@@ -185,16 +193,22 @@ mod tauri_app {
             }
         };
 
-        match behavior {
-            CloseWindowBehavior::Minimize => {
+        let hide = || {
+            let window = window.clone();
+            windows::with_macos_fullscreen_drained(&app, move || {
                 let _ = window.hide();
-            }
+            });
+        };
+
+        match behavior {
+            CloseWindowBehavior::Minimize => hide(),
             CloseWindowBehavior::Exit => {
                 let count = running_terminals(&app);
                 // Nothing to lose, or the confirmation could not be shown —
                 // either way the pinned choice stands.
                 if count == 0 || !prompt("confirm_terminals", count) {
-                    app.exit(0);
+                    let quit = app.clone();
+                    windows::with_macos_fullscreen_drained(&app, move || quit.exit(0));
                 }
             }
             CloseWindowBehavior::Ask => {
@@ -203,7 +217,7 @@ mod tauri_app {
                     // Fall back to the behavior codeg has always had. Exiting
                     // on a press the user never got to answer would discard
                     // work; hiding discards nothing.
-                    let _ = window.hide();
+                    hide();
                 }
             }
         }

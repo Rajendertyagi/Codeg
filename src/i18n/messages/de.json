@@ -2152,7 +2152,8 @@
         "output": "Ausgabe",
         "cacheRead": "Cache lesen",
         "cacheWrite": "Cache schreiben",
-        "total": "Gesamt"
+        "total": "Gesamt",
+        "cacheHit": "Cache-Trefferquote"
       },
       "quickActions": {
         "title": "Schnellaktionen",
@@ -3709,7 +3710,9 @@
         "skip": "Überspringen",
         "next": "Weiter",
         "submit": "Senden",
-        "submitError": "Senden fehlgeschlagen. Bitte versuche es erneut."
+        "submitError": "Senden fehlgeschlagen. Bitte versuche es erneut.",
+        "collapse": "Einklappen",
+        "expand": "Ausklappen"
       },
       "planApproval": {
         "title": "Der Agent hat einen Plan – bitte prüfen",
