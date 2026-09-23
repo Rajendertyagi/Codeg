@@ -52,6 +52,8 @@
       "science": "Science",
       "office_tools": "Office Tools",
       "skill_packs": "Skill Packs",
+      "collaboration": "Collaboration",
+      "browser": "Browser",
       "quick_messages": "Quick Messages",
       "logs": "Runtime Logs"
     }
@@ -862,7 +864,11 @@
       "authNotInstalled": "cursor-agent is not installed",
       "authLoggedIn": "Logged in",
       "authNotLoggedIn": "Not logged in",
+      "authUnverified": "Signed in — credential not verified",
+      "authUnverifiedHint": "cursor-agent still has a login stored, but it could not be used against Cursor just now — usually an expired session. Sessions will fail with \"Authentication required\" until you sign in again; the CLI has no way to refresh a browser login on its own.",
+      "authUnverifiedHintApiKey": "cursor-agent has an API key stored, but Cursor rejected it just now — usually a revoked, expired, or mistyped key. Sessions will fail with \"Authentication required\" until you save a working key below.",
       "loginHint": "Run this in a terminal to sign in with your Cursor account (a browser window opens), then hit refresh:",
+      "loginHintRemote": "Run this on the codeg host where cursor-agent is installed, not on this machine, then hit refresh. That host usually has no browser to open, so run it with NO_OPEN_BROWSER=1 — it prints a sign-in URL for you to open in your own browser instead. For an unattended server, switch the method above to API key.",
       "apiKeyLabel": "Cursor API key",
       "apiKeyPlaceholder": "key from cursor.com/dashboard",
       "apiKeyHint": "CURSOR_API_KEY — a Cursor Dashboard account key, an alternative to browser login for headless/server machines. Not a third-party or OpenAI key.",
@@ -1706,9 +1712,9 @@
   "GeneralSettings": {
     "loading": "Loading...",
     "sectionTitle": "General",
-    "sectionDescription": "Centralized preferences for the default terminal, rendering acceleration, notifications, and multi-agent delegation.",
+    "sectionDescription": "Centralized preferences for the default terminal, rendering acceleration, window close behavior, notifications and sounds.",
     "terminalTitle": "Default Terminal",
-    "terminalDescription": "Choose the shell used when opening new terminal tabs from the terminal bar or file tree. Agents also use it when they ask codeg to run a whole command line for them.",
+    "terminalDescription": "Choose the shell codeg launches for new terminal tabs and for whole command lines an agent asks codeg to run. Agents with a shell of their own (Codex, Claude Code) run commands inside their own process, where this setting cannot reach them.",
     "terminalSystemDefault": "System default",
     "terminalPowerShell7": "PowerShell 7 (pwsh)",
     "terminalWindowsPowerShell": "Windows PowerShell",
@@ -1731,6 +1737,10 @@
     "restartNow": "Restart now",
     "restartFailed": "Failed to restart: {message}",
     "loadFailed": "Load failed: {message}"
+  },
+  "CollaborationSettings": {
+    "sectionTitle": "Collaboration",
+    "sectionDescription": "How agents work with each other, and which of codeg's own tools they can reach from inside a conversation."
   },
   "LoginPage": {
     "documentTitle": "Login - codeg",
@@ -2804,6 +2814,11 @@
       "linkedFolder": "Linked folder",
       "moreActions": "More actions",
       "copyPath": "Copy path",
+      "copy": "Copy",
+      "copyRelativePath": "Relative path",
+      "copyAbsolutePath": "Absolute path",
+      "copyFileItself": "File",
+      "copyDirectoryItself": "Folder",
       "upload": "Upload files/folder",
       "download": "Download file",
       "downloadAsZip": "Download as ZIP",
@@ -2841,7 +2856,9 @@
         "downloadFailed": "Failed to download {name}",
         "downloadSaved": "Downloaded {name}",
         "pathCopied": "Path copied",
-        "copyPathFailed": "Failed to copy path"
+        "copyPathFailed": "Failed to copy path",
+        "fileCopied": "Copied {name}",
+        "copyFileFailed": "Failed to copy {name}"
       },
       "createDialog": {
         "newFile": "New file",
@@ -3013,6 +3030,7 @@
           "turnFailedMaxTurnRequests": "{agent} reached the maximum number of allowed requests for this turn.",
           "turnFailedUnknown": "{agent} ended the turn with an unrecognized stop reason.",
           "turnFailedAuthRequired": "{agent} needs you to sign in again before it can run this turn. Sign in from Settings, then send the message again.",
+          "agentAuthRequired": "{agent} could not start a session: it has no usable credential. Sign in again from Settings → Agents → {agent}, then reopen this conversation.",
           "grokModelSwitchIncompatibleAgent": "{agent} can't switch to that model in an existing conversation. Start a new session to use it.",
           "turnFailedEmpty": "{agent} ended the turn without producing any response.",
           "turnFailedEmptyProtocol": "{agent} produced output that codeg could not parse — the agent version may not match the protocol.",
@@ -3494,6 +3512,7 @@
             "child_max_turn_requests": "subagent request limit",
             "child_empty": "subagent no output",
             "child_auth_required": "subagent needs sign-in",
+            "child_rejected": "subagent rejected",
             "child_unknown": "subagent unknown error",
             "unknown": "unknown task"
           }
@@ -3818,6 +3837,7 @@
         "compacted": "Context compacted",
         "compactedTokens": "Context compacted · {before} → {after} tokens",
         "failed": "Context compaction failed",
+        "summary": "Summary",
         "triggerManual": "Manually triggered",
         "triggerAutomatic": "Automatically triggered"
       },
@@ -4949,8 +4969,8 @@
     },
     "browserEval": {
       "label": "Run code in the built-in browser",
-      "short": "Run its own code on a page you shared — you approve each snippet.",
-      "hint": "Let agents run their own JavaScript on a page you’ve shared. Off by default, and needs the switch above. Every snippet is shown to you and approved one at a time — there is no way to make it automatic."
+      "short": "Run its own code on a page you shared — without asking, unless you ask it to.",
+      "hint": "Let agents run their own JavaScript on a page you’ve shared. Off by default, and needs the switch above. Turning it on means snippets run without asking, so this switch is where the decision is made; Settings → Built-in browser can put each snippet in front of you instead."
     },
     "automations": {
       "label": "Create automations",
@@ -5024,6 +5044,7 @@
   "BrowserSettings": {
     "title": "Built-in browser",
     "description": "Web pages opened from conversations, tool results and the terminal can appear as tabs next to your files instead of leaving the app.",
+    "descriptionWeb": "In a browser session pages open in the browser you are already in. The exception is a server running on the codeg host, which is forwarded into a tab here. These are the settings that still decide something.",
     "defaultTargetTitle": "Where links open",
     "defaultTargetHint": "Set per source. ⌘/Ctrl-click a link to use the other one just this once.",
     "sourceTranscript": "Conversation messages",
@@ -5063,6 +5084,7 @@
     "downloadsHint": "Files a page downloads are saved to {dir}. Nothing is opened automatically, and an existing file is never replaced.",
     "rulesTitle": "Site rules",
     "rulesHint": "Per site: always the built-in browser, always the system browser, or block. Patterns are a hostname, *.example.com or *, with an optional :port; the most specific match wins.",
+    "rulesHintWeb": "Per site: block. Where a link opens is not a choice in a browser session. Patterns are a hostname, *.example.com or *, with an optional :port; the most specific match wins.",
     "serviceOpenTitle": "Local servers",
     "serviceOpenHint": "When a server started in a terminal prints its address, open it in a browser tab. Addresses on this machine only, and only once something is listening on them.",
     "serviceOpenOff": "Do nothing",
@@ -5084,6 +5106,10 @@
     "agentGrantRead": "Read only",
     "agentGrantControl": "Read and act",
     "agentGrantNone": "Share nothing",
+    "evalApprovalTitle": "Running code on a page",
+    "evalApprovalHint": "What happens when an agent asks to run its own JavaScript on a page shared at “Read and act”. It runs, without asking — the decision is the “Run code in the built-in browser” switch, which is off until you turn it on, and the page’s sharing level; every run is listed in that tab’s agent activity. “Ask me every time” puts each snippet in front of you in full and waits for an answer.",
+    "evalApprovalAsk": "Ask me every time",
+    "evalApprovalSilent": "Run without asking",
     "terminalMenuTitle": "Terminal link menu",
     "terminalMenuHint": "Clicking a link in the terminal shows a small menu (built-in browser, system browser, copy link) instead of opening it right away. ⌘/Ctrl-click still opens the link directly.",
     "htmlPreviewTitle": "HTML file previews",
@@ -6272,6 +6298,7 @@
       "copied": "Address copied",
       "unreachableTitle": "The bridge port can't be reached",
       "unreachableHint": "codeg's server put this page on {origin}, but your browser can't reach it. Publish that port (see CODEG_BRIDGE_PORTS) or set CODEG_BRIDGE_PUBLIC_HOST; if codeg is served over HTTPS, the bridge ports need HTTPS too.",
+      "unreachableHostHint": "codeg's server put this page on {origin}, but your browser can't reach it. That hostname has to resolve to the codeg server and reach it through whatever proxy is in front — a wildcard DNS record and a wildcard vhost (see CODEG_BRIDGE_HOST_PATTERN).",
       "errorTitle": "This page can't be shown here"
     },
     "download": {
@@ -6411,7 +6438,7 @@
         "description": "An agent wants to run JavaScript on this page. It can read and change anything on {site} that you can.",
         "descriptionWithTitle": "An agent wants to run JavaScript on “{title}”. It can read and change anything on {site} that you can.",
         "codeLabel": "The code it will run",
-        "everyTime": "You’ll be asked again for every snippet — approving this one does not approve the next.",
+        "everyTime": "You’ll be asked again for every snippet — approving this one does not approve the next. Whether you’re asked at all is set in Settings → Built-in browser.",
         "allow": "Run it once",
         "deny": "Don’t run it"
       }

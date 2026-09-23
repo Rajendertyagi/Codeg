@@ -45,6 +45,7 @@ import {
   getBrowserTabState,
   requestBrowserBoundsResync,
   resetBrowserTabStoreForTests,
+  setBrowserTabState,
 } from "@/lib/browser/browser-tab-store"
 import {
   acquireNativeSurfaceOcclusion,
@@ -104,6 +105,25 @@ function showing(id = "abc"): BrowserTabState {
     url: "https://example.com/",
     title: "Example",
     origin: "https://example.com",
+    loading: false,
+  }
+}
+
+/** A tab the user opened empty: the blank page and nothing else. */
+function emptyTab(id = "abc"): BrowserWorkspaceTab {
+  const record = tab(id)
+  return {
+    ...record,
+    browser: { ...record.browser, initialUrl: "about:blank" },
+  }
+}
+
+/** Its state once the blank page has committed in it. */
+function emptyState(id = "abc"): BrowserTabState {
+  return {
+    ...state(id),
+    requestedUrl: "about:blank",
+    url: "about:blank",
     loading: false,
   }
 }
@@ -266,6 +286,44 @@ describe("BrowserSurfaceHost", () => {
       height: 600,
     })
     expect(api.browserSetVisible).toHaveBeenLastCalledWith("host2", true, false)
+  })
+
+  // The answer to `browser_open_tab` is decided before the page starts
+  // loading, and on WKWebView it is not ordered against the event evals that
+  // carry `browser://state` — so the state of a page that has already
+  // committed can arrive first. Written over it, the tab would be loading
+  // with nothing left to correct it: an empty tab's `about:blank` commits at
+  // once and emits nothing afterwards, so it spun for the rest of the
+  // session.
+  it("does not put the create's answer over a state that arrived first", async () => {
+    let answer: (state: BrowserTabState) => void = () => {}
+    api.browserOpenTab.mockImplementation(
+      () => new Promise<BrowserTabState>((resolve) => (answer = resolve))
+    )
+    render(<BrowserSurfaceHost tab={emptyTab("host10")} />)
+    await flush()
+    // The blank page committed and the event beat the answer home.
+    act(() => setBrowserTabState(emptyState("host10")))
+    expect(getBrowserTabState("browser:host10")?.loading).toBe(false)
+
+    act(() => answer(state("host10")))
+    await flush()
+    expect(getBrowserTabState("browser:host10")?.loading).toBe(false)
+    expect(getBrowserTabState("browser:host10")?.url).toBe("about:blank")
+  })
+
+  // And with nothing else to go on it IS the state: a tab whose events are
+  // all still to come has only this one.
+  it("seeds the store from the create's answer when nothing arrived first", async () => {
+    api.browserOpenTab.mockImplementation(() =>
+      Promise.resolve(state("host11"))
+    )
+    render(<BrowserSurfaceHost tab={tab("host11")} />)
+    await flush()
+    // The whole answer, not a field or two of it: seeding has to put the
+    // state the command decided into the store, and a partial assertion
+    // would pass just as happily on a truncated one.
+    expect(getBrowserTabState("browser:host11")).toEqual(state("host11"))
   })
 
   // Bounds are pushed only when they change, which is right while this host
@@ -682,6 +740,42 @@ describe("BrowserSurfaceHost", () => {
       true
     )
     release()
+  })
+
+  // The blank page an empty tab sits on is a committed document like any
+  // other — the backend paints it in the app's colours (`browser::blank_page`)
+  // — so a notice hides it behind its own still, exactly as it does a page.
+  // Before this, the blank page was excluded from that and the empty tab was
+  // the one surface in the app that covered a toast.
+  it("hides a tab sitting on the blank page for a notice", async () => {
+    api.browserFreezeFrame.mockImplementation(() =>
+      Promise.resolve({ mime: "image/jpeg", data: "AAA", width: 8, height: 8 })
+    )
+    api.browserOpenTab.mockImplementation(() =>
+      Promise.resolve(emptyState("host-empty"))
+    )
+    const { container } = render(
+      <BrowserSurfaceHost tab={emptyTab("host-empty")} />
+    )
+    await flush()
+    api.browserSetVisible.mockClear()
+
+    await act(async () => {
+      acquireNativeSurfaceOcclusion("toast", { passive: true })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await flushPaint()
+    expect(api.browserFreezeFrame).toHaveBeenCalledWith("host-empty")
+    expect(
+      container.querySelector("img[data-browser-frozen-frame]")
+    ).not.toBeNull()
+    // No focus handoff: the notice is not something the user opened.
+    expect(api.browserSetVisible).toHaveBeenLastCalledWith(
+      "host-empty",
+      false,
+      false,
+      false
+    )
   })
 
   // One real overlay in the set and the hide is an overlay's again, notice or

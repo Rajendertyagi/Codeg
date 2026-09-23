@@ -11,6 +11,7 @@ use tauri::Url;
 
 use crate::app_error::AppCommandError;
 use crate::browser::agent::{self, GrantLevel};
+use crate::browser::blank_page;
 use crate::browser::capture::{self, CaptureOutcome, CaptureRegion, CaptureRequest};
 use crate::browser::console::{ConsoleLevel, ConsoleQuery, ConsoleReadout};
 use crate::browser::confirm::{
@@ -769,7 +770,22 @@ pub fn close_core(
     tab_id: &str,
     request_id: Option<&str>,
 ) -> Result<(), AppCommandError> {
-    if let Some(tab) = registry.remove(tab_id) {
+    close_core_if(app, registry, tab_id, request_id, |_| true)
+}
+
+/// Close only the incarnation `matches` recognises. A tab id is reused, so a
+/// caller that decided on a snapshot and then crossed a thread boundary to act
+/// on it — the page asking for its own window to go is the one that does —
+/// must say which tab it looked at, or it can take one it never saw.
+/// `close_core` is the form for a caller holding the registry still.
+pub fn close_core_if(
+    app: &AppHandle,
+    registry: &BrowserRegistry,
+    tab_id: &str,
+    request_id: Option<&str>,
+    matches: impl FnOnce(&BrowserTab) -> bool,
+) -> Result<(), AppCommandError> {
+    if let Some(tab) = registry.remove_if(tab_id, matches) {
         let _ = tab.surface.close();
         if let Some(guests) = app.try_state::<DocGuests>() {
             guests.unbind(tab_id);
@@ -3480,6 +3496,31 @@ pub fn set_sign_in_user_agent_core(registry: &BrowserRegistry, enabled: bool) {
             }
         }
     }
+}
+
+/// Record what the empty tab's page should look like and repaint the blank
+/// pages that are already open, so a theme change reaches the tab on screen
+/// and not only the next one opened.
+pub fn set_blank_page_theme_core(
+    registry: &BrowserRegistry,
+    background: String,
+    dark: bool,
+) -> Result<(), AppCommandError> {
+    blank_page::set(blank_page::BlankPageTheme { background, dark })
+        .map_err(AppCommandError::invalid_input)?;
+    blank_page::repaint_all(registry);
+    Ok(())
+}
+
+/// The colours of the empty tab's page, pushed by the frontend (which owns
+/// the theme) at startup and on every change. See `browser::blank_page`.
+#[tauri::command]
+pub async fn browser_set_blank_page_theme(
+    registry: State<'_, BrowserRegistry>,
+    background: String,
+    dark: bool,
+) -> Result<(), AppCommandError> {
+    set_blank_page_theme_core(&registry, background, dark)
 }
 
 /// The "sign-in user agent" preference, pushed by the frontend (which owns
