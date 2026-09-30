@@ -722,13 +722,6 @@
     "emptyNoAgent": "사용 가능한 에이전트가 없습니다.",
     "configManagement": "구성 관리",
     "envVars": "환경 변수",
-    "adapterChannel": {
-      "label": "어댑터 버전",
-      "description": "설치와 업그레이드는 codeg가 검토해 고정한 버전을 사용합니다. 최신 버전을 선택하면 해당 패키지의 그 시점 최신 npm 릴리스를 설치하며, 최신 버전 설치에 실패하면 고정 버전으로 되돌리고 설치 로그에 남깁니다.",
-      "pinned": "고정 버전 (권장)",
-      "latest": "최신 버전 (미검토)",
-      "latestWarning": "최신 릴리스는 검토되지 않아 codeg에서 이 에이전트가 깨질 수 있으며, 간혹 알려진 문제가 있는 릴리스일 수도 있습니다. 실제 설치된 버전은 버전 상태에 표시됩니다."
-    },
     "hostTools": {
       "label": "파일과 명령을 에이전트가 직접 처리",
       "description": "codeg가 파일 접근과 터미널 명령을 대신 처리하지 않고 에이전트가 자체 프로세스에서 실행합니다. 그래야 에이전트 자체의 샌드박스와 권한 규칙이 적용됩니다. 다른 에이전트에 위임하는 기능도 함께 꺼집니다. 같은 작업이 다시 codeg를 거치게 되기 때문입니다. codeg는 자체 샌드박스를 제공하지 않으므로 에이전트에 샌드박스를 구성한 경우에만 켜세요."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "CodeBuddy 구성 저장",
       "saveKimiCodeConfig": "Kimi Code 구성 저장",
       "customInstall": "사용자 지정 설치",
+      "upgradeToLatest": "검토되지 않은 최신 버전 {version}(으)로 업그레이드",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "DeepSeek 구성 저장",
       "diagnose": "진단"
@@ -1404,7 +1398,9 @@
       "customInstallDescription": "설치할 버전을 입력하세요. 다시 설치되며 현재 설치된 버전을 대체합니다.",
       "customInstallVersionLabel": "버전 번호",
       "customInstallInvalid": "유효한 버전 번호를 입력하세요. 예: 1.2.3",
-      "customInstallSubmit": "설치"
+      "customInstallSubmit": "설치",
+      "confirmUpgradeToLatest": "{name}을(를) 검토되지 않은 {version}(으)로 업그레이드하시겠습니까?",
+      "confirmUpgradeToLatestDescription": "이 릴리스는 codeg에서 검토되지 않아 codeg에서 {name}이(가) 깨질 수 있으며, 간혹 알려진 문제가 있는 릴리스일 수도 있습니다. 되돌리려면 「사용자 지정 설치」로 권장 버전 {recommendedVersion}을(를) 다시 설치하세요."
     },
     "errors": {
       "windowsFileLocked": "{name}의 파일이 실행 중인 세션에서 사용 중이어서 Windows에서 교체할 수 없습니다. 모든 {name} 세션을 닫은 후 다시 시도하세요.",
@@ -1493,7 +1489,7 @@
     "version": {
       "statusLabel": "버전 상태",
       "notInstalled": "설치되지 않음",
-      "remoteLocal": "원격: {remoteVersion} · 로컬: {localVersion}",
+      "recommendedLocal": "권장: {recommendedVersion} · 로컬: {localVersion}",
       "localOnly": "로컬: {localVersion}",
       "localInstalled": "{versionText}. 설치되어 있습니다.",
       "platformUnsupported": "{versionText}. 현재 플랫폼에서는 이 에이전트를 지원하지 않습니다.",
@@ -1501,9 +1497,9 @@
       "clickInstall": "{versionText}. 오른쪽의 설치를 클릭하세요.",
       "localUnrecognized": "{versionText}. 로컬 버전을 비교할 수 없습니다. 덮어쓰기 설치를 위해 업그레이드를 시도하세요.",
       "upgradeAvailable": "{versionText}. 업그레이드가 가능합니다.",
-      "remoteUnavailable": "{versionText}. 현재 원격 버전을 사용할 수 없습니다.",
+      "recommendedUnavailable": "{versionText}. 권장 버전이 없습니다.",
       "latest": "{versionText}. 이미 최신입니다.",
-      "latestChannel": "{versionText}. 최신 버전 채널이 켜져 있습니다. 업그레이드하면 최신 릴리스를 설치합니다."
+      "unreviewedAvailable": "{versionText}. 검토되지 않은 새 릴리스가 있습니다."
     },
     "adapter": {
       "label": "ACP 어댑터",
@@ -2002,7 +1998,7 @@
       "tasks": "할 일",
       "loadingSubsessions": "하위 대화 로드 중…",
       "forge": "리포지토리 패널",
-      "canvas": "무한 대화",
+      "canvas": "무한 캔버스",
       "folderGroup": {
         "newGroup": "새 그룹",
         "newGroupTitle": "새 폴더 그룹",
@@ -4259,7 +4255,7 @@
     "agentTypeRequired": "에이전트 유형을 선택하세요.",
     "agentTypeImmutableHint": "에이전트 유형은 생성 후 변경할 수 없습니다.",
     "model": "모델",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "메인 모델",
     "claudeReasoningModel": "추론 모델 (사고)",
@@ -4690,6 +4686,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "원격 워크스페이스 \"{name}\"을(를) 다시 열 수 없습니다",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -4710,7 +4707,8 @@
     "none": "브랜치 없음",
     "local": "로컬",
     "remote": "원격",
-    "useCustom": "\"{query}\" 사용"
+    "useCustom": "\"{query}\" 사용",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5484,10 +5482,11 @@
     "promptPlaceholder": "에이전트에게 작업을 설명하세요 — @로 파일 참조, /로 명령",
     "folderPlaceholder": "폴더 선택",
     "baseBranch": "기준 브랜치",
-    "baseBranchPlaceholder": "현재 브랜치",
     "baseBranchDefault": "작업이 시작될 때의 현재 브랜치",
     "baseBranchHint": "작업은 이 브랜치에서 갈라져 나오고, 병합도 이 브랜치로 돌아갑니다.",
     "agentInheritedHint": "작업 설정에서 상속됨 — 변경하면 이 작업에만 적용됩니다",
+    "agentNoDefaultHint": "작업 설정에 기본 에이전트가 없습니다 — 선택한 에이전트가 이 작업에 저장됩니다",
+    "agentInheritedUnavailableHint": "작업 설정의 기본 에이전트({agent})를 사용할 수 없습니다 — 선택한 에이전트가 이 작업에 저장됩니다",
     "agentOverrideReset": "상속으로 되돌리기",
     "sectionTarget": "대상",
     "errorTitle": "제목을 입력하세요",
@@ -6179,7 +6178,7 @@
     "save": "저장"
   },
   "Canvas": {
-    "title": "무한 대화",
+    "title": "무한 캔버스",
     "untitled": "제목 없는 대화",
     "unresolvedConversation": "대화가 삭제됨",
     "removeCard": "카드 제거",
@@ -6267,7 +6266,36 @@
     "removeTerminalCard": "터미널 카드 제거",
     "terminalNoDirectory": "이 카드에는 작업 디렉터리가 없습니다",
     "confirmDeleteTerminals": "실행 중인 터미널 {count}개가 닫히고 해당 프로세스도 종료됩니다.",
-    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다."
+    "confirmDeleteNotesAndTerminals": "직접 작성한 메모 {notes}개가 영구 삭제되고, 실행 중인 터미널 {terminals}개도 종료됩니다.",
+    "boardsTitle": "캔버스",
+    "boardsSubtitle": "캔버스마다 영역, 대화 카드, 메모, 파일, 터미널을 배치할 수 있는 독립된 무한 보드가 있습니다.",
+    "boardCount": "캔버스 {count}개",
+    "newBoard": "새 캔버스",
+    "newBoardTitle": "새 캔버스",
+    "editBoard": "캔버스 편집…",
+    "editBoardTitle": "캔버스 편집",
+    "deleteBoard": "캔버스 삭제…",
+    "openBoard": "열기",
+    "boardMenu": "캔버스 옵션",
+    "boardName": "이름",
+    "boardDescription": "설명",
+    "boardDescriptionPlaceholder": "이 캔버스의 용도 (선택 사항)",
+    "untitledBoard": "제목 없는 캔버스",
+    "boardItemCount": "{count, plural, =0 {비어 있음} other {요소 #개}}",
+    "boardEditedAt": "{time} 수정됨",
+    "boardsEmpty": "아직 캔버스가 없습니다",
+    "boardsEmptyHint": "캔버스를 만들어 작업을 공간적으로 정리하세요. 캔버스마다 자체 영역, 카드, 메모를 가집니다.",
+    "searchBoards": "캔버스 검색…",
+    "noBoardsMatch": "“{query}”와(과) 일치하는 캔버스가 없습니다",
+    "boardsLoadFailed": "캔버스를 불러오지 못했습니다",
+    "retry": "다시 시도",
+    "backToBoards": "모든 캔버스로 돌아가기",
+    "boardDeleted": "이 캔버스는 삭제되었습니다",
+    "deleteBoardTitle": "이 캔버스를 삭제할까요?",
+    "deleteBoardDescription": "“{name}”과(와) 그 위의 모든 내용이 영구적으로 삭제됩니다. 캔버스에 표시된 대화, 폴더, 파일 자체는 영향을 받지 않습니다.",
+    "deleteBoardItems": "이 캔버스에는 요소 {count}개가 있습니다.",
+    "deleteBoardTerminals": "그중 터미널 {count}개가 닫히고 프로세스도 종료됩니다.",
+    "deleteBoardConfirm": "캔버스 삭제"
   },
   "Browser": {
     "toolbar": {

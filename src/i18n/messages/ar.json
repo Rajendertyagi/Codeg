@@ -722,13 +722,6 @@
     "emptyNoAgent": "لا يوجد وكيل متاح.",
     "configManagement": "إدارة الإعدادات",
     "envVars": "متغيرات البيئة",
-    "adapterChannel": {
-      "label": "إصدار المحوّل",
-      "description": "يستخدم التثبيت والترقية الإصدار الذي راجعه codeg واعتمده. عند اختيار الأحدث يُثبَّت أحدث إصدار npm للحزمة في حينه؛ وإذا فشل ذلك، يعود codeg إلى الإصدار المعتمد ويوضح ذلك في سجل التثبيت.",
-      "pinned": "الإصدار المعتمد (موصى به)",
-      "latest": "الأحدث (غير مُراجَع)",
-      "latestWarning": "أحدث الإصدارات غير مُراجَعة وقد تعطّل هذا الوكيل في codeg، بل قد يكون الإصدار الأحدث معروفًا بأنه معطوب أحيانًا. تعرض حالة الإصدار ما تم تثبيته فعليًا."
-    },
     "hostTools": {
       "label": "دع الوكيل يتولى الملفات والأوامر بنفسه",
       "description": "يتوقف codeg عن تنفيذ الوصول إلى الملفات وأوامر الطرفية، فينفّذها الوكيل داخل عمليته الخاصة — وعندها فقط تُطبَّق البيئة المعزولة وقواعد الأذونات الخاصة به. كما يُعطَّل التفويض إلى وكلاء آخرين، لأنه سيعيد العمل نفسه عبر codeg. لا يضيف codeg بيئة معزولة من عنده، لذا فعّل هذا الخيار فقط إذا كان الوكيل قد أُعِدّت له واحدة."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "حفظ إعدادات CodeBuddy",
       "saveKimiCodeConfig": "حفظ إعدادات Kimi Code",
       "customInstall": "تثبيت مخصص",
+      "upgradeToLatest": "الترقية إلى أحدث إصدار غير مُراجَع {version}",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "حفظ إعدادات DeepSeek",
       "diagnose": "تشخيص"
@@ -1404,7 +1398,9 @@
       "customInstallDescription": "أدخل الإصدار المراد تثبيته. سيؤدي ذلك إلى إعادة التثبيت واستبدال الإصدار المثبت حاليًا.",
       "customInstallVersionLabel": "رقم الإصدار",
       "customInstallInvalid": "أدخل رقم إصدار صالحًا، مثل 1.2.3.",
-      "customInstallSubmit": "تثبيت"
+      "customInstallSubmit": "تثبيت",
+      "confirmUpgradeToLatest": "ترقية {name} إلى الإصدار غير المُراجَع {version}؟",
+      "confirmUpgradeToLatestDescription": "لم يراجع codeg هذا الإصدار، وقد يعطّل {name} في codeg، بل قد يكون الإصدار معروفًا بأنه معطوب أحيانًا. للرجوع، استخدم التثبيت المخصص لإعادة تثبيت الإصدار الموصى به {recommendedVersion}."
     },
     "errors": {
       "windowsFileLocked": "ملفات {name} قيد الاستخدام بواسطة جلسة قيد التشغيل، لذا لا يمكن لـ Windows استبدالها. أغلق جميع جلسات {name} ثم حاول مرة أخرى.",
@@ -1493,7 +1489,7 @@
     "version": {
       "statusLabel": "حالة الإصدار",
       "notInstalled": "غير مثبت",
-      "remoteLocal": "البعيد: {remoteVersion} · المحلي: {localVersion}",
+      "recommendedLocal": "الموصى به: {recommendedVersion} · المحلي: {localVersion}",
       "localOnly": "المحلي: {localVersion}",
       "localInstalled": "{versionText}. مثبت.",
       "platformUnsupported": "{versionText}. المنصة الحالية لا تدعم هذا الوكيل.",
@@ -1501,9 +1497,9 @@
       "clickInstall": "{versionText}. انقر تثبيت في الجهة اليمنى.",
       "localUnrecognized": "{versionText}. الإصدار المحلي غير قابل للمقارنة؛ جرّب الترقية للكتابة فوق التثبيت.",
       "upgradeAvailable": "{versionText}. تتوفر ترقية.",
-      "remoteUnavailable": "{versionText}. الإصدار البعيد غير متاح حاليًا.",
+      "recommendedUnavailable": "{versionText}. لا يتوفر إصدار موصى به.",
       "latest": "{versionText}. أنت على أحدث إصدار.",
-      "latestChannel": "{versionText}. قناة الأحدث مفعّلة؛ الترقية تثبّت أحدث إصدار."
+      "unreviewedAvailable": "{versionText}. يتوفر إصدار أحدث غير مُراجَع."
     },
     "adapter": {
       "label": "محوّل ACP",
@@ -2002,7 +1998,7 @@
       "tasks": "المهام قيد الانتظار",
       "loadingSubsessions": "جارٍ تحميل المحادثات الفرعية…",
       "forge": "لوحة المستودع",
-      "canvas": "محادثات لا نهائية",
+      "canvas": "لوحة لا نهائية",
       "folderGroup": {
         "newGroup": "مجموعة جديدة",
         "newGroupTitle": "مجموعة مجلدات جديدة",
@@ -4259,7 +4255,7 @@
     "agentTypeRequired": "نوع الوكيل مطلوب.",
     "agentTypeImmutableHint": "لا يمكن تغيير نوع الوكيل بعد الإنشاء.",
     "model": "النموذج",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "النموذج الرئيسي",
     "claudeReasoningModel": "نموذج الاستدلال (التفكير)",
@@ -4690,6 +4686,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "تعذّرت إعادة فتح مساحة العمل البعيدة \"{name}\"",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -4710,7 +4707,8 @@
     "none": "لا توجد فروع",
     "local": "محلي",
     "remote": "بعيد",
-    "useCustom": "استخدام \"{query}\""
+    "useCustom": "استخدام \"{query}\"",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5484,10 +5482,11 @@
     "promptPlaceholder": "صف المهمة للوكيل — استخدم @ للإشارة إلى الملفات و / للأوامر",
     "folderPlaceholder": "اختر مجلدًا",
     "baseBranch": "الفرع الأساسي",
-    "baseBranchPlaceholder": "الفرع الحالي",
     "baseBranchDefault": "الفرع الحالي عند بدء المهمة",
     "baseBranchHint": "تتفرّع المهمة من هذا الفرع، ويعيدها الدمج إليه.",
     "agentInheritedHint": "موروث من إعدادات المهام — عدِّله ليصبح خاصًا بهذه المهمة",
+    "agentNoDefaultHint": "لا يوجد وكيل افتراضي في إعدادات المهام — سيُحفَظ الوكيل المحدد مع هذه المهمة",
+    "agentInheritedUnavailableHint": "الوكيل {agent} من إعدادات المهام غير متاح — سيُحفَظ الوكيل المحدد مع هذه المهمة",
     "agentOverrideReset": "العودة إلى الوراثة",
     "sectionTarget": "الهدف",
     "errorTitle": "العنوان مطلوب",
@@ -6179,7 +6178,7 @@
     "save": "حفظ"
   },
   "Canvas": {
-    "title": "محادثات لا نهائية",
+    "title": "لوحة لا نهائية",
     "untitled": "محادثة بلا عنوان",
     "unresolvedConversation": "تم حذف المحادثة",
     "removeCard": "إزالة البطاقة",
@@ -6267,7 +6266,36 @@
     "removeTerminalCard": "إزالة بطاقة الطرفية",
     "terminalNoDirectory": "لا يوجد دليل عمل لهذه البطاقة",
     "confirmDeleteTerminals": "سيتم إغلاق {count} من الطرفيات قيد التشغيل وإنهاء عملياتها.",
-    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل."
+    "confirmDeleteNotesAndTerminals": "سيتم حذف {notes} من الملاحظات التي كتبتها نهائيًا، وإنهاء {terminals} من الطرفيات قيد التشغيل.",
+    "boardsTitle": "اللوحات",
+    "boardsSubtitle": "كل لوحة مساحة لا نهائية مستقلة تضم مناطق وبطاقات محادثات وملاحظات وملفات وطرفيات.",
+    "boardCount": "{count, plural, =0 {لا توجد لوحات} one {لوحة واحدة} two {لوحتان} few {# لوحات} many {# لوحة} other {# لوحة}}",
+    "newBoard": "لوحة جديدة",
+    "newBoardTitle": "لوحة جديدة",
+    "editBoard": "تعديل اللوحة…",
+    "editBoardTitle": "تعديل اللوحة",
+    "deleteBoard": "حذف اللوحة…",
+    "openBoard": "فتح",
+    "boardMenu": "خيارات اللوحة",
+    "boardName": "الاسم",
+    "boardDescription": "الوصف",
+    "boardDescriptionPlaceholder": "ما الغرض من هذه اللوحة؟ (اختياري)",
+    "untitledBoard": "لوحة بلا عنوان",
+    "boardItemCount": "{count, plural, =0 {فارغة} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+    "boardEditedAt": "عُدّلت {time}",
+    "boardsEmpty": "لا توجد لوحات بعد",
+    "boardsEmptyHint": "أنشئ لوحة لتنظيم عملك مكانيًا. لكل لوحة مناطقها وبطاقاتها وملاحظاتها الخاصة.",
+    "searchBoards": "البحث في اللوحات…",
+    "noBoardsMatch": "لا توجد لوحات تطابق «{query}»",
+    "boardsLoadFailed": "تعذّر تحميل اللوحات",
+    "retry": "إعادة المحاولة",
+    "backToBoards": "العودة إلى كل اللوحات",
+    "boardDeleted": "تم حذف هذه اللوحة",
+    "deleteBoardTitle": "حذف هذه اللوحة؟",
+    "deleteBoardDescription": "سيتم حذف «{name}» وكل ما عليها نهائيًا. لن تتأثر المحادثات والمجلدات والملفات التي تعرضها.",
+    "deleteBoardItems": "تحتوي على {count, plural, one {عنصر واحد} two {عنصرين} few {# عناصر} many {# عنصرًا} other {# عنصر}}.",
+    "deleteBoardTerminals": "سيتم إغلاق {count, plural, one {طرفية واحدة} two {طرفيتين} few {# طرفيات} many {# طرفية} other {# طرفية}} عليها وإنهاء عملياتها.",
+    "deleteBoardConfirm": "حذف اللوحة"
   },
   "Browser": {
     "toolbar": {

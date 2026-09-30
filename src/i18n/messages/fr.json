@@ -722,13 +722,6 @@
     "emptyNoAgent": "Aucun agent disponible.",
     "configManagement": "Gestion de configuration",
     "envVars": "Variables d'environnement",
-    "adapterChannel": {
-      "label": "Version de l'adaptateur",
-      "description": "Installer et Mettre à niveau utilisent la version examinée et épinglée par codeg. Avec Dernière, c'est la version npm la plus récente du paquet qui est installée ; si cette installation échoue, codeg revient à la version épinglée et l'indique dans le journal d'installation.",
-      "pinned": "Épinglée (recommandée)",
-      "latest": "Dernière (non examinée)",
-      "latestWarning": "Les versions les plus récentes ne sont pas examinées et peuvent casser cet agent dans codeg ; il arrive même qu'une version soit connue pour être défectueuse. Le statut de version affiche ce qui est réellement installé."
-    },
     "hostTools": {
       "label": "Laisser l'agent gérer les fichiers et les commandes",
       "description": "codeg cesse d'assurer l'accès aux fichiers et les commandes de terminal : l'agent les exécute dans son propre processus, là où son bac à sable et ses règles d'autorisation s'appliquent réellement. La délégation à d'autres agents est également désactivée, car elle ferait repasser le même travail par codeg. codeg n'ajoute aucun bac à sable, n'activez donc ceci que si l'agent en a un configuré."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "Enregistrer la configuration CodeBuddy",
       "saveKimiCodeConfig": "Enregistrer la configuration de Kimi Code",
       "customInstall": "Installation personnalisée",
+      "upgradeToLatest": "Mettre à niveau vers la dernière non examinée {version}",
       "saveKimiCodeRawConfig": "Enregistrer config.toml",
       "saveDeepSeekConfig": "Enregistrer la configuration DeepSeek",
       "diagnose": "Diagnostiquer"
@@ -1404,7 +1398,9 @@
       "customInstallDescription": "Saisissez la version à installer. Cela réinstalle et remplace la version actuellement installée.",
       "customInstallVersionLabel": "Numéro de version",
       "customInstallInvalid": "Saisissez un numéro de version valide, par ex. 1.2.3.",
-      "customInstallSubmit": "Installer"
+      "customInstallSubmit": "Installer",
+      "confirmUpgradeToLatest": "Mettre à niveau {name} vers la version non examinée {version} ?",
+      "confirmUpgradeToLatestDescription": "Cette version n’a pas été examinée par codeg. Elle peut casser {name} dans codeg, et il arrive qu’une version soit connue pour être défectueuse. Pour revenir en arrière, utilisez Installation personnalisée pour réinstaller la version recommandée {recommendedVersion}."
     },
     "errors": {
       "windowsFileLocked": "Les fichiers de {name} sont utilisés par une session en cours, Windows ne peut donc pas les remplacer. Fermez toutes les sessions {name}, puis réessayez.",
@@ -1493,7 +1489,7 @@
     "version": {
       "statusLabel": "Statut de version",
       "notInstalled": "Non installé",
-      "remoteLocal": "Distant : {remoteVersion} · Local : {localVersion}",
+      "recommendedLocal": "Recommandée : {recommendedVersion} · Local : {localVersion}",
       "localOnly": "Local : {localVersion}",
       "localInstalled": "{versionText}. Installé.",
       "platformUnsupported": "{versionText}. La plateforme actuelle ne prend pas en charge cet agent.",
@@ -1501,9 +1497,9 @@
       "clickInstall": "{versionText}. Cliquez sur Installer à droite.",
       "localUnrecognized": "{versionText}. La version locale n’est pas comparable ; essayez une mise à niveau pour écraser l’installation.",
       "upgradeAvailable": "{versionText}. Mise à niveau disponible.",
-      "remoteUnavailable": "{versionText}. La version distante est actuellement indisponible.",
+      "recommendedUnavailable": "{versionText}. Aucune version recommandée n'est disponible.",
       "latest": "{versionText}. Déjà à jour.",
-      "latestChannel": "{versionText}. Le canal Dernière est actif ; Mettre à niveau installe la version la plus récente."
+      "unreviewedAvailable": "{versionText}. Une version plus récente, non examinée, est disponible."
     },
     "adapter": {
       "label": "Adaptateur ACP",
@@ -2002,7 +1998,7 @@
       "tasks": "Tâches à faire",
       "loadingSubsessions": "Chargement des sous-conversations…",
       "forge": "Panneau du dépôt",
-      "canvas": "Conversations infinies",
+      "canvas": "Canevas infini",
       "folderGroup": {
         "newGroup": "Nouveau groupe",
         "newGroupTitle": "Nouveau groupe de dossiers",
@@ -4259,7 +4255,7 @@
     "agentTypeRequired": "Le type d'agent est requis.",
     "agentTypeImmutableHint": "Le type d'agent ne peut pas être modifié après la création.",
     "model": "Modèle",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Modèle Principal",
     "claudeReasoningModel": "Modèle de Raisonnement (réflexion)",
@@ -4690,6 +4686,7 @@
     "saveFailed": "Échec de l’enregistrement de la connexion distante",
     "deleteFailed": "Échec de la suppression de la connexion distante",
     "openFailed": "Échec de l’ouverture de l’espace de travail distant",
+    "restoreFailed": "Impossible de rouvrir l’espace de travail distant « {name} »",
     "connectionLoadFailed": "Échec du chargement de la connexion distante : {message}",
     "connectionExpired": "La connexion distante « {name} » a expiré. Mettez son jeton à jour, puis rechargez cette fenêtre."
   },
@@ -4710,7 +4707,8 @@
     "none": "Aucune branche",
     "local": "Locale",
     "remote": "Distante",
-    "useCustom": "Utiliser « {query} »"
+    "useCustom": "Utiliser « {query} »",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5484,10 +5482,11 @@
     "promptPlaceholder": "Décrivez la tâche pour l’agent — @ pour référencer des fichiers, / pour les commandes",
     "folderPlaceholder": "Choisir un dossier",
     "baseBranch": "Branche de base",
-    "baseBranchPlaceholder": "Branche actuelle",
     "baseBranchDefault": "Branche actuelle au démarrage de la tâche",
     "baseBranchHint": "La tâche part de cette branche, et la fusion l’y ramène.",
     "agentInheritedHint": "Hérité des réglages des tâches — modifiez-le pour personnaliser cette tâche",
+    "agentNoDefaultHint": "Aucun agent par défaut dans les réglages des tâches — l'agent sélectionné sera enregistré avec la tâche",
+    "agentInheritedUnavailableHint": "L'agent {agent} des réglages des tâches n'est pas disponible — l'agent sélectionné sera enregistré avec la tâche",
     "agentOverrideReset": "Revenir à l'héritage",
     "sectionTarget": "Cible",
     "errorTitle": "Le titre est requis",
@@ -6179,7 +6178,7 @@
     "save": "Enregistrer"
   },
   "Canvas": {
-    "title": "Conversations infinies",
+    "title": "Canevas infini",
     "untitled": "Conversation sans titre",
     "unresolvedConversation": "Conversation supprimée",
     "removeCard": "Retirer la carte",
@@ -6267,7 +6266,36 @@
     "removeTerminalCard": "Retirer la carte terminal",
     "terminalNoDirectory": "Cette carte n'a pas de répertoire de travail",
     "confirmDeleteTerminals": "{count} terminal(aux) en cours seront fermés et leurs processus arrêtés.",
-    "confirmDeleteNotesAndTerminals": "{notes} note(s) que vous avez écrites seront définitivement supprimées, et {terminals} terminal(aux) en cours seront arrêtés."
+    "confirmDeleteNotesAndTerminals": "{notes} note(s) que vous avez écrites seront définitivement supprimées, et {terminals} terminal(aux) en cours seront arrêtés.",
+    "boardsTitle": "Canevas",
+    "boardsSubtitle": "Chaque canevas est un tableau infini à part entière, avec ses régions, cartes de conversation, notes, fichiers et terminaux.",
+    "boardCount": "{count, plural, one {# canevas} other {# canevas}}",
+    "newBoard": "Nouveau canevas",
+    "newBoardTitle": "Nouveau canevas",
+    "editBoard": "Modifier le canevas…",
+    "editBoardTitle": "Modifier le canevas",
+    "deleteBoard": "Supprimer le canevas…",
+    "openBoard": "Ouvrir",
+    "boardMenu": "Options du canevas",
+    "boardName": "Nom",
+    "boardDescription": "Description",
+    "boardDescriptionPlaceholder": "À quoi sert ce canevas ? (facultatif)",
+    "untitledBoard": "Canevas sans titre",
+    "boardItemCount": "{count, plural, =0 {Vide} one {# élément} other {# éléments}}",
+    "boardEditedAt": "Modifié {time}",
+    "boardsEmpty": "Aucun canevas pour l'instant",
+    "boardsEmptyHint": "Créez un canevas pour organiser votre travail dans l'espace. Chaque canevas a ses propres régions, cartes et notes.",
+    "searchBoards": "Rechercher des canevas…",
+    "noBoardsMatch": "Aucun canevas ne correspond à « {query} »",
+    "boardsLoadFailed": "Impossible de charger les canevas",
+    "retry": "Réessayer",
+    "backToBoards": "Retour à tous les canevas",
+    "boardDeleted": "Ce canevas a été supprimé",
+    "deleteBoardTitle": "Supprimer ce canevas ?",
+    "deleteBoardDescription": "« {name} » et tout son contenu seront définitivement supprimés. Les conversations, dossiers et fichiers qu'il affiche ne sont pas affectés.",
+    "deleteBoardItems": "Il contient {count, plural, one {# élément} other {# éléments}}.",
+    "deleteBoardTerminals": "{count, plural, one {# terminal sera fermé et son processus arrêté.} other {# terminaux seront fermés et leurs processus arrêtés.}}",
+    "deleteBoardConfirm": "Supprimer le canevas"
   },
   "Browser": {
     "toolbar": {

@@ -722,13 +722,6 @@
     "emptyNoAgent": "No hay agentes disponibles.",
     "configManagement": "Gestión de configuración",
     "envVars": "Variables de entorno",
-    "adapterChannel": {
-      "label": "Versión del adaptador",
-      "description": "Instalar y Actualizar usan la versión que codeg ha revisado y fijado. Con Última pasan a instalar la versión de npm más reciente del paquete en ese momento; si esa instalación falla, codeg vuelve a la versión fijada y lo indica en el registro de instalación.",
-      "pinned": "Fijada (recomendada)",
-      "latest": "Última (sin revisar)",
-      "latestWarning": "Las versiones más recientes no están revisadas y pueden romper este agente en codeg; en ocasiones incluso se sabe que una versión está rota. El estado de versión muestra lo que quedó instalado realmente."
-    },
     "hostTools": {
       "label": "Dejar que el agente gestione archivos y comandos",
       "description": "codeg deja de atender el acceso a archivos y los comandos de terminal, de modo que el agente los ejecuta en su propio proceso, donde sí se aplican su sandbox y sus reglas de permisos. También se desactiva la delegación a otros agentes, ya que devolvería ese mismo trabajo a codeg. codeg no añade ningún sandbox propio, así que actívalo solo si el agente tiene uno configurado."
@@ -799,6 +792,7 @@
       "saveCodeBuddyConfig": "Guardar configuración de CodeBuddy",
       "saveKimiCodeConfig": "Guardar configuración de Kimi Code",
       "customInstall": "Instalación personalizada",
+      "upgradeToLatest": "Actualizar a la última sin revisar {version}",
       "saveKimiCodeRawConfig": "Save config.toml",
       "saveDeepSeekConfig": "Guardar configuración de DeepSeek",
       "diagnose": "Diagnosticar"
@@ -1404,7 +1398,9 @@
       "customInstallDescription": "Introduce la versión que quieres instalar. Se reinstalará y reemplazará la versión instalada actualmente.",
       "customInstallVersionLabel": "Número de versión",
       "customInstallInvalid": "Introduce un número de versión válido, p. ej. 1.2.3.",
-      "customInstallSubmit": "Instalar"
+      "customInstallSubmit": "Instalar",
+      "confirmUpgradeToLatest": "¿Actualizar {name} a la versión sin revisar {version}?",
+      "confirmUpgradeToLatestDescription": "codeg no ha revisado esta versión. Puede romper {name} en codeg y, en ocasiones, se sabe que una versión está rota. Para volver atrás, usa Instalación personalizada y reinstala la versión recomendada {recommendedVersion}."
     },
     "errors": {
       "windowsFileLocked": "Los archivos de {name} están en uso por una sesión activa, por lo que Windows no puede reemplazarlos. Cierra todas las sesiones de {name} e inténtalo de nuevo.",
@@ -1493,7 +1489,7 @@
     "version": {
       "statusLabel": "Estado de versión",
       "notInstalled": "No instalado",
-      "remoteLocal": "Remota: {remoteVersion} · Local: {localVersion}",
+      "recommendedLocal": "Recomendada: {recommendedVersion} · Local: {localVersion}",
       "localOnly": "Local: {localVersion}",
       "localInstalled": "{versionText}. Instalado.",
       "platformUnsupported": "{versionText}. La plataforma actual no soporta este agente.",
@@ -1501,9 +1497,9 @@
       "clickInstall": "{versionText}. Haz clic en Instalar a la derecha.",
       "localUnrecognized": "{versionText}. La versión local no es comparable; intenta actualizar para sobrescribir la instalación.",
       "upgradeAvailable": "{versionText}. Hay actualización disponible.",
-      "remoteUnavailable": "{versionText}. La versión remota no está disponible por ahora.",
+      "recommendedUnavailable": "{versionText}. No hay una versión recomendada disponible.",
       "latest": "{versionText}. Ya está en la última versión.",
-      "latestChannel": "{versionText}. Canal de última versión activado; Actualizar instala la versión más reciente."
+      "unreviewedAvailable": "{versionText}. Hay una versión más reciente sin revisar."
     },
     "adapter": {
       "label": "Adaptador ACP",
@@ -2002,7 +1998,7 @@
       "tasks": "Tareas pendientes",
       "loadingSubsessions": "Cargando subconversaciones…",
       "forge": "Panel del repositorio",
-      "canvas": "Conversaciones infinitas",
+      "canvas": "Lienzo infinito",
       "folderGroup": {
         "newGroup": "Nuevo grupo",
         "newGroupTitle": "Nuevo grupo de carpetas",
@@ -4259,7 +4255,7 @@
     "agentTypeRequired": "El tipo de agente es obligatorio.",
     "agentTypeImmutableHint": "El tipo de agente no se puede cambiar después de la creación.",
     "model": "Modelo",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6-luna",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Modelo Principal",
     "claudeReasoningModel": "Modelo de Razonamiento (pensamiento)",
@@ -4690,6 +4686,7 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "restoreFailed": "No se pudo volver a abrir el espacio de trabajo remoto \"{name}\"",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
   },
@@ -4710,7 +4707,8 @@
     "none": "Sin ramas",
     "local": "Local",
     "remote": "Remota",
-    "useCustom": "Usar «{query}»"
+    "useCustom": "Usar «{query}»",
+    "head": "HEAD"
   },
   "BackupSettings": {
     "tabs": {
@@ -5484,10 +5482,11 @@
     "promptPlaceholder": "Describe la tarea para el agente — @ para referenciar archivos, / para comandos",
     "folderPlaceholder": "Selecciona una carpeta",
     "baseBranch": "Rama base",
-    "baseBranchPlaceholder": "Rama actual",
     "baseBranchDefault": "Rama actual al iniciar la tarea",
     "baseBranchHint": "La tarea parte de esta rama y la fusión la devuelve a ella.",
     "agentInheritedHint": "Heredado de la configuración de tareas; cámbialo para personalizar esta tarea",
+    "agentNoDefaultHint": "No hay agente por defecto en la configuración de tareas; el agente seleccionado se guardará con la tarea",
+    "agentInheritedUnavailableHint": "El agente {agent} de la configuración de tareas no está disponible; el agente seleccionado se guardará con la tarea",
     "agentOverrideReset": "Volver a heredar",
     "sectionTarget": "Destino",
     "errorTitle": "El título es obligatorio",
@@ -6179,7 +6178,7 @@
     "save": "Guardar"
   },
   "Canvas": {
-    "title": "Conversaciones infinitas",
+    "title": "Lienzo infinito",
     "untitled": "Conversación sin título",
     "unresolvedConversation": "Conversación eliminada",
     "removeCard": "Quitar tarjeta",
@@ -6267,7 +6266,36 @@
     "removeTerminalCard": "Quitar tarjeta de terminal",
     "terminalNoDirectory": "Esta tarjeta no tiene directorio de trabajo",
     "confirmDeleteTerminals": "Se cerrarán {count} terminal(es) en ejecución y se detendrán sus procesos.",
-    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución."
+    "confirmDeleteNotesAndTerminals": "Se eliminarán permanentemente {notes} nota(s) que escribiste y se detendrán {terminals} terminal(es) en ejecución.",
+    "boardsTitle": "Lienzos",
+    "boardsSubtitle": "Cada lienzo es su propio tablero infinito de regiones, tarjetas de conversación, notas, archivos y terminales.",
+    "boardCount": "{count, plural, one {# lienzo} other {# lienzos}}",
+    "newBoard": "Nuevo lienzo",
+    "newBoardTitle": "Nuevo lienzo",
+    "editBoard": "Editar lienzo…",
+    "editBoardTitle": "Editar lienzo",
+    "deleteBoard": "Eliminar lienzo…",
+    "openBoard": "Abrir",
+    "boardMenu": "Opciones del lienzo",
+    "boardName": "Nombre",
+    "boardDescription": "Descripción",
+    "boardDescriptionPlaceholder": "¿Para qué es este lienzo? (opcional)",
+    "untitledBoard": "Lienzo sin título",
+    "boardItemCount": "{count, plural, =0 {Vacío} one {# elemento} other {# elementos}}",
+    "boardEditedAt": "Editado {time}",
+    "boardsEmpty": "Aún no hay lienzos",
+    "boardsEmptyHint": "Crea un lienzo para organizar tu trabajo espacialmente. Cada lienzo tiene sus propias regiones, tarjetas y notas.",
+    "searchBoards": "Buscar lienzos…",
+    "noBoardsMatch": "Ningún lienzo coincide con «{query}»",
+    "boardsLoadFailed": "No se pudieron cargar los lienzos",
+    "retry": "Reintentar",
+    "backToBoards": "Volver a todos los lienzos",
+    "boardDeleted": "Este lienzo fue eliminado",
+    "deleteBoardTitle": "¿Eliminar este lienzo?",
+    "deleteBoardDescription": "«{name}» y todo su contenido se eliminarán definitivamente. Las conversaciones, carpetas y archivos que muestra no se verán afectados.",
+    "deleteBoardItems": "Contiene {count, plural, one {# elemento} other {# elementos}}.",
+    "deleteBoardTerminals": "{count, plural, one {Se cerrará # terminal y se detendrá su proceso.} other {Se cerrarán # terminales y se detendrán sus procesos.}}",
+    "deleteBoardConfirm": "Eliminar lienzo"
   },
   "Browser": {
     "toolbar": {
