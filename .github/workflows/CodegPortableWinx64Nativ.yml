@@ -50,14 +50,23 @@ jobs:
         shell: pwsh
         run: pnpm build
 
-      - name: Pre-build and stage codeg-mcp sidecar
+      # Both entries in bundle.externalBin (codeg-mcp, codeg-computer-helper)
+      # are feature-gated bin targets, so they must be built with
+      # --no-default-features --features mcp-bin,computer-helper. Replaces the
+      # beforeBuildCommand we blank out below.
+      - name: Build and stage sidecars
         shell: pwsh
-        working-directory: src-tauri
+        run: node src-tauri/scripts/prepare-sidecars.mjs --target x86_64-pc-windows-msvc
+
+      - name: Verify staged sidecars
+        shell: pwsh
         run: |
-          cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
-          New-Item -ItemType Directory -Force -Path binaries | Out-Null
-          Copy-Item "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe" `
-            "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
+          $missing = @()
+          foreach ($b in @("codeg-mcp", "codeg-computer-helper")) {
+            $p = "src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe"
+            if (-not (Test-Path $p)) { $missing += $p }
+          }
+          if ($missing.Count -gt 0) { throw "Missing sidecar(s): $($missing -join ', ')" }
 
       - name: Patch tauri.conf.json (skip installer, skip beforeBuildCommand)
         shell: pwsh
@@ -77,16 +86,25 @@ jobs:
         run: |
           $dir = "dist/codeg-portable-win64"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
 
           $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
 
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
-          Copy-Item -Path "src-tauri/binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" `
-            -Destination "$dir/codeg-mcp.exe" -Force
+
+          # Ship each sidecar under both its bare and target-suffixed name so
+          # Tauri's sidecar lookup resolves regardless of which candidate path
+          # it probes first.
+          foreach ($b in @("codeg-mcp", "codeg-computer-helper")) {
+            $src = "src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe"
+            Copy-Item -Path $src -Destination "$dir/$b.exe" -Force
+            Copy-Item -Path $src -Destination "$dir/$b-x86_64-pc-windows-msvc.exe" -Force
+          }
 
           if (Test-Path "out") {
-            New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
-            Copy-Item -Recurse -Path "out/*" -Destination "$dir/web" -Force
+            Get-ChildItem -Path "out" -Force | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination "$dir/web" -Recurse -Force
+            }
           }
 
           Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
