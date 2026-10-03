@@ -50,10 +50,10 @@ jobs:
         shell: pwsh
         run: pnpm build
 
-      # Both entries in bundle.externalBin (codeg-mcp, codeg-computer-helper)
-      # are feature-gated bin targets, so they must be built with
-      # --no-default-features --features mcp-bin,computer-helper. Replaces the
-      # beforeBuildCommand we blank out below.
+      # Both externalBin entries are feature-gated bin targets
+      # (required-features = ["mcp-bin"] / ["computer-helper"]), so they need
+      # --no-default-features --features mcp-bin,computer-helper. This replaces
+      # the beforeBuildCommand we blank out below.
       - name: Build and stage sidecars
         shell: pwsh
         run: node src-tauri/scripts/prepare-sidecars.mjs --target x86_64-pc-windows-msvc
@@ -85,26 +85,35 @@ jobs:
         shell: pwsh
         run: |
           $dir = "dist/codeg-portable-win64"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
+          $triple = "x86_64-pc-windows-msvc"
+          $releaseDir = "src-tauri/target/$triple/release"
 
-          $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
+          if (-not (Test-Path "$releaseDir/codeg.exe")) {
+            throw "codeg.exe missing from $releaseDir"
+          }
+          if (-not (Test-Path "out/index.html")) {
+            throw "out/index.html missing - the Next static export produced nothing (check next.config output: 'export')"
+          }
+
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
 
-          # Ship each sidecar under both its bare and target-suffixed name so
-          # Tauri's sidecar lookup resolves regardless of which candidate path
-          # it probes first.
-          foreach ($b in @("codeg-mcp", "codeg-computer-helper")) {
-            $src = "src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe"
-            Copy-Item -Path $src -Destination "$dir/$b.exe" -Force
-            Copy-Item -Path $src -Destination "$dir/$b-x86_64-pc-windows-msvc.exe" -Force
-          }
+          # Rename on copy: codeg resolves BOTH companions by exe-sibling lookup
+          # with these exact names, not via Tauri's sidecar resolver
+          # (locate_codeg_mcp_binary / locate_helper_binary in
+          # src-tauri/src/acp/connection.rs and src/computer/local.rs).
+          # The target-triple suffix is only what externalBin/bundling wants.
+          Copy-Item -Path "src-tauri/binaries/codeg-mcp-$triple.exe" `
+            -Destination "$dir/codeg-mcp.exe" -Force
+          Copy-Item -Path "src-tauri/binaries/codeg-computer-helper-$triple.exe" `
+            -Destination "$dir/codeg-computer-helper.exe" -Force
 
-          if (Test-Path "out") {
-            Get-ChildItem -Path "out" -Force | ForEach-Object {
-              Copy-Item -Path $_.FullName -Destination "$dir/web" -Recurse -Force
-            }
+          # web/ next to the exe: find_static_dir_tauri() reads
+          # resource_dir()/web/index.html, and the fallback is CWD-relative.
+          New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
+          Get-ChildItem -Path "out" -Force | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$dir/web" -Recurse -Force
           }
 
           Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
