@@ -7,9 +7,14 @@ permissions:
   contents: read
   actions: read
 
+# Re-triggering cancels the in-progress run (fresh VM, warm caches persist)
+concurrency:
+  group: codeg-portable-win-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 90
     env:
       TAURI_SIGNING_PRIVATE_KEY: ""
@@ -46,17 +51,20 @@ jobs:
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend
-        shell: pwsh
-        run: pnpm build
+      # Frontend (Node) and sidecars (Rust) are independent:
+      #   pnpm build            -> out/
+      #   prepare-sidecars      -> src-tauri/binaries/*.exe
+      # The Tauri step only needs both when it embeds/bundles.
+      - name: Build frontend + sidecars (parallel)
+        shell: bash
+        run: |
+          pnpm build & pid_fe=$!
+          node src-tauri/scripts/prepare-sidecars.mjs --target x86_64-pc-windows-msvc & pid_side=$!
 
-      # Both externalBin entries are feature-gated bin targets
-      # (required-features = ["mcp-bin"] / ["computer-helper"]), so they need
-      # --no-default-features --features mcp-bin,computer-helper. This replaces
-      # the beforeBuildCommand we blank out below.
-      - name: Build and stage sidecars
-        shell: pwsh
-        run: node src-tauri/scripts/prepare-sidecars.mjs --target x86_64-pc-windows-msvc
+          wait $pid_fe; s_fe=$?
+          wait $pid_side; s_side=$?
+          echo "frontend=$s_fe sidecars=$s_side"
+          [ $((s_fe + s_side)) -eq 0 ] || exit 1
 
       - name: Verify staged sidecars
         shell: pwsh
