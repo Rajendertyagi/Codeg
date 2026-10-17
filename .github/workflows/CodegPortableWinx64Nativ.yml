@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 90
     env:
       TAURI_SIGNING_PRIVATE_KEY: ""
@@ -36,6 +36,11 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Floating @stable = always the newest stable (today 1.99.x, shipped
+      # 2026-10-15). Trade-off: each new stable (~6-weekly) forces one full
+      # cold Rust rebuild, and if upstream's Rust code needs newer features,
+      # @stable is what compiles it. If you'd rather have reproducible
+      # builds instead, pin an exact version, e.g. dtolnay/rust-toolchain@1.99
       - name: Install Rust toolchain and target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,12 +60,14 @@ jobs:
       #   pnpm build            -> out/
       #   prepare-sidecars      -> src-tauri/binaries/*.exe
       # The Tauri step only needs both when it embeds/bundles.
+      # Note: on a 2-core runner these two *share* the CPUs, so the win is
+      # "hidden" time (the ~85s Node build disappears under the Rust build),
+      # not an extra core.
       - name: Build frontend + sidecars (parallel)
         shell: bash
         run: |
           pnpm build & pid_fe=$!
           node src-tauri/scripts/prepare-sidecars.mjs --target x86_64-pc-windows-msvc & pid_side=$!
-
           wait $pid_fe; s_fe=$?
           wait $pid_side; s_side=$?
           echo "frontend=$s_fe sidecars=$s_side"
@@ -95,18 +102,14 @@ jobs:
           $dir = "dist/codeg-portable-win64"
           $triple = "x86_64-pc-windows-msvc"
           $releaseDir = "src-tauri/target/$triple/release"
-
           if (-not (Test-Path "$releaseDir/codeg.exe")) {
             throw "codeg.exe missing from $releaseDir"
           }
           if (-not (Test-Path "out/index.html")) {
             throw "out/index.html missing - the Next static export produced nothing (check next.config output: 'export')"
           }
-
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-
           Copy-Item -Path "$releaseDir/codeg.exe" -Destination $dir -Force
-
           # Rename on copy: codeg resolves BOTH companions by exe-sibling lookup
           # with these exact names, not via Tauri's sidecar resolver
           # (locate_codeg_mcp_binary / locate_helper_binary in
@@ -116,14 +119,12 @@ jobs:
             -Destination "$dir/codeg-mcp.exe" -Force
           Copy-Item -Path "src-tauri/binaries/codeg-computer-helper-$triple.exe" `
             -Destination "$dir/codeg-computer-helper.exe" -Force
-
           # web/ next to the exe: find_static_dir_tauri() reads
           # resource_dir()/web/index.html, and the fallback is CWD-relative.
           New-Item -ItemType Directory -Force -Path "$dir/web" | Out-Null
           Get-ChildItem -Path "out" -Force | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination "$dir/web" -Recurse -Force
           }
-
           Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item -Path $_.FullName -Destination $dir -Force }
 
