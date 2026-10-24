@@ -13,11 +13,13 @@ import {
   Collapsible,
   CollapsibleContent,
 } from "@/components/ui/instant-collapsible"
-import { buildActivity } from "@/lib/activity/build-activity"
+import { buildActivity, hasVisibleAnswer } from "@/lib/activity/build-activity"
 import { disclosureKeysFor } from "@/lib/activity/group"
 import { ActivityParts, ContentPartsRenderer } from "./content-parts-renderer"
 import { ActivityHeader } from "./activity/activity-header"
+import { useActivityLive } from "./activity/activity-live-context"
 import { openDisclosures } from "./activity/disclosure-store"
+import { WorkingMark } from "./activity/rail-icon"
 
 export interface SplitAssistantTurnParts {
   progress: AdaptedContentPart[]
@@ -40,17 +42,6 @@ export function splitAssistantTurnParts(
 ): SplitAssistantTurnParts {
   const { body, trailing } = splitTrailingAnswerParts(parts)
   return { progress: body, answer: trailing }
-}
-
-/**
- * Does the split leave anything for the reader once the progress is folded
- * away? Whitespace-only text is not an answer: it renders as an empty markdown
- * block, so a turn "kept visible" by it still reads as a blank reply.
- */
-function hasVisibleAnswer(answer: AdaptedContentPart[]): boolean {
-  return answer.some(
-    (part) => part.type !== "text" || part.text.trim().length > 0
-  )
 }
 
 /**
@@ -139,13 +130,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   const open = currentRound ? roundOpen : localOpen
 
   // The unfold animation belongs to a real closed→open TOGGLE, never to a mount
-  // that starts open. This component remounts constantly while staying open:
-  // the row key flips from `streaming-…` to `persisted-…` the instant a reply
-  // settles, the authoritative detail refetch renames the turn and flips it
-  // again, and the virtualizer recycles any row scrolled past its overscan
-  // buffer. Without this gate each of those replays a 200ms unfold, so a
-  // finished reply appears to collapse and re-open by itself — precisely the
-  // behaviour the round model exists to prevent.
+  // that starts open. This component remounts while staying open: the
+  // authoritative detail refetch renames the turn, and the virtualizer
+  // recycles any row scrolled past its overscan buffer. Without this gate each
+  // of those replays a 200ms unfold, so a finished reply appears to collapse
+  // and re-open by itself — precisely the behaviour the round model exists to
+  // prevent.
   //
   // Only the ENTER side is gated. The exit animation must always run: it is
   // what unmounts the content (see the presence check in `instant-collapsible`).
@@ -217,6 +207,19 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
     )
   }, [activity, failureKey, open, handleOpenChange])
 
+  // While its agent is at work — not while it waits on the user to answer a
+  // permission request — a live reply ends on a turning mark: at the foot of
+  // the rail when the open timeline is its last block, else under whatever
+  // does end it (the answer being written, a folded body, no steps yet).
+  const { awaitingUser } = useActivityLive()
+  const working = isStreaming && !awaitingUser
+  const workingOnRail =
+    working &&
+    foldable &&
+    open &&
+    activity.items.length > 0 &&
+    !hasVisibleAnswer(split.answer)
+
   const header = (
     <ActivityHeader
       summary={activity.summary}
@@ -255,14 +258,25 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
         />
       )
     }
+    // A reply that is all process — stopped on a tool call, or ended on a card
+    // that is its answer — shows its rows as an open fold does: hung under the
+    // header, with nothing between them; the header's failure link looks for
+    // its row in here. A reply with no steps has none, its answer under the
+    // header.
     return (
-      <div className="space-y-3">
-        {header}
-        <ContentPartsRenderer
-          parts={parts}
-          role="assistant"
-          isStreaming={isStreaming}
-        />
+      <div ref={turnRef} className="space-y-3">
+        <div>
+          {header}
+          <ActivityParts model={activity} isStreaming={isStreaming} headed />
+        </div>
+        {split.answer.length > 0 && (
+          <ContentPartsRenderer
+            parts={split.answer}
+            role="assistant"
+            isStreaming={isStreaming}
+          />
+        )}
+        {working ? <WorkingMark /> : null}
       </div>
     )
   }
@@ -281,12 +295,14 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
             model={activity}
             isStreaming={isStreaming}
             pinnedOnly
+            headed
           />
         ) : null}
         {/* `reply-fold-body` (globals.css) slides the body open and shut on a
-            grid track. The inner div is the clipped grid item — it must stay
-            a single child, and the spacing has to live INSIDE it or the closed
-            track never reaches zero. */}
+            grid track. The div is the clipped grid item — it must stay a
+            single child, and the spacing has to live INSIDE it (the headed
+            list's own, under the header) or the closed track never reaches
+            zero. */}
         <CollapsibleContent
           id={bodyId}
           className={cn(
@@ -295,9 +311,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
           )}
         >
           <div>
-            <div className="pt-2">
-              <ActivityParts model={activity} isStreaming={isStreaming} />
-            </div>
+            <ActivityParts
+              model={activity}
+              isStreaming={isStreaming}
+              working={workingOnRail}
+              headed
+            />
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -308,6 +327,7 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
           isStreaming={isStreaming}
         />
       )}
+      {working && !workingOnRail ? <WorkingMark /> : null}
     </div>
   )
 })

@@ -71,17 +71,23 @@ function Round({
   )
 }
 
-function renderUi(
+function withProviders(
   ui: ReactElement,
   awaitingToolCallId: string | null = null,
   approvals: ToolApprovalMap = {}
 ) {
-  return render(
+  return (
     <NextIntlClientProvider locale="en" messages={enMessages}>
       <StaticConnectionStoreProvider store={STORE}>
         <StaticDelegationProvider value={DELEGATION}>
           <StaticWorkspaceActionsProvider value={WORKSPACE}>
-            <ActivityLiveProvider value={{ awaitingToolCallId, approvals }}>
+            <ActivityLiveProvider
+              value={{
+                awaitingToolCallId,
+                awaitingUser: awaitingToolCallId !== null,
+                approvals,
+              }}
+            >
               {ui}
             </ActivityLiveProvider>
           </StaticWorkspaceActionsProvider>
@@ -89,6 +95,14 @@ function renderUi(
       </StaticConnectionStoreProvider>
     </NextIntlClientProvider>
   )
+}
+
+function renderUi(
+  ui: ReactElement,
+  awaitingToolCallId: string | null = null,
+  approvals: ToolApprovalMap = {}
+) {
+  return render(withProviders(ui, awaitingToolCallId, approvals))
 }
 
 function turn(blocks: ContentBlock[], id = "t"): MessageTurn {
@@ -220,6 +234,10 @@ describe("a folded turn", () => {
     const lists = document.querySelectorAll(".activity-timeline")
     expect(lists).toHaveLength(1)
     expect(lists[0]).not.toHaveAttribute("data-end")
+    // It hangs under the header as the open list does: a step's gap below
+    // it, the rail running up to it (globals.css), no margin of its own.
+    expect(lists[0]).toHaveAttribute("data-headed")
+    expect(lists[0]!.className.split(/\s+/)).not.toContain("mt-2")
   })
 })
 
@@ -323,7 +341,8 @@ describe("agent row", () => {
     expect(
       within(row).getByText("Only report.py assumes inactive bindings.")
     ).toBeTruthy()
-    expect(within(row).getByText("48.0s")).toBeTruthy()
+    // Written like the reply's header: whole seconds.
+    expect(within(row).getByText("48s")).toBeTruthy()
     expect(within(row).getByRole("img", { name: "2 steps" })).toBeTruthy()
     fireEvent.click(within(row).getAllByRole("button")[0]!)
     expect(within(row).getByText("Explored")).toBeTruthy()
@@ -364,9 +383,9 @@ describe("jumping to a failure", () => {
 })
 
 describe("long replies", () => {
-  it("opens a giant reply with its head and tail and a way to see the rest", () => {
+  function edits(count: number): MessageTurn {
     const blocks: ContentBlock[] = []
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < count; i++) {
       blocks.push(
         toolUse(`e${i}`, "Edit", {
           file_path: `/r/f${i}.ts`,
@@ -376,11 +395,38 @@ describe("long replies", () => {
       )
       blocks.push(toolResult(`e${i}`, "ok"))
     }
-    renderUi(<Round parts={parts(turn(blocks))} />)
+    return turn(blocks)
+  }
+
+  it("opens a giant reply with its head and tail and a way to see the rest", () => {
+    renderUi(<Round parts={parts(edits(200))} />)
     const more = screen.getByRole("button", { name: "Show 130 more steps" })
     expect(screen.getAllByText("Edited")).toHaveLength(70)
     fireEvent.click(more)
     expect(screen.getAllByText("Edited")).toHaveLength(200)
+  })
+
+  it("folds a streaming reply's rows away one at a time as it grows", () => {
+    const live = (count: number) => (
+      <Round parts={parts(edits(count), true)} completed={false} />
+    )
+    const view = renderUi(live(150))
+    expect(screen.getAllByText("Edited")).toHaveLength(150)
+    expect(screen.queryByRole("button", { name: /more step/ })).toBeNull()
+    const late = rowOf("f149.ts")
+    // Past the fold, the oldest row past the head goes, not a whole chunk —
+    // and the rows that stay are the same rows, not drawn again.
+    view.rerender(withProviders(live(151)))
+    expect(
+      screen.getByRole("button", { name: "Show 1 more step" })
+    ).toBeTruthy()
+    expect(screen.getAllByText("Edited")).toHaveLength(150)
+    expect(rowOf("f149.ts")).toBe(late)
+    view.rerender(withProviders(live(152)))
+    expect(
+      screen.getByRole("button", { name: "Show 2 more steps" })
+    ).toBeTruthy()
+    expect(screen.getAllByText("Edited")).toHaveLength(150)
   })
 })
 
@@ -471,22 +517,354 @@ describe("approval chips", () => {
   })
 })
 
-describe("a folded group waiting on the user", () => {
-  it("shows the member that needs the user under its header", () => {
-    const LIVE = turn([
+describe("a command group in a reply being written", () => {
+  const LIVE = turn([
+    toolUse("c1", "Bash", { command: "pnpm lint" }),
+    toolResult("c1", "ok"),
+    toolUse("c2", "Bash", { command: "pnpm test\npnpm build" }),
+    toolResult("c2", "ok"),
+    toolUse("c3", "Bash", { command: "rm -rf build" }),
+  ])
+
+  it("lists every command, one row each, and folds once the reply is done", () => {
+    const { rerender } = renderUi(
+      <Round parts={parts(LIVE, true, ["c3"])} completed={false} />
+    )
+    const group = rowOf("Running 3 commands")
+    const members = group.querySelectorAll(".activity-child")
+    expect([...members].map((m) => m.getAttribute("data-step-key"))).toEqual([
+      "tool:c1",
+      "tool:c2",
+      "tool:c3",
+    ])
+    expect(within(rowOf("pnpm lint")).getByText("Command")).toBeTruthy()
+    expect(rowOf("pnpm test").getAttribute("data-status")).toBe("succeeded")
+    expect(rowOf("rm -rf build").getAttribute("data-status")).toBe("running")
+
+    rerender(withProviders(<Round parts={parts(LIVE)} />, null))
+    expect(
+      screen.getByRole("button", { name: /Ran 3 commands/ })
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("pnpm lint")).toBeNull()
+  })
+
+  it("stays as the reader left it, open or folded", () => {
+    const { rerender } = renderUi(
+      <Round parts={parts(LIVE, true, ["c3"])} completed={false} />
+    )
+    // Folded by hand while it runs, it stays folded.
+    fireEvent.click(screen.getByRole("button", { name: /Running 3 commands/ }))
+    expect(screen.queryByText("pnpm lint")).toBeNull()
+    // Opened again, it stays open once the reply is done.
+    fireEvent.click(screen.getByRole("button", { name: /Running 3 commands/ }))
+    rerender(withProviders(<Round parts={parts(LIVE)} />, null))
+    expect(screen.getByText("pnpm lint")).toBeTruthy()
+  })
+
+  describe("once the reply moves past it", () => {
+    const live = (blocks: ContentBlock[]): MessageTurn => ({
+      id: "t-fold",
+      role: "assistant",
+      timestamp: "2026-10-23T10:00:00Z",
+      blocks,
+    })
+    const DONE = [
       toolUse("c1", "Bash", { command: "pnpm lint" }),
       toolResult("c1", "ok"),
-      toolUse("c2", "Bash", { command: "rm -rf build" }),
-    ])
+      toolUse("c2", "Bash", { command: "pnpm test" }),
+      toolResult("c2", "ok"),
+    ]
+    const READ = toolUse("r1", "Read", { file_path: "/r/a.ts" })
+    const header = () => screen.getByRole("button", { name: /2 commands/ })
+
+    it("folds by itself when the next step comes", () => {
+      const view = renderUi(
+        <Round parts={parts(live(DONE), true)} completed={false} />
+      )
+      // Its commands done but still the reply's last row: the next command
+      // may join it.
+      expect(header()).toHaveAttribute("aria-expanded", "true")
+
+      view.rerender(
+        withProviders(
+          <Round
+            parts={parts(live([...DONE, READ]), true, ["r1"])}
+            completed={false}
+          />
+        )
+      )
+      expect(header()).toHaveAttribute("aria-expanded", "false")
+      expect(screen.queryByText("pnpm lint")).toBeNull()
+    })
+
+    it("folds by itself when the answer starts under it", () => {
+      const view = renderUi(
+        <Round
+          parts={parts(live([...DONE, { type: "text", text: " " }]), true)}
+          completed={false}
+        />
+      )
+      // Blank text is no answer yet.
+      expect(header()).toHaveAttribute("aria-expanded", "true")
+
+      view.rerender(
+        withProviders(
+          <Round
+            parts={parts(
+              live([...DONE, { type: "text", text: "Both pass." }]),
+              true
+            )}
+            completed={false}
+          />
+        )
+      )
+      expect(header()).toHaveAttribute("aria-expanded", "false")
+    })
+
+    it("stays open while one of its commands still runs", () => {
+      renderUi(
+        <Round
+          parts={parts(
+            live([
+              ...DONE.slice(0, 3),
+              { type: "text", text: "While that runs…" },
+              READ,
+            ]),
+            true,
+            ["c2", "r1"]
+          )}
+          completed={false}
+        />
+      )
+      expect(header()).toHaveAttribute("aria-expanded", "true")
+    })
+
+    it("stays open once the reader has opened it", () => {
+      const view = renderUi(
+        <Round parts={parts(live(DONE), true)} completed={false} />
+      )
+      fireEvent.click(header())
+      fireEvent.click(header())
+      view.rerender(
+        withProviders(
+          <Round
+            parts={parts(live([...DONE, READ]), true, ["r1"])}
+            completed={false}
+          />
+        )
+      )
+      expect(header()).toHaveAttribute("aria-expanded", "true")
+      expect(screen.getByText("pnpm lint")).toBeTruthy()
+    })
+
+    it("slides its members shut, and lets them go once the slide has run", () => {
+      // jsdom runs no animations: report the slide the stylesheet starts.
+      const computed = window.getComputedStyle
+      const spy = vi
+        .spyOn(window, "getComputedStyle")
+        .mockImplementation((element, pseudo) =>
+          element.classList.contains("activity-detail-shut")
+            ? ({
+                animationName: "activity-detail-shut",
+                animationDuration: "0.24s",
+              } as CSSStyleDeclaration)
+            : computed(element, pseudo)
+        )
+      try {
+        const view = renderUi(
+          <Round parts={parts(live(DONE), true)} completed={false} />
+        )
+        view.rerender(
+          withProviders(
+            <Round
+              parts={parts(live([...DONE, READ]), true, ["r1"])}
+              completed={false}
+            />
+          )
+        )
+        expect(header()).toHaveAttribute("aria-expanded", "false")
+        const panel = view.container.querySelector(".activity-detail-shut")!
+        expect(panel).toBeTruthy()
+        expect(within(panel as HTMLElement).getByText("pnpm lint")).toBeTruthy()
+        // The rail still runs beside it while it slides.
+        expect(rowOf("Ran 2 commands")).toHaveAttribute("data-body", "")
+        // A member's own animation ending is not the slide's.
+        fireEvent.animationEnd(rowOf("pnpm lint"))
+        expect(screen.getByText("pnpm lint")).toBeTruthy()
+
+        fireEvent.animationEnd(panel)
+        expect(screen.queryByText("pnpm lint")).toBeNull()
+        expect(rowOf("Ran 2 commands")).not.toHaveAttribute("data-body")
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it("folds at once when the reader closes it", () => {
+      const spy = vi.spyOn(window, "getComputedStyle")
+      try {
+        renderUi(<Round parts={parts(live(DONE), true)} completed={false} />)
+        fireEvent.click(header())
+        expect(screen.queryByText("pnpm lint")).toBeNull()
+        expect(document.querySelector(".activity-detail-shut")).toBeNull()
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
+
+  it("folded, shows the member that needs the user under its header", () => {
     renderUi(
-      <Round parts={parts(LIVE, true, ["c2"])} completed={false} />,
-      "c2"
+      <Round parts={parts(LIVE, true, ["c3"])} completed={false} />,
+      "c3"
     )
-    const group = rowOf("Running 2 commands")
+    const header = screen.getByRole("button", { name: /Running 3 commands/ })
+    fireEvent.click(header)
+    const group = rowOf("Running 3 commands")
     expect(group.getAttribute("data-status")).toBe("awaiting")
     const member = rowOf("rm -rf build")
     expect(member.getAttribute("data-status")).toBe("awaiting")
     expect(within(member).getByText("needs you")).toBeTruthy()
     expect(screen.queryByText("pnpm lint")).toBeNull()
+  })
+})
+
+describe("a reply's rail while it is written", () => {
+  const live = (blocks: ContentBlock[]): MessageTurn => ({
+    id: "t-rail",
+    role: "assistant",
+    timestamp: "2026-10-23T10:00:00Z",
+    blocks,
+  })
+  const C1 = [
+    toolUse("c1", "Bash", { command: "pnpm lint" }),
+    toolResult("c1", "ok"),
+  ]
+  const C2 = [
+    toolUse("c2", "Bash", { command: "pnpm test" }),
+    toolResult("c2", "ok"),
+  ]
+  const C3 = [toolUse("c3", "Bash", { command: "pnpm build" })]
+  const READ = [toolUse("r1", "Read", { file_path: "/r/a.ts" })]
+  const marked = (li: Element) =>
+    [
+      li.hasAttribute("data-rail-enter") && "enter",
+      li.hasAttribute("data-rail-extend") && "extend",
+    ]
+      .filter(Boolean)
+      .join(" ")
+
+  it("grows down to each step and group member that joins it", async () => {
+    const view = renderUi(
+      <Round parts={parts(live([...C1, ...C2]), true)} completed={false} />
+    )
+    const list = view.container.querySelector(".activity-timeline")!
+    const group = rowOf("Ran 2 commands")
+    expect(marked(group)).toBe("")
+
+    // A member joins the open group: its rail runs on from the last member.
+    view.rerender(
+      withProviders(
+        <Round
+          parts={parts(live([...C1, ...C2, ...C3]), true, ["c3"])}
+          completed={false}
+        />
+      )
+    )
+    await act(async () => {})
+    expect(marked(rowOf("pnpm test"))).toBe("extend")
+    expect(marked(rowOf("pnpm build"))).toBe("enter")
+    expect(marked(rowOf("pnpm lint"))).toBe("")
+
+    // A step joins the reply, above the turning mark the rail runs down to.
+    view.rerender(
+      withProviders(
+        <Round
+          parts={parts(live([...C1, ...C2, ...C3, ...READ]), true, [
+            "c3",
+            "r1",
+          ])}
+          completed={false}
+        />
+      )
+    )
+    await act(async () => {})
+    const read = rowOf(/a\.ts/)
+    expect(marked(read)).toBe("enter")
+    expect(marked(rowOf("Running 3 commands"))).toBe("")
+    expect(list.lastElementChild).toHaveAttribute("data-marker", "working")
+    expect(read.nextElementSibling).toBe(list.lastElementChild)
+
+    // Done, the marks go: nothing replays in history.
+    view.rerender(
+      withProviders(
+        <Round parts={parts(live([...C1, ...C2, ...C3, ...READ]))} />
+      )
+    )
+    expect(view.container.querySelector("[data-rail-enter]")).toBeNull()
+    expect(view.container.querySelector("[data-rail-extend]")).toBeNull()
+  })
+})
+
+describe("file rows", () => {
+  it("draw the file they read, write or edit in the label's light ink", () => {
+    renderUi(
+      <Round
+        parts={parts(
+          turn([
+            toolUse("r1", "Read", { file_path: "/repo/src/read.ts" }),
+            toolResult("r1", "1→export {}"),
+            { type: "text", text: "Now the new file." },
+            toolUse("w1", "Write", {
+              file_path: "/repo/src/made.ts",
+              content: "export const a = 1\n",
+            }),
+            toolResult("w1", "ok"),
+            { type: "text", text: "And the edit." },
+            toolUse("e1", "Edit", {
+              file_path: "/repo/src/changed.ts",
+              old_string: "a",
+              new_string: "b",
+            }),
+            toolResult("e1", "ok"),
+          ])
+        )}
+      />
+    )
+
+    expect(screen.getByText("/repo/src/read.ts")).toHaveClass(
+      "text-muted-foreground"
+    )
+    for (const name of ["made.ts", "changed.ts"]) {
+      const label = screen.getByText(name)
+      expect(label).not.toHaveClass("text-foreground")
+      expect(label.parentElement).toHaveClass("text-muted-foreground")
+    }
+  })
+})
+
+describe("command row", () => {
+  it("draws its command line in the label's light ink, like a description", () => {
+    renderUi(
+      <Round
+        parts={parts(
+          turn([
+            toolUse("c1", "Bash", { command: "pnpm lint" }),
+            toolResult("c1", "ok"),
+            { type: "text", text: "Now the tests." },
+            toolUse("c2", "Bash", {
+              command: "pnpm test",
+              description: "Run the tests",
+            }),
+            toolResult("c2", "ok"),
+          ])
+        )}
+      />
+    )
+
+    expect(screen.getByText("pnpm lint")).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Run the tests")).toHaveClass(
+      "text-muted-foreground"
+    )
   })
 })

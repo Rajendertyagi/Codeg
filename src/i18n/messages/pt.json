@@ -3807,7 +3807,6 @@
         "deletedAssistant": "(excluído)"
       },
       "contentParts": {
-        "scriptToolCalls": "{count, plural, one {# chamada de ferramenta} other {# chamadas de ferramenta}}",
         "offset": "Deslocamento: {offset}",
         "pages": "Páginas: {pages}",
         "allowLarge": "Além do limite de tamanho",
@@ -4021,6 +4020,7 @@
         "detail": {
           "lines": "{count, plural, one {# linha} other {# linhas}}",
           "copyCommand": "copiar comando",
+          "copyScript": "copiar script",
           "copyOutput": "copiar saída",
           "copied": "copiado",
           "args": "argumentos",

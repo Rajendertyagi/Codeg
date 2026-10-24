@@ -3807,7 +3807,6 @@
         "deletedAssistant": "(삭제됨)"
       },
       "contentParts": {
-        "scriptToolCalls": "도구 {count}개 호출",
         "offset": "오프셋: {offset}",
         "pages": "페이지: {pages}",
         "allowLarge": "크기 제한 초과",
@@ -4021,6 +4020,7 @@
         "detail": {
           "lines": "{count}줄",
           "copyCommand": "명령 복사",
+          "copyScript": "스크립트 복사",
           "copyOutput": "출력 복사",
           "copied": "복사됨",
           "args": "인자",
