@@ -7,7 +7,7 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import enMessages from "@/i18n/messages/en.json"
 import { formatScheduleDay, toDateTimeLocalValue } from "@/lib/task-schedule"
 import type { WorkTask } from "@/lib/types"
@@ -67,6 +67,15 @@ async function pickDay(day: Date) {
 
 beforeEach(() => {
   scheduleMock.mockClear()
+  // Pin "today" to mid-month: the calendar renders a two-month window ending
+  // this month, so a wall-clock run on a month's last days looks for day cells
+  // (+1, +2) that lie outside the grid and are never rendered.
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date(2026, 6, 15, 12, 0))
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe("TaskScheduleDialog", () => {
