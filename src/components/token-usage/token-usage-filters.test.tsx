@@ -94,8 +94,8 @@ function lastMonthDay(n: number): Date {
 describe("CustomRangeFields", () => {
   beforeEach(() => {
     // Pin "today" to mid-month: the calendar renders a two-month window ending
-    // this month, so a wall-clock run on a month's last days looks for tomorrow
-    // outside the grid, where no cell is rendered at all.
+    // this month, so tomorrow can fall outside the grid near month-end.
+    // Fake only Date so userEvent and waitFor keep using real timers.
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date(2026, 6, 15, 12, 0))
   })

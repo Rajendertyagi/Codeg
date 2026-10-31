@@ -67,9 +67,9 @@ async function pickDay(day: Date) {
 
 beforeEach(() => {
   scheduleMock.mockClear()
-  // Pin "today" to mid-month: the calendar renders a two-month window ending
-  // this month, so a wall-clock run on a month's last days looks for day cells
-  // (+1, +2) that lie outside the grid and are never rendered.
+  // Pin "today" to mid-month: this calendar opens on the current month, so a
+  // wall-clock run on a month's last days can look for a day cell (+2) outside
+  // the grid. Fake only Date so userEvent and waitFor keep using real timers.
   vi.useFakeTimers({ toFake: ["Date"] })
   vi.setSystemTime(new Date(2026, 6, 15, 12, 0))
 })
